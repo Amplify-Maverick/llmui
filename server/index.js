@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -9,9 +10,55 @@ const PORT = 3001;
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
+const TOKEN_FILE = path.join(STORAGE_DIR, "token");
+
+let authToken = null;
+
+async function getOrCreateToken() {
+  try {
+    authToken = await fs.readFile(TOKEN_FILE, "utf-8");
+    authToken = authToken.trim();
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      await ensureStorageDir();
+      authToken = crypto.randomBytes(32).toString("hex");
+      await fs.writeFile(TOKEN_FILE, authToken, { mode: 0o600 });
+      console.log("Generated new auth token");
+    } else {
+      throw err;
+    }
+  }
+  return authToken;
+}
+
+function isLocalhost(req) {
+  const ip = req.ip || req.connection.remoteAddress;
+  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+}
+
+function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing authorization header" });
+  }
+  const token = authHeader.slice(7);
+  if (token !== authToken) {
+    return res.status(403).json({ error: "Invalid token" });
+  }
+  next();
+}
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+app.set("trust proxy", false);
+
+// Token endpoint - only serves to localhost
+app.get("/auth/token", (req, res) => {
+  if (!isLocalhost(req)) {
+    return res.status(403).json({ error: "Token only available from localhost" });
+  }
+  res.json({ token: authToken });
+});
 
 // Ensure storage directory exists
 async function ensureStorageDir() {
@@ -29,7 +76,7 @@ function getFilePath(key) {
 }
 
 // GET /storage/:key - Load data
-app.get("/storage/:key", async (req, res) => {
+app.get("/storage/:key", requireAuth, async (req, res) => {
   try {
     const filePath = getFilePath(req.params.key);
     const data = await fs.readFile(filePath, "utf-8");
@@ -45,7 +92,7 @@ app.get("/storage/:key", async (req, res) => {
 });
 
 // PUT /storage/:key - Save data
-app.put("/storage/:key", async (req, res) => {
+app.put("/storage/:key", requireAuth, async (req, res) => {
   try {
     await ensureStorageDir();
     const filePath = getFilePath(req.params.key);
@@ -58,7 +105,7 @@ app.put("/storage/:key", async (req, res) => {
 });
 
 // DELETE /storage/:key - Remove data
-app.delete("/storage/:key", async (req, res) => {
+app.delete("/storage/:key", requireAuth, async (req, res) => {
   try {
     const filePath = getFilePath(req.params.key);
     await fs.unlink(filePath);
@@ -94,6 +141,7 @@ app.get("/health", (req, res) => {
 });
 
 await ensureStorageDir();
+await getOrCreateToken();
 app.listen(PORT, () => {
   console.log(`Storage server running on http://localhost:${PORT}`);
   console.log(`Data directory: ${STORAGE_DIR}`);
