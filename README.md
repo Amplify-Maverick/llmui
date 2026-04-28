@@ -19,27 +19,73 @@ For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't hav
 
 ## Installation
 
-```bash
-git clone <repo-url>
-cd llmui
-npm install
-```
+### Linux
+
+1. Install Node.js (if not already installed):
+   ```bash
+   # Ubuntu/Debian
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt install -y nodejs
+
+   # Fedora
+   sudo dnf install nodejs
+
+   # Arch
+   sudo pacman -S nodejs npm
+   ```
+
+2. Install Ollama:
+   ```bash
+   curl -fsSL https://ollama.com/install.sh | sh
+   ```
+
+3. Clone and install:
+   ```bash
+   git clone <repo-url>
+   cd llmui
+   npm install
+   ```
+
+### Windows
+
+1. Install Node.js:
+   - Download from [nodejs.org](https://nodejs.org/) and run the installer
+   - Or use winget: `winget install OpenJS.NodeJS`
+
+2. Install Ollama:
+   - Download from [ollama.com](https://ollama.com/download) and run the installer
+
+3. Clone and install (in PowerShell or Command Prompt):
+   ```powershell
+   git clone <repo-url>
+   cd llmui
+   npm install
+   ```
 
 ## Running
 
-Make sure Ollama is running first:
+### Linux
 
+Start Ollama (if not running as a service):
 ```bash
 ollama serve
 ```
 
 Then start the UI:
-
 ```bash
 npm run dev
 ```
 
-This runs both the storage server (port 3001) and the frontend (port 3000). Open http://localhost:3000 in your browser.
+### Windows
+
+Ollama runs automatically after installation. If needed, start it from the Start Menu.
+
+Then start the UI (in PowerShell or Command Prompt):
+```powershell
+npm run dev
+```
+
+Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000).
 
 ## Configuration
 
