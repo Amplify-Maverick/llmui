@@ -1,0 +1,64 @@
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transition: background var(--transition-normal);
+}
+
+.status-checking .connection-dot {
+  background: var(--color-warning);
+  animation: pulse 1s infinite;
+}
+
+.status-connected .connection-dot {
+  background: var(--color-primary);
+}
+
+.status-disconnected .connection-dot {
+  background: var(--color-danger);
+}
+
+.connection-text {
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-connected .connection-text {
+  color: var(--color-primary);
+}
+
+.status-disconnected .connection-text {
+  color: var(--color-danger);
+}
+
+.connection-retry {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.connection-retry:hover {
+  background: var(--color-danger-bg-hover);
+  border-color: var(--color-danger-border-hover);
+}

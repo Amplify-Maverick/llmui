@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useChatStore } from "./stores/chatStore.js";
 import { useSettingsStore } from "./stores/settingsStore.js";
 import { TABS } from "./constants/config.js";
@@ -7,17 +7,37 @@ import ConversationHistory from "./components/history/ConversationHistory.jsx";
 import ModelManager from "./components/models/ModelManager.jsx";
 import SystemStats from "./components/stats/SystemStats.jsx";
 import SettingsPanel from "./components/settings/SettingsPanel.jsx";
+import KeyboardShortcutsPanel, {
+  useKeyboardShortcuts,
+} from "./components/shared/KeyboardShortcuts.jsx";
 import "./App.css";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("chat");
-  const { loadConversations } = useChatStore();
-  const { loadSettings } = useSettingsStore();
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const { loadConversations, createConversation } = useChatStore();
+  const { loadSettings, defaultModel } = useSettingsStore();
 
   useEffect(() => {
     loadSettings();
     loadConversations();
   }, [loadSettings, loadConversations]);
+
+  // Keyboard shortcuts handlers
+  const shortcutHandlers = useMemo(
+    () => ({
+      onNewConversation: () => {
+        setActiveTab("chat");
+        createConversation(defaultModel);
+      },
+      onToggleShortcuts: () => setShowShortcuts((v) => !v),
+      onOpenSettings: () => setActiveTab("settings"),
+      onSwitchTab: (tab) => setActiveTab(tab),
+    }),
+    [createConversation, defaultModel]
+  );
+
+  useKeyboardShortcuts(shortcutHandlers);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -52,6 +72,13 @@ export default function App() {
               {tab.label}
             </button>
           ))}
+          <button
+            className="app-tab shortcuts-btn"
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard shortcuts (Ctrl+/)"
+          >
+            ?
+          </button>
         </nav>
       </header>
 
@@ -63,6 +90,11 @@ export default function App() {
         )}
         <section className="app-content">{renderContent()}</section>
       </main>
+
+      <KeyboardShortcutsPanel
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 }

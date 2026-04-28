@@ -16,6 +16,12 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .chat-header-title {
   font-size: 16px;
   font-weight: 600;
@@ -26,6 +32,43 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.streaming-speed {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-secondary);
+  padding: 4px 10px;
+  background: var(--color-secondary-bg);
+  border: 1px solid var(--color-secondary-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  animation: pulse 2s infinite;
+}
+
+/* ── Model Info Bar ─────────────────────────────────────── */
+.model-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.model-info-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.model-info-item strong {
+  color: var(--color-text-muted);
+  font-weight: 500;
 }
 
 .chat-messages {

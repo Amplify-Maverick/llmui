@@ -59,6 +59,19 @@
   background: var(--color-border-light);
 }
 
+.app-tab.shortcuts-btn {
+  width: 32px;
+  padding: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 50%;
+}
+
+.app-tab.shortcuts-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-primary);
+}
+
 .app-main {
   display: flex;
   flex: 1;

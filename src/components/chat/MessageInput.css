@@ -1,10 +1,54 @@
+.message-input-wrapper {
+  position: relative;
+  background: rgba(255, 255, 255, 0.02);
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+}
+
+.message-input-wrapper.dragging {
+  background: var(--color-primary-bg);
+}
+
 .message-input {
   display: flex;
   gap: 12px;
   padding: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border-top: 1px solid var(--color-border);
-  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  align-items: flex-end;
+}
+
+.message-input-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.input-action-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-mono);
+}
+
+.input-action-btn:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+}
+
+.input-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .message-input-textarea {
@@ -33,4 +77,69 @@
 
 .message-input-textarea::placeholder {
   color: var(--color-text-muted);
+}
+
+/* ── Image Preview ──────────────────────────────────────── */
+.message-input-images {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 0;
+  flex-wrap: wrap;
+}
+
+.image-preview {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-danger);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.image-preview:hover .image-remove {
+  opacity: 1;
+}
+
+/* ── Drag Overlay ───────────────────────────────────────── */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--color-primary-bg);
+  border: 2px dashed var(--color-primary);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+.drag-overlay-content {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-primary);
 }

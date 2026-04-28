@@ -1,0 +1,227 @@
+/* ── Markdown Content Container ─────────────────────────── */
+.markdown-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+/* ── Code Blocks ────────────────────────────────────────── */
+.code-block-wrapper {
+  margin: 12px 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-block-language {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.code-copy-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.code-copy-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+}
+
+.code-copy-btn.copied {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+}
+
+/* ── Inline Code ────────────────────────────────────────── */
+.md-inline-code {
+  background: var(--color-code-bg);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-primary);
+}
+
+/* ── Headings ───────────────────────────────────────────── */
+.md-heading {
+  margin: 16px 0 8px 0;
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.md-h1 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.md-h2 {
+  font-size: 1.3em;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 6px;
+}
+
+.md-h3 {
+  font-size: 1.15em;
+}
+
+.md-h4 {
+  font-size: 1em;
+}
+
+/* ── Paragraphs ─────────────────────────────────────────── */
+.md-paragraph {
+  margin: 8px 0;
+}
+
+.md-paragraph:first-child {
+  margin-top: 0;
+}
+
+.md-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Lists ──────────────────────────────────────────────── */
+.md-list {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.md-list li {
+  margin: 4px 0;
+}
+
+.md-list li::marker {
+  color: var(--color-text-muted);
+}
+
+.md-ul li {
+  list-style-type: disc;
+}
+
+.md-ol li {
+  list-style-type: decimal;
+}
+
+/* Nested lists */
+.md-list .md-list {
+  margin: 4px 0;
+}
+
+/* ── Blockquote ─────────────────────────────────────────── */
+.md-blockquote {
+  margin: 12px 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-surface);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-secondary);
+}
+
+.md-blockquote p {
+  margin: 0;
+}
+
+/* ── Tables ─────────────────────────────────────────────── */
+.md-table-wrapper {
+  margin: 12px 0;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.md-table th,
+.md-table td {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.md-table th {
+  background: var(--color-surface);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.md-table tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ── Horizontal Rule ────────────────────────────────────── */
+.md-hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ── Links ──────────────────────────────────────────────── */
+.markdown-content a {
+  color: var(--color-secondary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.markdown-content a:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* ── Strong and Emphasis ────────────────────────────────── */
+.markdown-content strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+/* ── Images ─────────────────────────────────────────────── */
+.markdown-content img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  margin: 8px 0;
+}
+
+/* ── Task Lists (GFM) ───────────────────────────────────── */
+.markdown-content input[type="checkbox"] {
+  margin-right: 8px;
+  accent-color: var(--color-primary);
+}
+
+/* ── Strikethrough ──────────────────────────────────────── */
+.markdown-content del {
+  color: var(--color-text-muted);
+}

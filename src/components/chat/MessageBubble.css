@@ -5,7 +5,8 @@
 
 .bubble {
   padding: 12px 16px;
-  max-width: 70%;
+  max-width: 75%;
+  position: relative;
 }
 
 .bubble-user {
@@ -27,6 +28,10 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .bubble-role-user {
@@ -42,7 +47,6 @@
   text-transform: none;
   letter-spacing: normal;
   color: var(--color-text-muted);
-  margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--color-border);
 }
@@ -52,7 +56,15 @@
   text-transform: none;
   letter-spacing: normal;
   color: var(--color-text-muted);
-  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+}
+
+.bubble-tokens-per-sec {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-secondary);
   padding-left: 8px;
   border-left: 1px solid var(--color-border);
 }
@@ -60,10 +72,13 @@
 .bubble-content {
   font-size: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-sans);
   color: var(--color-text-primary);
+}
+
+.bubble-text-content {
+  white-space: pre-wrap;
 }
 
 .bubble-code-block {
@@ -91,4 +106,137 @@
   background: var(--color-primary);
   margin-left: 2px;
   animation: blink 1s infinite;
+  vertical-align: text-bottom;
+}
+
+/* ── Message Actions ────────────────────────────────────── */
+.bubble-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.bubble-action-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.bubble-action-btn:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+}
+
+.bubble-action-btn.copied {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+}
+
+.bubble-action-btn.danger:hover {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+/* ── Edit Mode ──────────────────────────────────────────── */
+.bubble-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bubble-edit-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.bubble-edit-textarea:focus {
+  border-color: var(--color-primary-border);
+}
+
+.bubble-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.bubble-edit-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-right: auto;
+}
+
+.bubble-edit-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.bubble-edit-btn.cancel {
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+}
+
+.bubble-edit-btn.cancel:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.bubble-edit-btn.save {
+  background: var(--color-primary-bg);
+  border: 1px solid var(--color-primary-border);
+  color: var(--color-primary);
+}
+
+.bubble-edit-btn.save:hover {
+  background: var(--color-primary-bg-hover);
+  border-color: var(--color-primary-border-hover);
+}
+
+/* ── Image Attachments ──────────────────────────────────── */
+.bubble-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.bubble-image {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.bubble-image:hover {
+  transform: scale(1.02);
 }

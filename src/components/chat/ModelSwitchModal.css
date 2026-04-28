@@ -1,0 +1,57 @@
+.model-switch-content {
+  padding: 8px 0;
+}
+
+.model-switch-warning {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+
+.model-switch-comparison {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+
+.model-switch-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-switch-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+}
+
+.model-switch-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 4px 12px;
+  background: var(--color-code-bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+}
+
+.model-switch-value.new {
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  border: 1px solid var(--color-primary-border);
+}
+
+.model-switch-arrow {
+  font-size: 18px;
+  color: var(--color-text-muted);
+}
