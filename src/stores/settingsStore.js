@@ -4,11 +4,14 @@ import { loadFromStorage, saveToStorage } from "../utils/storage.js";
 
 export const useSettingsStore = create((set, get) => ({
   ...DEFAULT_SETTINGS,
+  isLoading: true,
 
-  loadSettings: () => {
-    const saved = loadFromStorage(STORAGE_KEYS.settings);
+  loadSettings: async () => {
+    const saved = await loadFromStorage(STORAGE_KEYS.settings);
     if (saved) {
-      set(saved);
+      set({ ...saved, isLoading: false });
+    } else {
+      set({ isLoading: false });
     }
   },
 

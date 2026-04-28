@@ -1,13 +1,12 @@
 # LLMUI
 
-A web interface for chatting with local LLMs through Ollama. Nothing fancy, just a clean UI that makes it easy to manage models and have conversations.
-
+A web interface for chatting with local LLMs through Ollama. 
 ## What it does
 
 - **Chat** with any model you have installed in Ollama
 - **Pull and delete models** directly from the UI
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
-- **Conversation history** - saved locally in your browser
+- **Conversation history** - saved to `~/.llmui/` on your device
 - **Hardware guide** - helps figure out what models will run on your system
 - Configurable system prompts, temperature, max tokens
 
@@ -40,7 +39,7 @@ Then start the UI:
 npm run dev
 ```
 
-Open http://localhost:3000 in your browser.
+This runs both the storage server (port 3001) and the frontend (port 3000). Open http://localhost:3000 in your browser.
 
 ## Configuration
 
@@ -50,6 +49,10 @@ Most settings can be changed in the Settings tab:
 - **System Prompt** - gets sent at the start of every conversation
 - **Temperature** - lower = more focused, higher = more creative
 - **Max Tokens** - limit on response length
+
+## Data storage
+
+Conversations and settings are stored in `~/.llmui/` as JSON files. This persists your data independently of the browser.
 
 ## Keyboard shortcuts
 

@@ -11,21 +11,24 @@ export const useChatStore = create((set, get) => ({
   streamingContent: "",
   streamingTokenCount: 0,
   streamingStartTime: null,
+  isLoading: true,
 
-  loadConversations: () => {
-    const saved = loadFromStorage(STORAGE_KEYS.conversations);
-    const activeId = loadFromStorage(STORAGE_KEYS.activeConversation);
+  loadConversations: async () => {
+    const saved = await loadFromStorage(STORAGE_KEYS.conversations);
+    const activeId = await loadFromStorage(STORAGE_KEYS.activeConversation);
     if (saved) {
-      set({ conversations: saved });
+      set({ conversations: saved, isLoading: false });
       if (activeId && saved.find((c) => c.id === activeId)) {
         get().setActiveConversation(activeId);
       }
+    } else {
+      set({ isLoading: false });
     }
   },
 
-  saveConversations: () => {
+  saveConversations: async () => {
     const { conversations } = get();
-    saveToStorage(STORAGE_KEYS.conversations, conversations);
+    await saveToStorage(STORAGE_KEYS.conversations, conversations);
   },
 
   createConversation: (model) => {
