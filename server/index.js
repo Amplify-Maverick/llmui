@@ -130,14 +130,74 @@ app.get("/", (req, res) => {
       "GET /storage/:key": "Load data",
       "PUT /storage/:key": "Save data",
       "DELETE /storage/:key": "Remove data",
-      "GET /health": "Health check"
-    }
+      "POST /ollama/pull": "Pull model (authenticated)",
+      "DELETE /ollama/delete": "Delete model (authenticated)",
+      "GET /health": "Health check",
+    },
   });
 });
 
 // Health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", storageDir: STORAGE_DIR });
+});
+
+// Authenticated Ollama proxy endpoints for dangerous operations
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+
+// POST /ollama/pull - Pull a model (authenticated, streaming)
+app.post("/ollama/pull", requireAuth, async (req, res) => {
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return res.status(response.status).send(error);
+    }
+
+    // Stream the response back
+    res.setHeader("Content-Type", "application/x-ndjson");
+    const reader = response.body.getReader();
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          break;
+        }
+        res.write(Buffer.from(value));
+      }
+    };
+    await pump();
+  } catch (err) {
+    console.error("Error proxying pull request:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /ollama/delete - Delete a model (authenticated)
+app.delete("/ollama/delete", requireAuth, async (req, res) => {
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/delete`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return res.status(response.status).send(error);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error proxying delete request:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 await ensureStorageDir();

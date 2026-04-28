@@ -1,5 +1,31 @@
 import { DEFAULT_OLLAMA_URL } from "../constants/config.js";
 
+const AUTH_SERVER = "http://localhost:3001";
+let authToken = null;
+let tokenPromise = null;
+
+async function getAuthToken() {
+  if (authToken) return authToken;
+  if (tokenPromise) return tokenPromise;
+
+  tokenPromise = fetch(`${AUTH_SERVER}/auth/token`)
+    .then((res) => {
+      if (!res.ok) throw new Error("Failed to fetch auth token");
+      return res.json();
+    })
+    .then((data) => {
+      authToken = data.token;
+      return authToken;
+    })
+    .catch((error) => {
+      console.error("Error fetching auth token:", error);
+      tokenPromise = null;
+      throw error;
+    });
+
+  return tokenPromise;
+}
+
 class OllamaAPI {
   constructor(baseUrl = DEFAULT_OLLAMA_URL) {
     this.baseUrl = baseUrl;
@@ -77,9 +103,14 @@ class OllamaAPI {
   }
 
   async *pullModel(name) {
-    const response = await fetch(`${this.baseUrl}/api/pull`, {
+    // Use authenticated endpoint on storage server
+    const token = await getAuthToken();
+    const response = await fetch(`${AUTH_SERVER}/ollama/pull`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ name, stream: true }),
     });
 
@@ -113,9 +144,14 @@ class OllamaAPI {
   }
 
   async deleteModel(name) {
-    const response = await fetch(`${this.baseUrl}/api/delete`, {
+    // Use authenticated endpoint on storage server
+    const token = await getAuthToken();
+    const response = await fetch(`${AUTH_SERVER}/ollama/delete`, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ name }),
     });
     return response.ok;

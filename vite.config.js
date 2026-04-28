@@ -10,6 +10,22 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:11434",
         changeOrigin: true,
+        configure: (proxy) => {
+          // Block dangerous endpoints - require authentication via Express server
+          proxy.on("proxyReq", (proxyReq, req, res) => {
+            const blockedPaths = ["/api/pull", "/api/delete"];
+            if (blockedPaths.some((p) => req.url.startsWith(p))) {
+              res.writeHead(403, { "Content-Type": "application/json" });
+              res.end(
+                JSON.stringify({
+                  error:
+                    "This endpoint requires authentication. Use /ollama/pull or /ollama/delete on port 3001.",
+                })
+              );
+              proxyReq.destroy();
+            }
+          });
+        },
       },
     },
   },
