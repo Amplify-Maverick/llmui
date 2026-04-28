@@ -1,9 +1,13 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+
+const execFileAsync = promisify(execFile);
 
 const app = express();
 const PORT = 3001;
@@ -374,6 +378,50 @@ app.delete("/ollama/delete", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Error proxying delete request:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// GPU stats endpoint (authenticated)
+// Uses execFile (no shell) + async to avoid blocking the event loop.
+// ============================================================
+
+const NVIDIA_SMI_ARGS = [
+  "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,fan.speed,power.draw,power.limit,clocks.current.graphics,clocks.current.memory",
+  "--format=csv,noheader,nounits",
+];
+
+app.get("/api/gpu", requireAuth, async (req, res) => {
+  try {
+    const { stdout } = await execFileAsync("nvidia-smi", NVIDIA_SMI_ARGS, {
+      timeout: 3000,
+    });
+
+    const raw = stdout.trim();
+    const gpus = raw.split("\n").map((line) => {
+      const parts = line.split(",").map((s) => s.trim());
+      return {
+        index: parseInt(parts[0], 10),
+        name: parts[1],
+        utilization: parseFloat(parts[2]),       // %
+        memoryUsed: parseFloat(parts[3]),         // MiB
+        memoryTotal: parseFloat(parts[4]),        // MiB
+        temperature: parseFloat(parts[5]),        // °C
+        fanSpeed: parseFloat(parts[6]),           // %
+        powerDraw: parseFloat(parts[7]),          // W
+        powerLimit: parseFloat(parts[8]),         // W
+        clockGraphics: parseFloat(parts[9]),      // MHz
+        clockMemory: parseFloat(parts[10]),       // MHz
+      };
+    });
+
+    res.json({ ok: true, gpus, timestamp: Date.now() });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: "nvidia-smi not available or failed",
+      message: err.message,
+    });
   }
 });
 

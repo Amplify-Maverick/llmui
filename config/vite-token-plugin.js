@@ -13,7 +13,7 @@ import os from "os";
  * Why this approach vs injecting into index.html (Option B):
  * - Cleaner separation: token is fetched on-demand, not embedded in HTML
  * - Easier to debug: can curl the endpoint to verify token delivery
- * - Consistent with existing pattern (see vite-gpu-plugin.js)
+ * - Consistent with existing pattern used by the app
  *
  * PRODUCTION NOTE: This plugin only runs during Vite dev/preview mode.
  * For production deployment (serving dist/ after vite build), you'll need
