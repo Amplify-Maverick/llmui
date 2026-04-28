@@ -2,6 +2,41 @@ import { useState } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import "./MessageBubble.css";
 
+// Icons as inline SVGs for better control
+const CopyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
+
+const EditIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+  </svg>
+);
+
+const RefreshIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 4 23 10 17 10"/>
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+  </svg>
+);
+
 function formatDuration(seconds) {
   if (!seconds) return null;
   if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
@@ -28,7 +63,6 @@ export default function MessageBubble({
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
-  const [showActions, setShowActions] = useState(false);
 
   const isUser = message.role === "user";
 
@@ -69,11 +103,7 @@ export default function MessageBubble({
   };
 
   return (
-    <div
-      className="message-row"
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
-    >
+    <div className="message-row">
       <div className={`bubble ${isUser ? "bubble-user" : "bubble-assistant"}`}>
         <div className={`bubble-role ${isUser ? "bubble-role-user" : "bubble-role-assistant"}`}>
           {isUser ? "You" : "Assistant"}
@@ -119,14 +149,14 @@ export default function MessageBubble({
         )}
 
         {/* Message Actions */}
-        {!isEditing && !isStreaming && (showActions || copied) && (
+        {!isEditing && !isStreaming && (
           <div className="bubble-actions">
             <button
               className={`bubble-action-btn ${copied ? "copied" : ""}`}
               onClick={handleCopy}
-              title="Copy message"
+              title={copied ? "Copied!" : "Copy message"}
             >
-              {copied ? "Copied!" : "Copy"}
+              {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
             {isUser && (
               <button
@@ -134,7 +164,7 @@ export default function MessageBubble({
                 onClick={handleEdit}
                 title="Edit message"
               >
-                Edit
+                <EditIcon />
               </button>
             )}
             {!isUser && isLastAssistant && (
@@ -143,7 +173,7 @@ export default function MessageBubble({
                 onClick={() => onRegenerate?.(message.id)}
                 title="Regenerate response"
               >
-                Regenerate
+                <RefreshIcon />
               </button>
             )}
             <button
@@ -151,7 +181,7 @@ export default function MessageBubble({
               onClick={() => onDelete?.(message.id)}
               title="Delete message"
             >
-              Delete
+              <TrashIcon />
             </button>
           </div>
         )}

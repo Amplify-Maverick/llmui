@@ -21,6 +21,7 @@ export const useSettingsStore = create((set, get) => ({
       systemPrompt: state.systemPrompt,
       temperature: state.temperature,
       maxTokens: state.maxTokens,
+      customTags: state.customTags,
     });
   },
 

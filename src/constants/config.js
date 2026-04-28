@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = {
   systemPrompt: "",
   temperature: 0.7,
   maxTokens: 2048,
+  customTags: [],
 };
 
 export const STORAGE_KEYS = {

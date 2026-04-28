@@ -7,12 +7,9 @@ import Input from "../shared/Input.jsx";
 import Modal, { ConfirmModal } from "../shared/Modal.jsx";
 import "./ConversationHistory.css";
 
-const AVAILABLE_TAGS = [
-  { id: "work", label: "Work", color: "#60a5fa" },
-  { id: "personal", label: "Personal", color: "#6ee7b7" },
-  { id: "coding", label: "Coding", color: "#c4b5fd" },
-  { id: "research", label: "Research", color: "#fcd34d" },
-  { id: "creative", label: "Creative", color: "#fb923c" },
+const TAG_COLORS = [
+  "#60a5fa", "#6ee7b7", "#c4b5fd", "#fcd34d", "#fb923c",
+  "#f87171", "#a78bfa", "#34d399", "#fbbf24", "#f472b6",
 ];
 
 export default function ConversationHistory() {
@@ -27,7 +24,8 @@ export default function ConversationHistory() {
     exportConversation,
   } = useChatStore();
 
-  const { defaultModel } = useSettingsStore();
+  const { defaultModel, customTags = [], updateSetting } = useSettingsStore();
+  const tags = customTags || [];
 
   const [search, setSearch] = useState("");
   const [searchInContent, setSearchInContent] = useState(false);
@@ -37,6 +35,7 @@ export default function ConversationHistory() {
   const [renameValue, setRenameValue] = useState("");
   const [tagsModal, setTagsModal] = useState(null);
   const [exportModal, setExportModal] = useState(null);
+  const [newTagName, setNewTagName] = useState("");
 
   // Filter conversations
   const filteredConversations = useMemo(() => {
@@ -151,24 +150,26 @@ export default function ConversationHistory() {
         </div>
 
         {/* Tag Filter */}
-        <div className="history-tags-filter">
-          <button
-            className={`tag-filter-btn ${!selectedTag ? "active" : ""}`}
-            onClick={() => setSelectedTag(null)}
-          >
-            All
-          </button>
-          {AVAILABLE_TAGS.map((tag) => (
+        {tags.length > 0 && (
+          <div className="history-tags-filter">
             <button
-              key={tag.id}
-              className={`tag-filter-btn ${selectedTag === tag.id ? "active" : ""}`}
-              style={{ "--tag-color": tag.color }}
-              onClick={() => setSelectedTag(selectedTag === tag.id ? null : tag.id)}
+              className={`tag-filter-btn ${!selectedTag ? "active" : ""}`}
+              onClick={() => setSelectedTag(null)}
             >
-              {tag.label}
+              All
             </button>
-          ))}
-        </div>
+            {tags.map((tag) => (
+              <button
+                key={tag.id}
+                className={`tag-filter-btn ${selectedTag === tag.id ? "active" : ""}`}
+                style={{ "--tag-color": tag.color }}
+                onClick={() => setSelectedTag(selectedTag === tag.id ? null : tag.id)}
+              >
+                {tag.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="history-list">
@@ -189,7 +190,7 @@ export default function ConversationHistory() {
               onRename={(id) => openRenameModal(id, conversation.title)}
               onTags={setTagsModal}
               onExport={setExportModal}
-              availableTags={AVAILABLE_TAGS}
+              availableTags={tags}
             />
           ))
         )}
@@ -240,24 +241,75 @@ export default function ConversationHistory() {
       {/* Tags Modal */}
       <Modal
         isOpen={tagsModal !== null}
-        onClose={() => setTagsModal(null)}
+        onClose={() => {
+          setTagsModal(null);
+          setNewTagName("");
+        }}
         title="Manage Tags"
       >
         <div className="tags-modal-content">
-          {AVAILABLE_TAGS.map((tag) => {
+          {tags.length === 0 && (
+            <p className="tags-empty-hint">No tags yet. Create your first tag below.</p>
+          )}
+          {tags.map((tag) => {
             const isSelected = getConversationTags(tagsModal).includes(tag.id);
             return (
-              <button
-                key={tag.id}
-                className={`tag-select-btn ${isSelected ? "selected" : ""}`}
-                style={{ "--tag-color": tag.color }}
-                onClick={() => handleTagToggle(tag.id)}
-              >
-                <span className="tag-dot" />
-                {tag.label}
-              </button>
+              <div key={tag.id} className="tag-select-row">
+                <button
+                  className={`tag-select-btn ${isSelected ? "selected" : ""}`}
+                  style={{ "--tag-color": tag.color }}
+                  onClick={() => handleTagToggle(tag.id)}
+                >
+                  <span className="tag-dot" />
+                  {tag.label}
+                </button>
+                <button
+                  className="tag-delete-btn"
+                  onClick={() => {
+                    const newTags = tags.filter((t) => t.id !== tag.id);
+                    updateSetting("customTags", newTags);
+                  }}
+                  title="Delete tag"
+                >
+                  ×
+                </button>
+              </div>
             );
           })}
+          <div className="tag-create-row">
+            <Input
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              placeholder="New tag name..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newTagName.trim()) {
+                  const newTag = {
+                    id: newTagName.trim().toLowerCase().replace(/\s+/g, "-"),
+                    label: newTagName.trim(),
+                    color: TAG_COLORS[tags.length % TAG_COLORS.length],
+                  };
+                  updateSetting("customTags", [...tags, newTag]);
+                  setNewTagName("");
+                }
+              }}
+            />
+            <Button
+              onClick={() => {
+                if (newTagName.trim()) {
+                  const newTag = {
+                    id: newTagName.trim().toLowerCase().replace(/\s+/g, "-"),
+                    label: newTagName.trim(),
+                    color: TAG_COLORS[tags.length % TAG_COLORS.length],
+                  };
+                  updateSetting("customTags", [...tags, newTag]);
+                  setNewTagName("");
+                }
+              }}
+              disabled={!newTagName.trim()}
+            >
+              Add
+            </Button>
+          </div>
         </div>
       </Modal>
 

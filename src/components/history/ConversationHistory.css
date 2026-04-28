@@ -87,9 +87,58 @@
 /* ── Tags Modal ─────────────────────────────────────────── */
 .tags-modal-content {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   padding: 8px 0;
+}
+
+.tags-empty-hint {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  margin: 0 0 8px 0;
+}
+
+.tag-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-select-row .tag-select-btn {
+  flex: 1;
+}
+
+.tag-delete-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  transition: all var(--transition-fast);
+}
+
+.tag-delete-btn:hover {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  color: white;
+}
+
+.tag-create-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.tag-create-row input {
+  flex: 1;
 }
 
 .tag-select-btn {
