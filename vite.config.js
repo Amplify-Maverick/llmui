@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import gpuStatsPlugin from "./vite-gpu-plugin.js";
+import gpuStatsPlugin from "./config/vite-gpu-plugin.js";
 
 export default defineConfig({
   plugins: [react(), gpuStatsPlugin()],

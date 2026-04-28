@@ -1,10 +1,10 @@
 #!/bin/bash
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Check if dependencies are installed
 if [ ! -d "node_modules" ]; then
-    echo "Dependencies not installed. Run ./install.sh first."
+    echo "Dependencies not installed. Run ./scripts/install.sh first."
     exit 1
 fi
 
@@ -18,7 +18,7 @@ fi
 # Start storage server if not running
 if ! lsof -i:3001 > /dev/null 2>&1; then
     echo "Starting storage server..."
-    node server.js &
+    node server/index.js &
     sleep 1
 fi
 

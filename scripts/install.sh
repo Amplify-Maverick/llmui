@@ -30,7 +30,7 @@ else
 fi
 
 # Install npm dependencies if needed
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if [ -d "node_modules" ] && [ -f "node_modules/.package-lock.json" ]; then
     echo "✓ npm dependencies already installed"
