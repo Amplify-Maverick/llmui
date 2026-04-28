@@ -25,7 +25,6 @@ export default function ModelManager() {
   const [showPullDialog, setShowPullDialog] = useState(false);
   const [showHardwareGuide, setShowHardwareGuide] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [pullModelName, setPullModelName] = useState("");
 
   useEffect(() => {
     fetchModels();
@@ -65,7 +64,7 @@ export default function ModelManager() {
           <Button variant="ghost" onClick={fetchModels} disabled={isLoading}>
             Refresh
           </Button>
-          <Button onClick={() => { setPullModelName(""); setShowPullDialog(true); }}>
+          <Button onClick={() => setShowPullDialog(true)}>
             Pull Model
           </Button>
         </div>
@@ -107,7 +106,6 @@ export default function ModelManager() {
         onClose={() => setShowPullDialog(false)}
         onPull={handlePull}
         pullProgress={pullProgress}
-        initialModelName={pullModelName}
       />
 
       <ConfirmModal
@@ -122,11 +120,6 @@ export default function ModelManager() {
       <HardwareGuideModal
         isOpen={showHardwareGuide}
         onClose={() => setShowHardwareGuide(false)}
-        onInstallModel={(model) => {
-          setShowHardwareGuide(false);
-          setPullModelName(model);
-          setShowPullDialog(true);
-        }}
       />
     </div>
   );

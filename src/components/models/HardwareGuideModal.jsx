@@ -1,12 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import Modal from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
-import ModelTag from "./ModelTag.jsx";
 import { MODEL_TIERS } from "../../constants/hardwareTiers.js";
 import { detectGPU, parseGPUName } from "../../utils/hardwareDetection.js";
 import "./HardwareGuideModal.css";
 
-export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) {
+export default function HardwareGuideModal({ isOpen, onClose }) {
   const [gpuInfo, setGpuInfo] = useState(null);
   const [showManualCommands, setShowManualCommands] = useState(false);
   const [showAllTiers, setShowAllTiers] = useState(false);
@@ -21,12 +20,6 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
   };
-
-  const handleModelClick = useCallback((model) => {
-    if (onInstallModel) {
-      onInstallModel(model);
-    }
-  }, [onInstallModel]);
 
   return (
     <Modal
@@ -60,17 +53,7 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
               )}
             </div>
             {gpuInfo.tier && (
-              <>
-                <div className="hw-tier-description">{gpuInfo.tier.description}</div>
-                <div className="hw-recommended">
-                  <div className="hw-recommended-title">Recommended Models</div>
-                  <div className="hw-model-list">
-                    {gpuInfo.tier.models.map((model) => (
-                      <ModelTag key={model} model={model} onClick={handleModelClick} />
-                    ))}
-                  </div>
-                </div>
-              </>
+              <div className="hw-tier-description">{gpuInfo.tier.description}</div>
             )}
           </div>
         ) : gpuInfo?.detected ? (
@@ -172,11 +155,6 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
                   </div>
                   <div className="hw-tier-gpus">{tier.gpus}</div>
                   <div className="hw-tier-notes">{tier.notes}</div>
-                  <div className="hw-model-list">
-                    {tier.models.map((model) => (
-                      <ModelTag key={model} model={model} onClick={handleModelClick} />
-                    ))}
-                  </div>
                 </div>
               ))}
             </div>

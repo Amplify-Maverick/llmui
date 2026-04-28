@@ -9,15 +9,14 @@ export default function ModelPullDialog({
   onClose,
   onPull,
   pullProgress,
-  initialModelName = "",
 }) {
-  const [modelName, setModelName] = useState(initialModelName);
+  const [modelName, setModelName] = useState("");
 
   useEffect(() => {
     if (isOpen) {
-      setModelName(initialModelName);
+      setModelName("");
     }
-  }, [isOpen, initialModelName]);
+  }, [isOpen]);
 
   const handlePull = () => {
     if (modelName.trim()) {

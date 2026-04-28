@@ -42,6 +42,9 @@ export const useModelsStore = create((set, get) => ({
 
     try {
       for await (const chunk of ollamaApi.pullModel(name)) {
+        if (chunk.error) {
+          throw new Error(chunk.error);
+        }
         if (chunk.status) {
           const progress = chunk.completed && chunk.total
             ? Math.round((chunk.completed / chunk.total) * 100)
