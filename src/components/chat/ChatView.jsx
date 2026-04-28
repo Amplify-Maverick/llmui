@@ -33,7 +33,7 @@ export default function ChatView() {
     getLastUserMessage,
   } = useChatStore();
 
-  const { defaultModel, updateSetting } = useSettingsStore();
+  const { defaultModel, enableThinking, updateSetting } = useSettingsStore();
   const { localModels, fetchModels, modelInfoCache, fetchModelInfo } = useModelsStore();
   const { sendMessage, stopStreaming, regenerateLastMessage } = useOllamaStream();
 
@@ -137,6 +137,13 @@ export default function ChatView() {
           {isStreaming && currentTokensPerSec && (
             <span className="streaming-speed">{currentTokensPerSec} tok/s</span>
           )}
+          <button
+            className={`think-toggle ${enableThinking ? "active" : ""}`}
+            onClick={() => updateSetting("enableThinking", !enableThinking)}
+            title={enableThinking ? "Disable thinking mode" : "Enable thinking mode for reasoning models"}
+          >
+            Think
+          </button>
           <button
             className={`gpu-toggle ${showGpu ? "active" : ""}`}
             onClick={() => setShowGpu((v) => !v)}

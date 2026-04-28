@@ -103,7 +103,8 @@
   margin: 0;
 }
 
-.gpu-toggle {
+.gpu-toggle,
+.think-toggle {
   padding: 4px 10px;
   border: 1px solid var(--color-border-separator);
   border-radius: var(--radius-md);
@@ -123,4 +124,10 @@
 .gpu-toggle.active {
   background: var(--color-secondary-bg);
   color: var(--color-secondary);
+}
+
+.think-toggle.active {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
 }

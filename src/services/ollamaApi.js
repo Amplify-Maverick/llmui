@@ -39,6 +39,7 @@ class OllamaAPI {
         model,
         messages,
         stream: true,
+        think: options.enableThinking || false,
         options: {
           temperature: options.temperature,
           num_predict: options.maxTokens,

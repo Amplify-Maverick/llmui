@@ -51,3 +51,22 @@
   background: var(--color-border);
   margin: 32px 0;
 }
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.settings-toggle-row .settings-label {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+
+.settings-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}

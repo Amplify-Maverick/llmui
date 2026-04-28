@@ -25,6 +25,7 @@ export const useSettingsStore = create((set, get) => ({
       temperature: state.temperature,
       maxTokens: state.maxTokens,
       customTags: state.customTags,
+      enableThinking: state.enableThinking,
     });
   },
 

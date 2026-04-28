@@ -21,7 +21,7 @@ export function useOllamaStream() {
     getLastUserMessage,
   } = useChatStore();
 
-  const { ollamaBaseUrl, defaultModel, systemPrompt, temperature, maxTokens } =
+  const { ollamaBaseUrl, defaultModel, systemPrompt, temperature, maxTokens, enableThinking } =
     useSettingsStore();
 
   const sendMessage = useCallback(
@@ -79,7 +79,7 @@ export function useOllamaStream() {
         for await (const chunk of ollamaApi.chatStream(
           selectedModel,
           chatMessages,
-          { temperature, maxTokens }
+          { temperature, maxTokens, enableThinking }
         )) {
           if (chunk.message?.content) {
             appendStreamContent(chunk.message.content);
@@ -115,6 +115,7 @@ export function useOllamaStream() {
       systemPrompt,
       temperature,
       maxTokens,
+      enableThinking,
       addMessage,
       setStreaming,
       appendStreamContent,
@@ -172,7 +173,7 @@ export function useOllamaStream() {
         for await (const chunk of ollamaApi.chatStream(
           selectedModel,
           chatMessages,
-          { temperature, maxTokens }
+          { temperature, maxTokens, enableThinking }
         )) {
           if (chunk.message?.content) {
             appendStreamContent(chunk.message.content);
@@ -206,6 +207,7 @@ export function useOllamaStream() {
       systemPrompt,
       temperature,
       maxTokens,
+      enableThinking,
       addMessage,
       setStreaming,
       appendStreamContent,

@@ -15,5 +15,12 @@ if ! pgrep -x "ollama" > /dev/null; then
     sleep 2
 fi
 
+# Start storage server if not running
+if ! lsof -i:3001 > /dev/null 2>&1; then
+    echo "Starting storage server..."
+    node server.js &
+    sleep 1
+fi
+
 echo "Starting LLMUI at http://localhost:3000"
 ./node_modules/.bin/vite --host

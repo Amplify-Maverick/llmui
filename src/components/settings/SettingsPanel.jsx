@@ -8,6 +8,7 @@ export default function SettingsPanel() {
     temperature,
     maxTokens,
     ollamaBaseUrl,
+    enableThinking,
     updateSetting,
   } = useSettingsStore();
 
@@ -82,6 +83,24 @@ export default function SettingsPanel() {
         </div>
         <p className="settings-description">
           Maximum number of tokens for each response.
+        </p>
+      </div>
+
+      <div className="settings-divider" />
+
+      <div className="settings-section">
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={enableThinking}
+            onChange={(e) => updateSetting("enableThinking", e.target.checked)}
+            className="settings-checkbox"
+          />
+          <span className="settings-label">Enable Thinking Mode</span>
+        </label>
+        <p className="settings-description">
+          Enables extended reasoning for models that support it (e.g., DeepSeek-R1, QwQ).
+          The model will show its thought process before answering.
         </p>
       </div>
     </div>

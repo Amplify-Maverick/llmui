@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = {
   temperature: 0.7,
   maxTokens: 2048,
   customTags: [],
+  enableThinking: false,
 };
 
 export const STORAGE_KEYS = {
