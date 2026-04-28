@@ -184,7 +184,7 @@ app.get("/storage/:key", requireAuth, async (req, res) => {
       res.json({ data: null });
     } else {
       console.error(`Error loading ${req.params.key}:`, err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 });
@@ -198,7 +198,7 @@ app.put("/storage/:key", storageWriteLimiter, requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error(`Error saving ${req.params.key}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -213,7 +213,7 @@ app.delete("/storage/:key", requireAuth, async (req, res) => {
       res.json({ success: true });
     } else {
       console.error(`Error removing ${req.params.key}:`, err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Internal server error" });
     }
   }
 });
@@ -260,7 +260,7 @@ app.put("/ollama/config", requireAuth, async (req, res) => {
     res.json({ success: true, ollamaUrl });
   } catch (err) {
     console.error("Error saving Ollama config:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -276,7 +276,7 @@ app.get("/ollama/tags", requireAuth, async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("Error proxying tags request:", err);
-    res.status(502).json({ error: `Failed to connect to Ollama at ${ollamaUrl}: ${err.message}` });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -292,7 +292,7 @@ app.get("/ollama/ps", requireAuth, async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("Error proxying ps request:", err);
-    res.status(502).json({ error: `Failed to connect to Ollama at ${ollamaUrl}: ${err.message}` });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -312,7 +312,7 @@ app.post("/ollama/show", requireAuth, async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error("Error proxying show request:", err);
-    res.status(502).json({ error: `Failed to connect to Ollama at ${ollamaUrl}: ${err.message}` });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -346,7 +346,7 @@ app.post("/ollama/chat", requireAuth, async (req, res) => {
     await pump();
   } catch (err) {
     console.error("Error proxying chat request:", err);
-    res.status(502).json({ error: `Failed to connect to Ollama at ${ollamaUrl}: ${err.message}` });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -380,7 +380,7 @@ app.post("/ollama/pull", requireAuth, async (req, res) => {
     await pump();
   } catch (err) {
     console.error("Error proxying pull request:", err);
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -401,7 +401,7 @@ app.delete("/ollama/delete", requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Error proxying delete request:", err);
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -441,10 +441,10 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
 
     res.json({ ok: true, gpus, timestamp: Date.now() });
   } catch (err) {
+    console.error("GPU stats error:", err);
     res.status(500).json({
       ok: false,
       error: "nvidia-smi not available or failed",
-      message: err.message,
     });
   }
 });
