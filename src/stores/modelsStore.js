@@ -10,6 +10,7 @@ const syncApiUrl = () => {
 export const useModelsStore = create((set, get) => ({
   localModels: [],
   runningModels: [],
+  modelInfoCache: {},
   isLoading: false,
   error: null,
   pullProgress: null,
@@ -72,6 +73,54 @@ export const useModelsStore = create((set, get) => ({
     } catch (error) {
       set({ error: error.message });
       throw error;
+    }
+  },
+
+  fetchModelInfo: async (modelName) => {
+    if (!modelName) return null;
+    const { modelInfoCache } = get();
+    if (modelInfoCache[modelName]) return modelInfoCache[modelName];
+
+    syncApiUrl();
+    try {
+      const info = await ollamaApi.showModel(modelName);
+      // Extract context window from model parameters
+      let contextLength = null;
+
+      // Check modelfile parameters for num_ctx
+      if (info.parameters) {
+        const match = info.parameters.match(/num_ctx\s+(\d+)/);
+        if (match) contextLength = parseInt(match[1], 10);
+      }
+
+      // Check model_info for context_length keys
+      if (!contextLength && info.model_info) {
+        for (const [key, value] of Object.entries(info.model_info)) {
+          if (key.includes("context_length") && typeof value === "number") {
+            contextLength = value;
+            break;
+          }
+        }
+      }
+
+      // Default fallback based on common models
+      if (!contextLength) contextLength = 4096;
+
+      const modelInfo = {
+        name: modelName,
+        contextLength,
+        details: info.details || {},
+        rawParameters: info.parameters || "",
+      };
+
+      set((state) => ({
+        modelInfoCache: { ...state.modelInfoCache, [modelName]: modelInfo },
+      }));
+
+      return modelInfo;
+    } catch (error) {
+      console.error("Failed to fetch model info:", error);
+      return { name: modelName, contextLength: 4096, details: {}, rawParameters: "" };
     }
   },
 

@@ -132,7 +132,7 @@ export default function ModelManager() {
         <div style={emptyStateStyle}>Loading models...</div>
       ) : localModels.length === 0 ? (
         <div style={emptyStateStyle}>
-          <p style={{ fontSize: "48px", marginBottom: "16px" }}>📦</p>
+          <p style={{ fontSize: "48px", marginBottom: "16px" }}></p>
           <h3 style={{ color: "#e8e8f0", margin: "0 0 8px 0" }}>No models found</h3>
           <p>Pull a model to get started.</p>
         </div>

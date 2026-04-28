@@ -92,7 +92,7 @@ export default function ConversationItem({
       <div style={titleStyle}>{conversation.title}</div>
       {conversation.model && (
         <div style={modelBadgeStyle}>
-          🤖 {conversation.model.includes("/")
+          {conversation.model.includes("/")
             ? conversation.model.split("/").pop()
             : conversation.model}
         </div>
@@ -110,7 +110,7 @@ export default function ConversationItem({
           }}
           title="Delete conversation"
         >
-          🗑️
+          Delete
         </button>
       </div>
     </div>

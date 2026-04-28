@@ -3,6 +3,7 @@ import { useModelsStore } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { ollamaApi } from "../../services/ollamaApi.js";
 import StatCard from "./StatCard.jsx";
+import GpuStats from "./GpuStats.jsx";
 import { formatBytes } from "../../utils/storage.js";
 
 const containerStyle = {
@@ -114,7 +115,11 @@ export default function SystemStats() {
         />
       </div>
 
-      <h3 style={sectionTitleStyle}>Running Models</h3>
+      <GpuStats />
+
+      <div style={{ marginTop: "24px" }}>
+        <h3 style={sectionTitleStyle}>Running Models</h3>
+      </div>
 
       {runningModels.length === 0 ? (
         <div style={emptyStyle}>

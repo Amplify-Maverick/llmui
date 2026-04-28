@@ -29,6 +29,7 @@ const textareaStyle = {
 export default function MessageInput({
   onSend,
   onStop,
+  onInputChange,
   disabled = false,
   isStreaming = false,
 }) {
@@ -46,6 +47,7 @@ export default function MessageInput({
     if (value.trim() && !disabled && !isStreaming) {
       onSend(value.trim());
       setValue("");
+      onInputChange?.("");
     }
   };
 
@@ -65,7 +67,10 @@ export default function MessageInput({
           borderColor: disabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.1)",
         }}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onInputChange?.(e.target.value);
+        }}
         onKeyDown={handleKeyDown}
         placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
         disabled={disabled || isStreaming}

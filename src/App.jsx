@@ -112,7 +112,7 @@ export default function App() {
     <div style={appStyle}>
       <header style={headerStyle}>
         <div style={logoStyle}>
-          <div style={logoIconStyle}>🦙</div>
+          <div style={logoIconStyle}></div>
           LLMUI
         </div>
         <nav style={tabsStyle}>
