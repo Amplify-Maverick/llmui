@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -174,7 +174,7 @@ function InlineCode({ children }) {
   return <code className="md-inline-code">{children}</code>;
 }
 
-export default function MarkdownRenderer({ content }) {
+export default memo(function MarkdownRenderer({ content }) {
   return (
     <div className="markdown-content">
       <ReactMarkdown
@@ -248,4 +248,4 @@ export default function MarkdownRenderer({ content }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

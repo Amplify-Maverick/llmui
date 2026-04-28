@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useOllamaStream } from "../../hooks/useOllamaStream.js";
 import MessageBubble from "./MessageBubble.jsx";
+import StreamingBubble from "./StreamingBubble.jsx";
 import MessageInput from "./MessageInput.jsx";
 import StreamingIndicator from "./StreamingIndicator.jsx";
 import TokenCounter from "./TokenCounter.jsx";
@@ -83,22 +84,28 @@ export default function ChatView() {
     }
   };
 
-  const handleEditMessage = (id, newContent) => {
+  // Stable callback refs — these don't change between renders so
+  // memoized MessageBubble children won't re-render.
+  const handleEditMessage = useCallback((id, newContent) => {
     editMessageAndTruncate(id, newContent);
     // Auto-regenerate after edit
     sendMessage(newContent, defaultModel);
-  };
+  }, [editMessageAndTruncate, sendMessage, defaultModel]);
 
-  const handleDeleteMessage = () => {
+  const handleDeleteMessage = useCallback(() => {
     if (deleteConfirm) {
       deleteMessage(deleteConfirm);
       setDeleteConfirm(null);
     }
-  };
+  }, [deleteConfirm, deleteMessage]);
 
-  const handleRegenerate = () => {
+  const handleRegenerate = useCallback(() => {
     regenerateLastMessage(defaultModel);
-  };
+  }, [regenerateLastMessage, defaultModel]);
+
+  const handleSetDeleteConfirm = useCallback((id) => {
+    setDeleteConfirm(id);
+  }, []);
 
   // Calculate real-time tokens/sec during streaming
   const currentTokensPerSec = (() => {
@@ -108,23 +115,39 @@ export default function ChatView() {
     return (streamingTokenCount / elapsed).toFixed(1);
   })();
 
-  // Combine messages with streaming content for display
-  const displayMessages = [...messages];
-  if (isStreaming && displayMessages.length > 0) {
-    const lastMsg = displayMessages[displayMessages.length - 1];
-    if (lastMsg.role === "assistant") {
-      displayMessages[displayMessages.length - 1] = {
-        ...lastMsg,
-        content: streamingContent,
-      };
+  // When streaming, exclude the placeholder assistant message (last
+  // message, which has empty content) from the rendered list.  The
+  // StreamingBubble component takes over rendering the in-progress
+  // response and subscribes to streamingContent directly — so
+  // completed messages stay referentially stable and memo'd
+  // MessageBubble instances never re-render.
+  const displayMessages = useMemo(() => {
+    if (isStreaming && messages.length > 0) {
+      const last = messages[messages.length - 1];
+      if (last.role === "assistant" && !last.content) {
+        return messages.slice(0, -1);
+      }
     }
-  }
+    return messages;
+  }, [messages, isStreaming]);
 
-  // Find last assistant message index
-  const lastAssistantIndex = displayMessages.reduce(
-    (acc, msg, idx) => (msg.role === "assistant" ? idx : acc),
-    -1
-  );
+  // Find last assistant message index (for the regenerate button) —
+  // only relevant when NOT streaming.
+  const lastAssistantIndex = useMemo(() => {
+    if (isStreaming) return -1;
+    return displayMessages.reduce(
+      (acc, msg, idx) => (msg.role === "assistant" ? idx : acc),
+      -1
+    );
+  }, [displayMessages, isStreaming]);
+
+  // The model for the streaming bubble — grab from the placeholder
+  // assistant message that the stream hook creates.
+  const streamingModel = useMemo(() => {
+    if (!isStreaming || messages.length === 0) return defaultModel;
+    const last = messages[messages.length - 1];
+    return last.role === "assistant" ? (last.model || defaultModel) : defaultModel;
+  }, [isStreaming, messages, defaultModel]);
 
   return (
     <div className="chat-container">
@@ -185,7 +208,7 @@ export default function ChatView() {
       <TokenCounter inputValue={inputValue} />
 
       <div className="chat-messages">
-        {displayMessages.length === 0 ? (
+        {displayMessages.length === 0 && !isStreaming ? (
           <div className="chat-empty">
             <div className="chat-empty-icon"></div>
             <h3>Start a conversation</h3>
@@ -201,18 +224,18 @@ export default function ChatView() {
               <MessageBubble
                 key={msg.id || idx}
                 message={msg}
-                isStreaming={
-                  isStreaming &&
-                  idx === displayMessages.length - 1 &&
-                  msg.role === "assistant"
-                }
                 onEdit={handleEditMessage}
-                onDelete={setDeleteConfirm}
+                onDelete={handleSetDeleteConfirm}
                 onRegenerate={handleRegenerate}
-                isLastAssistant={idx === lastAssistantIndex && !isStreaming}
+                isLastAssistant={idx === lastAssistantIndex}
               />
             ))}
-            {isStreaming && streamingContent === "" && <StreamingIndicator />}
+            {/* Isolated streaming bubble — only this re-renders per token */}
+            {isStreaming && (
+              streamingContent === ""
+                ? <StreamingIndicator />
+                : <StreamingBubble model={streamingModel} />
+            )}
           </>
         )}
         <div ref={messagesEndRef} />

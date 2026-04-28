@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, memo } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import "./MessageBubble.css";
 
@@ -37,7 +37,7 @@ const TrashIcon = () => (
   </svg>
 );
 
-function formatDuration(seconds) {
+export function formatDuration(seconds) {
   if (!seconds) return null;
   if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
@@ -46,14 +46,16 @@ function formatDuration(seconds) {
   return `${mins}m ${secs}s`;
 }
 
-function formatTokensPerSec(tokensPerSec) {
+export function formatTokensPerSec(tokensPerSec) {
   if (!tokensPerSec) return null;
   return `${tokensPerSec.toFixed(1)} tok/s`;
 }
 
-export default function MessageBubble({
+// Exported for reuse in StreamingBubble
+export { CopyIcon, CheckIcon, EditIcon, RefreshIcon, TrashIcon };
+
+const MessageBubble = memo(function MessageBubble({
   message,
-  isStreaming = false,
   onCopy,
   onEdit,
   onDelete,
@@ -66,7 +68,7 @@ export default function MessageBubble({
 
   const isUser = message.role === "user";
 
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(message.content);
       setCopied(true);
@@ -75,32 +77,40 @@ export default function MessageBubble({
     } catch (err) {
       console.error("Failed to copy:", err);
     }
-  };
+  }, [message.content, onCopy]);
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     setEditContent(message.content);
     setIsEditing(true);
-  };
+  }, [message.content]);
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = useCallback(() => {
     if (editContent.trim() && editContent !== message.content) {
       onEdit?.(message.id, editContent.trim());
     }
     setIsEditing(false);
-  };
+  }, [editContent, message.content, message.id, onEdit]);
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = useCallback(() => {
     setEditContent(message.content);
     setIsEditing(false);
-  };
+  }, [message.content]);
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = useCallback((e) => {
     if (e.key === "Escape") {
       handleCancelEdit();
     } else if (e.key === "Enter" && e.ctrlKey) {
       handleSaveEdit();
     }
-  };
+  }, [handleCancelEdit, handleSaveEdit]);
+
+  const handleDelete = useCallback(() => {
+    onDelete?.(message.id);
+  }, [message.id, onDelete]);
+
+  const handleRegenerate = useCallback(() => {
+    onRegenerate?.(message.id);
+  }, [message.id, onRegenerate]);
 
   return (
     <div className="message-row">
@@ -144,12 +154,11 @@ export default function MessageBubble({
             ) : (
               <MarkdownRenderer content={message.content} />
             )}
-            {isStreaming && <span className="streaming-cursor" />}
           </div>
         )}
 
         {/* Message Actions */}
-        {!isEditing && !isStreaming && (
+        {!isEditing && (
           <div className="bubble-actions">
             <button
               className={`bubble-action-btn ${copied ? "copied" : ""}`}
@@ -170,7 +179,7 @@ export default function MessageBubble({
             {!isUser && isLastAssistant && (
               <button
                 className="bubble-action-btn"
-                onClick={() => onRegenerate?.(message.id)}
+                onClick={handleRegenerate}
                 title="Regenerate response"
               >
                 <RefreshIcon />
@@ -178,7 +187,7 @@ export default function MessageBubble({
             )}
             <button
               className="bubble-action-btn danger"
-              onClick={() => onDelete?.(message.id)}
+              onClick={handleDelete}
               title="Delete message"
             >
               <TrashIcon />
@@ -202,4 +211,6 @@ export default function MessageBubble({
       </div>
     </div>
   );
-}
+});
+
+export default MessageBubble;
