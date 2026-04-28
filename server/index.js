@@ -1,4 +1,5 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import cors from "cors";
 import crypto from "crypto";
 import { execFile } from "child_process";
@@ -123,8 +124,31 @@ app.use(
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
   })
 );
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.set("trust proxy", false);
+
+// ============================================================
+// Rate limiting
+// Global: 100 requests per minute per IP (generous for normal use)
+// Storage writes: 30 requests per minute per IP (tighter to prevent disk-fill DoS)
+// ============================================================
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+});
+
+const storageWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many storage writes, please try again later" },
+});
+
+app.use(globalLimiter);
 
 // Token endpoint - only serves to localhost
 app.get("/auth/token", (req, res) => {
@@ -165,8 +189,8 @@ app.get("/storage/:key", requireAuth, async (req, res) => {
   }
 });
 
-// PUT /storage/:key - Save data
-app.put("/storage/:key", requireAuth, async (req, res) => {
+// PUT /storage/:key - Save data (rate-limited to prevent disk-fill DoS)
+app.put("/storage/:key", storageWriteLimiter, requireAuth, async (req, res) => {
   try {
     await ensureStorageDir();
     const filePath = getFilePath(req.params.key);
