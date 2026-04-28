@@ -21,7 +21,7 @@ export function useOllamaStream() {
     getLastUserMessage,
   } = useChatStore();
 
-  const { ollamaBaseUrl, defaultModel, systemPrompt, temperature, maxTokens, enableThinking } =
+  const { defaultModel, systemPrompt, temperature, maxTokens, enableThinking } =
     useSettingsStore();
 
   const sendMessage = useCallback(
@@ -30,9 +30,6 @@ export function useOllamaStream() {
       if (!selectedModel) {
         throw new Error("No model selected");
       }
-
-      // Update API base URL if changed
-      ollamaApi.setBaseUrl(ollamaBaseUrl);
 
       // Create conversation if none exists, or update model if changed
       let convId = activeConversationId;
@@ -110,7 +107,6 @@ export function useOllamaStream() {
     },
     [
       activeConversationId,
-      ollamaBaseUrl,
       defaultModel,
       systemPrompt,
       temperature,
@@ -141,9 +137,6 @@ export function useOllamaStream() {
         console.error("No user message to regenerate from");
         return;
       }
-
-      // Update API base URL if changed
-      ollamaApi.setBaseUrl(ollamaBaseUrl);
 
       // Add placeholder for assistant with model info
       addMessage({ role: "assistant", content: "", model: selectedModel });
@@ -202,7 +195,6 @@ export function useOllamaStream() {
       }
     },
     [
-      ollamaBaseUrl,
       defaultModel,
       systemPrompt,
       temperature,

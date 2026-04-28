@@ -1,20 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSettingsStore } from "../../stores/settingsStore.js";
 import { ollamaApi } from "../../services/ollamaApi.js";
 import "./ConnectionStatus.css";
 
 export default function ConnectionStatus() {
   const [status, setStatus] = useState("checking"); // checking, connected, disconnected
   const [retryCount, setRetryCount] = useState(0);
-  const { ollamaBaseUrl } = useSettingsStore();
 
   const checkConnection = useCallback(async () => {
     setStatus("checking");
-    ollamaApi.setBaseUrl(ollamaBaseUrl);
     const isConnected = await ollamaApi.checkConnection();
     setStatus(isConnected ? "connected" : "disconnected");
     return isConnected;
-  }, [ollamaBaseUrl]);
+  }, []);
 
   useEffect(() => {
     checkConnection();

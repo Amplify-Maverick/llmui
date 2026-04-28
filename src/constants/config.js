@@ -1,5 +1,3 @@
-export const DEFAULT_OLLAMA_URL = "http://localhost:11434";
-
 export const TABS = {
   chat: { key: "chat", label: "Chat", color: "#6ee7b7" },
   models: { key: "models", label: "Models", color: "#60a5fa" },
@@ -8,7 +6,6 @@ export const TABS = {
 };
 
 export const DEFAULT_SETTINGS = {
-  ollamaBaseUrl: DEFAULT_OLLAMA_URL,
   defaultModel: "",
   systemPrompt: "",
   temperature: 0.7,

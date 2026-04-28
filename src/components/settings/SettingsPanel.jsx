@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { TextArea, Select } from "../shared/Input.jsx";
@@ -9,17 +9,42 @@ export default function SettingsPanel() {
     systemPrompt,
     temperature,
     maxTokens,
-    ollamaBaseUrl,
+    ollamaUrl,
+    ollamaUrlLoading,
+    ollamaUrlError,
     defaultModel,
     enableThinking,
     updateSetting,
+    updateOllamaUrl,
   } = useSettingsStore();
 
   const { localModels, fetchModels } = useModelsStore();
 
+  // Local state for the URL input so we can edit without saving on every keystroke
+  const [urlInput, setUrlInput] = useState(ollamaUrl);
+  const [urlSaved, setUrlSaved] = useState(false);
+
+  useEffect(() => {
+    setUrlInput(ollamaUrl);
+  }, [ollamaUrl]);
+
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  const handleUrlSave = async () => {
+    if (urlInput === ollamaUrl) return;
+    setUrlSaved(false);
+    try {
+      await updateOllamaUrl(urlInput);
+      setUrlSaved(true);
+      // Refresh models from the new URL
+      fetchModels();
+      setTimeout(() => setUrlSaved(false), 2000);
+    } catch {
+      // Error is set in the store
+    }
+  };
 
   const modelOptions = localModels.map((m) => ({
     value: m.name,
@@ -32,14 +57,38 @@ export default function SettingsPanel() {
 
       <div className="settings-section">
         <label className="settings-label">Ollama Server URL</label>
-        <input
-          className="input"
-          value={ollamaBaseUrl}
-          onChange={(e) => updateSetting("ollamaBaseUrl", e.target.value)}
-          placeholder="http://localhost:11434"
-        />
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleUrlSave()}
+            placeholder="http://localhost:11434"
+            disabled={ollamaUrlLoading}
+          />
+          <button
+            className="btn btn-sm"
+            onClick={handleUrlSave}
+            disabled={ollamaUrlLoading || urlInput === ollamaUrl}
+            style={{ whiteSpace: "nowrap" }}
+          >
+            {ollamaUrlLoading ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {ollamaUrlError && (
+          <p className="settings-description" style={{ color: "#f87171" }}>
+            Error: {ollamaUrlError}
+          </p>
+        )}
+        {urlSaved && (
+          <p className="settings-description" style={{ color: "#6ee7b7" }}>
+            Ollama URL updated successfully.
+          </p>
+        )}
         <p className="settings-description">
-          The URL where your Ollama server is running.
+          The URL where your Ollama server is running. This is configured on the
+          server and all API calls are proxied through the authenticated backend.
         </p>
       </div>
 

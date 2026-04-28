@@ -1,11 +1,5 @@
 import { create } from "zustand";
 import { ollamaApi } from "../services/ollamaApi.js";
-import { useSettingsStore } from "./settingsStore.js";
-
-const syncApiUrl = () => {
-  const { ollamaBaseUrl } = useSettingsStore.getState();
-  ollamaApi.setBaseUrl(ollamaBaseUrl);
-};
 
 export const useModelsStore = create((set, get) => ({
   localModels: [],
@@ -16,7 +10,6 @@ export const useModelsStore = create((set, get) => ({
   pullProgress: null,
 
   fetchModels: async () => {
-    syncApiUrl();
     set({ isLoading: true, error: null });
     try {
       const data = await ollamaApi.listModels();
@@ -27,7 +20,6 @@ export const useModelsStore = create((set, get) => ({
   },
 
   fetchRunningModels: async () => {
-    syncApiUrl();
     try {
       const data = await ollamaApi.listRunningModels();
       set({ runningModels: data.models || [] });
@@ -37,7 +29,6 @@ export const useModelsStore = create((set, get) => ({
   },
 
   pullModel: async (name) => {
-    syncApiUrl();
     set({ pullProgress: { model: name, status: "starting", progress: 0 } });
 
     try {
@@ -69,7 +60,6 @@ export const useModelsStore = create((set, get) => ({
   },
 
   deleteModel: async (name) => {
-    syncApiUrl();
     try {
       await ollamaApi.deleteModel(name);
       await get().fetchModels();
@@ -84,7 +74,6 @@ export const useModelsStore = create((set, get) => ({
     const { modelInfoCache } = get();
     if (modelInfoCache[modelName]) return modelInfoCache[modelName];
 
-    syncApiUrl();
     try {
       const info = await ollamaApi.showModel(modelName);
       // Extract context window from model parameters
