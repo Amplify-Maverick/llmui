@@ -99,9 +99,9 @@ export default function ConversationHistory() {
     updateConversationTags(tagsModal, newTags);
   };
 
-  const handleExport = (format) => {
+  const handleExport = async (format) => {
     if (!exportModal) return;
-    const content = exportConversation(exportModal, format);
+    const content = await exportConversation(exportModal, format);
     if (!content) return;
 
     const conv = conversations.find((c) => c.id === exportModal);

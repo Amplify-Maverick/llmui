@@ -1,53 +1,122 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { STORAGE_KEYS } from "../constants/config.js";
-import { loadFromStorage, saveToStorage } from "../utils/storage.js";
+import {
+  loadFromStorage,
+  saveToStorage,
+  removeFromStorage,
+  debouncedSaveToStorage,
+  cancelDebouncedSave,
+  flushDebouncedSave,
+} from "../utils/storage.js";
+
+// Strip messages from a conversation object, keep only sidebar metadata
+function toMeta(conv) {
+  const { messages, ...meta } = conv;
+  return { ...meta, messageCount: messages?.length ?? meta.messageCount ?? 0 };
+}
 
 export const useChatStore = create((set, get) => ({
-  conversations: [],
+  conversations: [], // metadata only — no .messages on these objects
   activeConversationId: null,
-  messages: [],
+  messages: [], // messages for the active conversation
   isStreaming: false,
   streamingContent: "",
   streamingTokenCount: 0,
   streamingStartTime: null,
   isLoading: true,
 
+  // ================================================================
+  // Persistence helpers (debounced ~500ms)
+  // ================================================================
+  _saveIndex: () => {
+    const { conversations } = get();
+    debouncedSaveToStorage(STORAGE_KEYS.convIndex, conversations);
+  },
+
+  _saveActiveMessages: () => {
+    const { activeConversationId, messages } = get();
+    if (!activeConversationId) return;
+    debouncedSaveToStorage(
+      STORAGE_KEYS.convMessages(activeConversationId),
+      messages
+    );
+  },
+
+  _saveCurrentConversation: () => {
+    get()._saveIndex();
+    get()._saveActiveMessages();
+  },
+
+  // ================================================================
+  // Load (with automatic migration from legacy blob)
+  // ================================================================
   loadConversations: async () => {
-    const saved = await loadFromStorage(STORAGE_KEYS.conversations);
-    const activeId = await loadFromStorage(STORAGE_KEYS.activeConversation);
-    if (saved) {
-      set({ conversations: saved, isLoading: false });
-      if (activeId && saved.find((c) => c.id === activeId)) {
-        get().setActiveConversation(activeId);
+    // Try new split format first
+    let index = await loadFromStorage(STORAGE_KEYS.convIndex);
+
+    if (!index) {
+      // Check for legacy single-blob format and migrate
+      const legacy = await loadFromStorage(STORAGE_KEYS.conversations);
+      if (legacy && Array.isArray(legacy) && legacy.length > 0) {
+        console.log(
+          `[LLMUI] Migrating ${legacy.length} conversations to split storage…`
+        );
+        // Write each conversation's messages to its own key
+        await Promise.all(
+          legacy.map((conv) =>
+            saveToStorage(
+              STORAGE_KEYS.convMessages(conv.id),
+              conv.messages || []
+            )
+          )
+        );
+        // Build and persist the metadata index
+        index = legacy.map(toMeta);
+        await saveToStorage(STORAGE_KEYS.convIndex, index);
+        // Remove the legacy blob
+        await removeFromStorage(STORAGE_KEYS.conversations);
+        console.log("[LLMUI] Migration complete.");
+      }
+    }
+
+    if (index && Array.isArray(index)) {
+      set({ conversations: index, isLoading: false });
+
+      // Restore the active conversation
+      const activeId = await loadFromStorage(STORAGE_KEYS.activeConversation);
+      if (activeId && index.find((c) => c.id === activeId)) {
+        const msgs = await loadFromStorage(
+          STORAGE_KEYS.convMessages(activeId)
+        );
+        set({ activeConversationId: activeId, messages: msgs || [] });
       }
     } else {
       set({ isLoading: false });
     }
   },
 
-  saveConversations: async () => {
-    const { conversations } = get();
-    await saveToStorage(STORAGE_KEYS.conversations, conversations);
-  },
-
+  // ================================================================
+  // Conversation CRUD
+  // ================================================================
   createConversation: (model) => {
     const id = nanoid();
-    const conversation = {
+    const meta = {
       id,
       title: "New Chat",
-      messages: [],
       model,
       tags: [],
+      messageCount: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
     set((state) => ({
-      conversations: [conversation, ...state.conversations],
+      conversations: [meta, ...state.conversations],
       activeConversationId: id,
       messages: [],
     }));
-    get().saveConversations();
+    get()._saveIndex();
+    saveToStorage(STORAGE_KEYS.convMessages(id), []);
     saveToStorage(STORAGE_KEYS.activeConversation, id);
     return id;
   },
@@ -61,7 +130,7 @@ export const useChatStore = create((set, get) => ({
       );
       return { conversations };
     });
-    get().saveConversations();
+    get()._saveIndex();
   },
 
   renameConversation: (id, title) => {
@@ -70,7 +139,7 @@ export const useChatStore = create((set, get) => ({
         c.id === id ? { ...c, title, updatedAt: Date.now() } : c
       ),
     }));
-    get().saveConversations();
+    get()._saveIndex();
   },
 
   updateConversationTags: (id, tags) => {
@@ -79,40 +148,71 @@ export const useChatStore = create((set, get) => ({
         c.id === id ? { ...c, tags, updatedAt: Date.now() } : c
       ),
     }));
-    get().saveConversations();
+    get()._saveIndex();
   },
 
-  setActiveConversation: (id) => {
-    const { conversations } = get();
-    const conversation = conversations.find((c) => c.id === id);
-    if (conversation) {
-      set({
-        activeConversationId: id,
-        messages: conversation.messages || [],
-      });
-      saveToStorage(STORAGE_KEYS.activeConversation, id);
+  setActiveConversation: async (id) => {
+    const { conversations, activeConversationId } = get();
+    if (id === activeConversationId) return;
+    if (!conversations.find((c) => c.id === id)) return;
+
+    // Flush any pending debounced saves for the conversation we're leaving
+    if (activeConversationId) {
+      flushDebouncedSave(STORAGE_KEYS.convMessages(activeConversationId));
+      flushDebouncedSave(STORAGE_KEYS.convIndex);
+    }
+
+    // Immediately update the active ID; clear messages while loading
+    set({ activeConversationId: id, messages: [] });
+    saveToStorage(STORAGE_KEYS.activeConversation, id);
+
+    // Load messages for the target conversation
+    const msgs = await loadFromStorage(STORAGE_KEYS.convMessages(id));
+    // Guard against rapid switching — only apply if still on this conversation
+    if (get().activeConversationId === id) {
+      set({ messages: msgs || [] });
     }
   },
 
-  deleteConversation: (id) => {
+  deleteConversation: async (id) => {
+    // Cancel any pending debounced save for the doomed conversation
+    cancelDebouncedSave(STORAGE_KEYS.convMessages(id));
+
+    const wasActive = get().activeConversationId === id;
+
     set((state) => {
       const newConversations = state.conversations.filter((c) => c.id !== id);
-      const newActiveId =
-        state.activeConversationId === id
-          ? newConversations[0]?.id || null
-          : state.activeConversationId;
+      const newActiveId = wasActive
+        ? newConversations[0]?.id || null
+        : state.activeConversationId;
       return {
         conversations: newConversations,
         activeConversationId: newActiveId,
-        messages:
-          newActiveId === state.activeConversationId
-            ? state.messages
-            : newConversations.find((c) => c.id === newActiveId)?.messages || [],
+        messages: wasActive ? [] : state.messages,
       };
     });
-    get().saveConversations();
+
+    // Immediate (non-debounced) saves — deletion is destructive
+    removeFromStorage(STORAGE_KEYS.convMessages(id));
+    cancelDebouncedSave(STORAGE_KEYS.convIndex);
+    await saveToStorage(STORAGE_KEYS.convIndex, get().conversations);
+
+    // If we switched to a new active conversation, load its messages
+    const { activeConversationId } = get();
+    if (wasActive && activeConversationId) {
+      const msgs = await loadFromStorage(
+        STORAGE_KEYS.convMessages(activeConversationId)
+      );
+      if (get().activeConversationId === activeConversationId) {
+        set({ messages: msgs || [] });
+      }
+      saveToStorage(STORAGE_KEYS.activeConversation, activeConversationId);
+    }
   },
 
+  // ================================================================
+  // Messages
+  // ================================================================
   addMessage: (message) => {
     const id = nanoid();
     const newMessage = { id, ...message, timestamp: Date.now() };
@@ -123,18 +223,19 @@ export const useChatStore = create((set, get) => ({
         c.id === state.activeConversationId
           ? {
               ...c,
-              messages: newMessages,
               title:
                 c.title === "New Chat" && message.role === "user"
-                  ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
+                  ? message.content.slice(0, 30) +
+                    (message.content.length > 30 ? "..." : "")
                   : c.title,
+              messageCount: newMessages.length,
               updatedAt: Date.now(),
             }
           : c
       );
       return { messages: newMessages, conversations };
     });
-    get().saveConversations();
+    get()._saveCurrentConversation();
     return id;
   },
 
@@ -145,11 +246,13 @@ export const useChatStore = create((set, get) => ({
       );
       const conversations = state.conversations.map((c) =>
         c.id === state.activeConversationId
-          ? { ...c, messages: newMessages, updatedAt: Date.now() }
+          ? { ...c, updatedAt: Date.now() }
           : c
       );
       return { messages: newMessages, conversations };
     });
+    // No save here — called rapidly during streaming.
+    // finalizeStream triggers the save after the stream completes.
   },
 
   deleteMessage: (id) => {
@@ -157,12 +260,12 @@ export const useChatStore = create((set, get) => ({
       const newMessages = state.messages.filter((m) => m.id !== id);
       const conversations = state.conversations.map((c) =>
         c.id === state.activeConversationId
-          ? { ...c, messages: newMessages, updatedAt: Date.now() }
+          ? { ...c, messageCount: newMessages.length, updatedAt: Date.now() }
           : c
       );
       return { messages: newMessages, conversations };
     });
-    get().saveConversations();
+    get()._saveCurrentConversation();
   },
 
   // Edit a user message and remove all subsequent messages (for regeneration)
@@ -171,17 +274,23 @@ export const useChatStore = create((set, get) => ({
       const messageIndex = state.messages.findIndex((m) => m.id === id);
       if (messageIndex === -1) return state;
 
-      const editedMessage = { ...state.messages[messageIndex], content: newContent };
-      const newMessages = [...state.messages.slice(0, messageIndex), editedMessage];
+      const editedMessage = {
+        ...state.messages[messageIndex],
+        content: newContent,
+      };
+      const newMessages = [
+        ...state.messages.slice(0, messageIndex),
+        editedMessage,
+      ];
 
       const conversations = state.conversations.map((c) =>
         c.id === state.activeConversationId
-          ? { ...c, messages: newMessages, updatedAt: Date.now() }
+          ? { ...c, messageCount: newMessages.length, updatedAt: Date.now() }
           : c
       );
       return { messages: newMessages, conversations };
     });
-    get().saveConversations();
+    get()._saveCurrentConversation();
   },
 
   // Get the last user message for regeneration
@@ -203,16 +312,19 @@ export const useChatStore = create((set, get) => ({
         const newMessages = state.messages.slice(0, lastIndex);
         const conversations = state.conversations.map((c) =>
           c.id === state.activeConversationId
-            ? { ...c, messages: newMessages, updatedAt: Date.now() }
+            ? { ...c, messageCount: newMessages.length, updatedAt: Date.now() }
             : c
         );
         return { messages: newMessages, conversations };
       }
       return state;
     });
-    get().saveConversations();
+    get()._saveCurrentConversation();
   },
 
+  // ================================================================
+  // Streaming
+  // ================================================================
   setStreaming: (isStreaming, content = "") => {
     set({
       isStreaming,
@@ -230,7 +342,12 @@ export const useChatStore = create((set, get) => ({
   },
 
   finalizeStream: (extras = {}) => {
-    const { streamingContent, messages, streamingTokenCount, streamingStartTime } = get();
+    const {
+      streamingContent,
+      messages,
+      streamingTokenCount,
+      streamingStartTime,
+    } = get();
 
     // Calculate tokens per second
     let tokensPerSec = null;
@@ -244,7 +361,10 @@ export const useChatStore = create((set, get) => ({
     if (messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === "assistant") {
-        get().updateMessage(lastMessage.id, streamingContent, { ...extras, tokensPerSec });
+        get().updateMessage(lastMessage.id, streamingContent, {
+          ...extras,
+          tokensPerSec,
+        });
       }
     }
     set({
@@ -253,27 +373,42 @@ export const useChatStore = create((set, get) => ({
       streamingTokenCount: 0,
       streamingStartTime: null,
     });
-    get().saveConversations();
+    get()._saveCurrentConversation();
   },
 
-  // Export conversation as JSON or Markdown
-  exportConversation: (id, format = "json") => {
-    const { conversations } = get();
+  // ================================================================
+  // Export — loads messages on demand for non-active conversations
+  // ================================================================
+  exportConversation: async (id, format = "json") => {
+    const {
+      conversations,
+      activeConversationId,
+      messages: activeMessages,
+    } = get();
     const conversation = conversations.find((c) => c.id === id);
     if (!conversation) return null;
 
+    // Use in-memory messages if this is the active conversation,
+    // otherwise load from storage on demand
+    const msgs =
+      id === activeConversationId
+        ? activeMessages
+        : (await loadFromStorage(STORAGE_KEYS.convMessages(id))) || [];
+
+    const fullConv = { ...conversation, messages: msgs };
+
     if (format === "json") {
-      return JSON.stringify(conversation, null, 2);
+      return JSON.stringify(fullConv, null, 2);
     }
 
     if (format === "markdown") {
-      let md = `# ${conversation.title}\n\n`;
-      md += `**Model:** ${conversation.model || "Unknown"}\n`;
-      md += `**Created:** ${new Date(conversation.createdAt).toLocaleString()}\n`;
-      md += `**Tags:** ${conversation.tags?.join(", ") || "None"}\n\n`;
+      let md = `# ${fullConv.title}\n\n`;
+      md += `**Model:** ${fullConv.model || "Unknown"}\n`;
+      md += `**Created:** ${new Date(fullConv.createdAt).toLocaleString()}\n`;
+      md += `**Tags:** ${fullConv.tags?.join(", ") || "None"}\n\n`;
       md += `---\n\n`;
 
-      for (const msg of conversation.messages) {
+      for (const msg of fullConv.messages) {
         const role = msg.role === "user" ? "**You**" : "**Assistant**";
         md += `${role}\n\n${msg.content}\n\n---\n\n`;
       }

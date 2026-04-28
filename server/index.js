@@ -134,7 +134,7 @@ app.set("trust proxy", false);
 // ============================================================
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 200, // bumped from 100: split storage means more small reads/writes
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
@@ -142,7 +142,7 @@ const globalLimiter = rateLimit({
 
 const storageWriteLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30,
+  max: 60, // bumped from 30: split storage writes index + conversation per save
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many storage writes, please try again later" },

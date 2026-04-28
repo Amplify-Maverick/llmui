@@ -77,7 +77,7 @@ export default function ConversationItem({
       <div className="conv-item-meta">
         <span>{formatDate(conversation.updatedAt)}</span>
         <span className="conv-item-count">
-          {conversation.messages?.length || 0} messages
+          {conversation.messageCount ?? 0} messages
         </span>
       </div>
     </div>

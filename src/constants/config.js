@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS = {
 
 export const STORAGE_KEYS = {
   settings: "llmui_settings",
-  conversations: "llmui_conversations",
+  conversations: "llmui_conversations", // legacy — kept for migration detection
+  convIndex: "llmui_conv_index",
+  convMessages: (id) => `llmui_conv_${id}`,
   activeConversation: "llmui_active_conversation",
 };

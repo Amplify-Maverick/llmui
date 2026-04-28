@@ -92,6 +92,7 @@ class OllamaAPI {
           num_predict: options.maxTokens,
         },
       }),
+      signal: options.signal,
     });
 
     if (!response.ok) {

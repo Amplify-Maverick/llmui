@@ -76,7 +76,7 @@ export function useOllamaStream() {
         for await (const chunk of ollamaApi.chatStream(
           selectedModel,
           chatMessages,
-          { temperature, maxTokens, enableThinking }
+          { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
         )) {
           if (chunk.message?.content) {
             appendStreamContent(chunk.message.content);
@@ -166,7 +166,7 @@ export function useOllamaStream() {
         for await (const chunk of ollamaApi.chatStream(
           selectedModel,
           chatMessages,
-          { temperature, maxTokens, enableThinking }
+          { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
         )) {
           if (chunk.message?.content) {
             appendStreamContent(chunk.message.content);
