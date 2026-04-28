@@ -73,6 +73,21 @@ app.delete("/storage/:key", async (req, res) => {
   }
 });
 
+// Root route
+app.get("/", (req, res) => {
+  res.json({
+    name: "LLMUI Storage Server",
+    status: "running",
+    storageDir: STORAGE_DIR,
+    endpoints: {
+      "GET /storage/:key": "Load data",
+      "PUT /storage/:key": "Save data",
+      "DELETE /storage/:key": "Remove data",
+      "GET /health": "Health check"
+    }
+  });
+});
+
 // Health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", storageDir: STORAGE_DIR });

@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore.js";
-import { TextArea } from "../shared/Input.jsx";
+import { useModelsStore } from "../../stores/modelsStore.js";
+import { TextArea, Select } from "../shared/Input.jsx";
 import "./SettingsPanel.css";
 
 export default function SettingsPanel() {
@@ -8,9 +10,21 @@ export default function SettingsPanel() {
     temperature,
     maxTokens,
     ollamaBaseUrl,
+    defaultModel,
     enableThinking,
     updateSetting,
   } = useSettingsStore();
+
+  const { localModels, fetchModels } = useModelsStore();
+
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  const modelOptions = localModels.map((m) => ({
+    value: m.name,
+    label: m.name,
+  }));
 
   return (
     <div className="settings">
@@ -26,6 +40,19 @@ export default function SettingsPanel() {
         />
         <p className="settings-description">
           The URL where your Ollama server is running.
+        </p>
+      </div>
+
+      <div className="settings-section">
+        <label className="settings-label">Default Model</label>
+        <Select
+          value={defaultModel}
+          onChange={(e) => updateSetting("defaultModel", e.target.value)}
+          options={modelOptions}
+          placeholder="Select a default model"
+        />
+        <p className="settings-description">
+          The model to use for new conversations.
         </p>
       </div>
 
