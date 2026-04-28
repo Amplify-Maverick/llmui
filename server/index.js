@@ -39,16 +39,46 @@ function isLocalhost(req) {
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing authorization header" });
+    return res.status(401).json({ error: "Unauthorized" });
   }
   const token = authHeader.slice(7);
-  if (token !== authToken) {
-    return res.status(403).json({ error: "Invalid token" });
+
+  // Use timing-safe comparison to prevent timing attacks
+  // timingSafeEqual throws on length mismatch, so check length first
+  const tokenBuffer = Buffer.from(token);
+  const authTokenBuffer = Buffer.from(authToken);
+  if (
+    tokenBuffer.length !== authTokenBuffer.length ||
+    !crypto.timingSafeEqual(tokenBuffer, authTokenBuffer)
+  ) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
   next();
 }
 
-app.use(cors());
+// CORS configuration with allowlist
+// Default allows localhost:3000, additional origins can be added via LLMUI_ALLOWED_ORIGINS env var
+const defaultOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"];
+const envOrigins = process.env.LLMUI_ALLOWED_ORIGINS
+  ? process.env.LLMUI_ALLOWED_ORIGINS.split(",").map((s) => s.trim())
+  : [];
+const allowedOrigins = [...defaultOrigins, ...envOrigins];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g., curl, mobile apps, same-origin)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
+  })
+);
 app.use(express.json({ limit: "50mb" }));
 app.set("trust proxy", false);
 
@@ -120,26 +150,17 @@ app.delete("/storage/:key", requireAuth, async (req, res) => {
   }
 });
 
-// Root route
+// Root route - no sensitive info exposed
 app.get("/", (req, res) => {
   res.json({
     name: "LLMUI Storage Server",
     status: "running",
-    storageDir: STORAGE_DIR,
-    endpoints: {
-      "GET /storage/:key": "Load data",
-      "PUT /storage/:key": "Save data",
-      "DELETE /storage/:key": "Remove data",
-      "POST /ollama/pull": "Pull model (authenticated)",
-      "DELETE /ollama/delete": "Delete model (authenticated)",
-      "GET /health": "Health check",
-    },
   });
 });
 
-// Health check
+// Health check - unauthenticated, used by start script
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", storageDir: STORAGE_DIR });
+  res.json({ status: "ok" });
 });
 
 // Authenticated Ollama proxy endpoints for dangerous operations

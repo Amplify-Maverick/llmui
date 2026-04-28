@@ -1,5 +1,8 @@
 const STORAGE_API = "http://localhost:3001/storage";
-const AUTH_API = "http://localhost:3001/auth/token";
+
+// Token is fetched from Vite plugin endpoint (works for both localhost and LAN clients)
+// See config/vite-token-plugin.js for details on token delivery approach
+const TOKEN_API = "/api/llmui-token";
 
 let authToken = null;
 let tokenPromise = null;
@@ -8,9 +11,15 @@ async function getToken() {
   if (authToken) return authToken;
   if (tokenPromise) return tokenPromise;
 
-  tokenPromise = fetch(AUTH_API)
+  tokenPromise = fetch(TOKEN_API)
     .then((res) => {
-      if (!res.ok) throw new Error("Failed to fetch auth token");
+      if (!res.ok) {
+        throw new Error(
+          `Failed to fetch auth token (${res.status}). ` +
+            "Ensure the storage server is running (node server/index.js) " +
+            "and the Vite dev server is active."
+        );
+      }
       return res.json();
     })
     .then((data) => {
@@ -18,7 +27,12 @@ async function getToken() {
       return authToken;
     })
     .catch((error) => {
-      console.error("Error fetching auth token:", error);
+      console.error(
+        "[LLMUI] Auth token fetch failed:",
+        error.message,
+        "\nThis typically means the storage server hasn't started yet.",
+        "\nRun: node server/index.js"
+      );
       tokenPromise = null;
       throw error;
     });

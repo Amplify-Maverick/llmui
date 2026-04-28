@@ -100,6 +100,20 @@ Most settings can be changed in the Settings tab:
 
 Conversations and settings are stored in `~/.llmui/` as JSON files. This persists your data independently of the browser.
 
+## Authentication & LAN Access
+
+The storage server uses bearer token authentication to protect your data. A token is automatically generated on first run and stored at `~/.llmui/token` (mode 0600).
+
+**LAN Access**: To access LLMUI from other devices on your network, add your server's LAN IP to the allowed origins:
+
+```bash
+LLMUI_ALLOWED_ORIGINS="http://192.168.1.100:3000" npm run dev
+```
+
+Multiple origins can be comma-separated.
+
+**Production Deployment Note**: The current token delivery mechanism (via Vite plugin at `/api/llmui-token`) only works during development. For production deployment after `vite build`, you'll need to serve `dist/` from the Express server and have it inject the token into `index.html` at serve time, or use a reverse proxy that handles token injection.
+
 ## Keyboard shortcuts
 
 Press `Ctrl+/` (or `Cmd+/` on Mac) to see all shortcuts.
