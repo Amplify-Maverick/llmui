@@ -114,10 +114,10 @@ export const useChatStore = create((set, get) => ({
     return id;
   },
 
-  updateMessage: (id, content) => {
+  updateMessage: (id, content, extras = {}) => {
     set((state) => {
       const newMessages = state.messages.map((m) =>
-        m.id === id ? { ...m, content } : m
+        m.id === id ? { ...m, content, ...extras } : m
       );
       const conversations = state.conversations.map((c) =>
         c.id === state.activeConversationId
@@ -138,12 +138,12 @@ export const useChatStore = create((set, get) => ({
     }));
   },
 
-  finalizeStream: () => {
+  finalizeStream: (extras = {}) => {
     const { streamingContent, messages } = get();
     if (messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === "assistant") {
-        get().updateMessage(lastMessage.id, streamingContent);
+        get().updateMessage(lastMessage.id, streamingContent, extras);
       }
     }
     set({ isStreaming: false, streamingContent: "" });

@@ -43,8 +43,8 @@ export function useOllamaStream() {
       // Add user message
       addMessage({ role: "user", content });
 
-      // Add placeholder for assistant
-      addMessage({ role: "assistant", content: "" });
+      // Add placeholder for assistant with model info
+      addMessage({ role: "assistant", content: "", model: selectedModel });
 
       setStreaming(true, "");
 
@@ -62,6 +62,8 @@ export function useOllamaStream() {
 
       abortControllerRef.current = new AbortController();
 
+      const startTime = Date.now();
+
       try {
         for await (const chunk of ollamaApi.chatStream(
           selectedModel,
@@ -77,7 +79,8 @@ export function useOllamaStream() {
           }
         }
 
-        finalizeStream();
+        const duration = (Date.now() - startTime) / 1000;
+        finalizeStream({ duration });
       } catch (error) {
         if (error.name !== "AbortError") {
           console.error("Streaming error:", error);

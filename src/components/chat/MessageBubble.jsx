@@ -1,5 +1,14 @@
 import "./MessageBubble.css";
 
+function formatDuration(seconds) {
+  if (!seconds) return null;
+  if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = (seconds % 60).toFixed(0);
+  return `${mins}m ${secs}s`;
+}
+
 function formatContent(content) {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
@@ -34,6 +43,12 @@ export default function MessageBubble({ message, isStreaming = false }) {
       <div className={`bubble ${isUser ? "bubble-user" : "bubble-assistant"}`}>
         <div className={`bubble-role ${isUser ? "bubble-role-user" : "bubble-role-assistant"}`}>
           {isUser ? "You" : "Assistant"}
+          {!isUser && message.model && (
+            <span className="bubble-model">{message.model}</span>
+          )}
+          {!isUser && message.duration && (
+            <span className="bubble-duration">{formatDuration(message.duration)}</span>
+          )}
         </div>
         <div className="bubble-content">
           {formatContent(message.content)}
