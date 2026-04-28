@@ -1,0 +1,233 @@
+.hw-modal-content {
+  max-width: 550px;
+}
+
+/* ── Detected GPU Card ───────────────────────────────────── */
+.hw-detected-card {
+  background: linear-gradient(135deg, rgba(110, 231, 183, 0.1) 0%, rgba(96, 165, 250, 0.1) 100%);
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.hw-gpu-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+}
+
+.hw-vram-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+
+.hw-vram-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.hw-vram-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.hw-tier-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  margin-left: 12px;
+}
+
+.hw-tier-description {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.hw-recommended {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.hw-recommended-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hw-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Not Detected ────────────────────────────────────────── */
+.hw-not-detected {
+  background: var(--color-danger-bg);
+  border: 1px solid rgba(255, 107, 107, 0.2);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.hw-not-detected-title {
+  font-size: 16px;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+}
+
+.hw-not-detected-error {
+  font-size: 16px;
+  color: var(--color-danger);
+  margin-bottom: 8px;
+}
+
+.hw-not-detected-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Collapsible Sections ────────────────────────────────── */
+.hw-collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 8px;
+}
+
+.hw-collapsible-title {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.hw-collapsible-icon {
+  color: var(--color-text-secondary);
+  font-size: 18px;
+}
+
+.hw-collapsible-body {
+  padding-bottom: 16px;
+}
+
+/* ── Code Blocks ─────────────────────────────────────────── */
+.hw-text {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 12px 0;
+}
+
+.hw-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.hw-code-block {
+  background: var(--color-code-bg);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-primary);
+  margin-bottom: 8px;
+  overflow-x: auto;
+  cursor: pointer;
+}
+
+.hw-code-block:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* ── Tier Cards ──────────────────────────────────────────── */
+.hw-tier-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-separator);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.hw-tier-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.hw-tier-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hw-vram-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.hw-tier-gpus {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.hw-tier-notes {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* ── Section & Links ─────────────────────────────────────── */
+.hw-section {
+  margin-bottom: 24px;
+}
+
+.hw-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hw-link {
+  color: var(--color-secondary);
+  text-decoration: none;
+}
+
+.hw-link:hover {
+  text-decoration: underline;
+}
+
+.hw-tip-box {
+  background: rgba(252, 211, 77, 0.1);
+  border: 1px solid rgba(252, 211, 77, 0.2);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--color-warning);
+}

@@ -1,0 +1,70 @@
+.gpu-mini {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  overflow-x: auto;
+}
+
+.gpu-mini-label {
+  color: var(--color-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gpu-mini-metric {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.gpu-mini-metric-label {
+  color: var(--color-text-muted);
+}
+
+.gpu-mini-bar-track {
+  width: 48px;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.gpu-mini-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.gpu-mini-live {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: gpuPulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.gpu-mini-separator {
+  color: var(--color-border-light);
+}
+
+.gpu-mini-error {
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-align: center;
+}

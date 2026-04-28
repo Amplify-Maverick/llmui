@@ -1,22 +1,4 @@
-import { useState } from "react";
-
-const baseStyle = {
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: "8px",
-  padding: "10px 12px",
-  color: "#e8e8f0",
-  fontSize: "14px",
-  fontFamily: "'DM Mono', monospace",
-  outline: "none",
-  width: "100%",
-  transition: "border-color 0.2s ease, background 0.2s ease",
-};
-
-const focusStyle = {
-  borderColor: "rgba(110, 231, 183, 0.5)",
-  background: "rgba(255,255,255,0.08)",
-};
+import "./Input.css";
 
 export default function Input({
   type = "text",
@@ -24,19 +6,10 @@ export default function Input({
   onChange,
   placeholder,
   disabled = false,
+  className = "",
   style = {},
   ...props
 }) {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const computedStyle = {
-    ...baseStyle,
-    ...(isFocused ? focusStyle : {}),
-    opacity: disabled ? 0.5 : 1,
-    cursor: disabled ? "not-allowed" : "text",
-    ...style,
-  };
-
   return (
     <input
       type={type}
@@ -44,9 +17,8 @@ export default function Input({
       onChange={onChange}
       placeholder={placeholder}
       disabled={disabled}
-      style={computedStyle}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
+      className={`input ${className}`}
+      style={style}
       {...props}
     />
   );
@@ -58,21 +30,10 @@ export function TextArea({
   placeholder,
   disabled = false,
   rows = 4,
+  className = "",
   style = {},
   ...props
 }) {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const computedStyle = {
-    ...baseStyle,
-    ...(isFocused ? focusStyle : {}),
-    opacity: disabled ? 0.5 : 1,
-    cursor: disabled ? "not-allowed" : "text",
-    resize: "vertical",
-    minHeight: "80px",
-    ...style,
-  };
-
   return (
     <textarea
       value={value}
@@ -80,18 +41,12 @@ export function TextArea({
       placeholder={placeholder}
       disabled={disabled}
       rows={rows}
-      style={computedStyle}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
+      className={`textarea ${className}`}
+      style={style}
       {...props}
     />
   );
 }
-
-const optionStyle = {
-  background: "#1a1a24",
-  color: "#e8e8f0",
-};
 
 export function Select({
   value,
@@ -99,36 +54,26 @@ export function Select({
   options = [],
   placeholder,
   disabled = false,
+  className = "",
   style = {},
   ...props
 }) {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const computedStyle = {
-    ...baseStyle,
-    ...(isFocused ? focusStyle : {}),
-    opacity: disabled ? 0.5 : 1,
-    cursor: disabled ? "not-allowed" : "pointer",
-    ...style,
-  };
-
   return (
     <select
       value={value}
       onChange={onChange}
       disabled={disabled}
-      style={computedStyle}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
+      className={`select ${className}`}
+      style={style}
       {...props}
     >
       {placeholder && (
-        <option value="" disabled style={optionStyle}>
+        <option value="" disabled>
           {placeholder}
         </option>
       )}
       {options.map((opt) => (
-        <option key={opt.value} value={opt.value} style={optionStyle}>
+        <option key={opt.value} value={opt.value}>
           {opt.label}
         </option>
       ))}

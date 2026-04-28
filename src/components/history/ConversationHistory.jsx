@@ -5,41 +5,7 @@ import ConversationItem from "./ConversationItem.jsx";
 import Button from "../shared/Button.jsx";
 import Input from "../shared/Input.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
-
-const containerStyle = {
-  display: "flex",
-  flexDirection: "column",
-  height: "100%",
-  background: "rgba(255,255,255,0.02)",
-  borderRadius: "12px",
-  border: "1px solid rgba(255,255,255,0.06)",
-  overflow: "hidden",
-};
-
-const headerStyle = {
-  padding: "16px",
-  borderBottom: "1px solid rgba(255,255,255,0.06)",
-};
-
-const titleStyle = {
-  fontSize: "16px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-  margin: "0 0 12px 0",
-};
-
-const listStyle = {
-  flex: 1,
-  overflow: "auto",
-  padding: "12px",
-};
-
-const emptyStyle = {
-  textAlign: "center",
-  color: "#8a8a9a",
-  padding: "40px 20px",
-  fontSize: "14px",
-};
+import "./ConversationHistory.css";
 
 export default function ConversationHistory() {
   const {
@@ -71,9 +37,9 @@ export default function ConversationHistory() {
   };
 
   return (
-    <div style={containerStyle}>
-      <div style={headerStyle}>
-        <h3 style={titleStyle}>Conversations</h3>
+    <div className="history-container">
+      <div className="history-header">
+        <h3 className="history-title">Conversations</h3>
         <Button
           onClick={handleNewChat}
           style={{ width: "100%", marginBottom: "12px" }}
@@ -87,9 +53,9 @@ export default function ConversationHistory() {
         />
       </div>
 
-      <div style={listStyle}>
+      <div className="history-list">
         {filteredConversations.length === 0 ? (
-          <div style={emptyStyle}>
+          <div className="history-empty">
             {search ? "No matching conversations" : "No conversations yet"}
           </div>
         ) : (

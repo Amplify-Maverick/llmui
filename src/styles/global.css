@@ -1,0 +1,123 @@
+/* ── Design Tokens ────────────────────────────────────────── */
+:root {
+  --color-primary: #6ee7b7;
+  --color-secondary: #60a5fa;
+  --color-warning: #fcd34d;
+  --color-danger: #ff6b6b;
+  --color-purple: #c4b5fd;
+  --color-orange: #fb923c;
+
+  --color-text-primary: #e8e8f0;
+  --color-text-secondary: #8a8a9a;
+  --color-text-muted: #6a6a7a;
+
+  --color-surface: rgba(255, 255, 255, 0.03);
+  --color-surface-hover: rgba(255, 255, 255, 0.05);
+  --color-surface-input: rgba(255, 255, 255, 0.06);
+  --color-surface-input-hover: rgba(255, 255, 255, 0.08);
+
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-light: rgba(255, 255, 255, 0.1);
+  --color-border-separator: rgba(255, 255, 255, 0.08);
+
+  --color-primary-bg: rgba(110, 231, 183, 0.15);
+  --color-primary-bg-hover: rgba(110, 231, 183, 0.25);
+  --color-primary-border: rgba(110, 231, 183, 0.3);
+  --color-primary-border-hover: rgba(110, 231, 183, 0.5);
+
+  --color-secondary-bg: rgba(96, 165, 250, 0.15);
+  --color-secondary-bg-hover: rgba(96, 165, 250, 0.25);
+  --color-secondary-border: rgba(96, 165, 250, 0.3);
+  --color-secondary-border-hover: rgba(96, 165, 250, 0.5);
+
+  --color-danger-bg: rgba(255, 107, 107, 0.15);
+  --color-danger-bg-hover: rgba(255, 107, 107, 0.25);
+  --color-danger-border: rgba(255, 107, 107, 0.3);
+  --color-danger-border-hover: rgba(255, 107, 107, 0.5);
+
+  --color-ghost-bg: transparent;
+  --color-ghost-bg-hover: rgba(255, 255, 255, 0.05);
+  --color-ghost-border: rgba(255, 255, 255, 0.1);
+  --color-ghost-border-hover: rgba(255, 255, 255, 0.2);
+
+  --color-overlay: rgba(0, 0, 0, 0.7);
+  --color-modal-bg: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+  --color-code-bg: rgba(0, 0, 0, 0.3);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+
+  --font-sans: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* ── Shared Keyframe Animations ──────────────────────────── */
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes gpuPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ── Scrollbar Styling ───────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Range Input Styling ─────────────────────────────────── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--color-border-light);
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  border: none;
+}

@@ -1,120 +1,13 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { fetchGpuStats } from "../../services/gpuApi.js";
+import { tempColor, utilizationColor, vramColor } from "../../utils/gpuColors.js";
+import "./GpuMini.css";
 
 const POLL_INTERVAL = 2000;
-
-// ── Styles ──────────────────────────────────────────────────
-
-const containerStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "12px",
-  padding: "6px 16px",
-  borderBottom: "1px solid rgba(255,255,255,0.06)",
-  background: "rgba(255,255,255,0.02)",
-  fontSize: "12px",
-  fontFamily: "'DM Mono', monospace",
-  color: "#8a8a9a",
-  overflowX: "auto",
-};
-
-const gpuLabelStyle = {
-  color: "#60a5fa",
-  fontWeight: "600",
-  fontSize: "11px",
-  whiteSpace: "nowrap",
-  display: "flex",
-  alignItems: "center",
-  gap: "5px",
-};
-
-const metricStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "6px",
-  whiteSpace: "nowrap",
-};
-
-const miniBarTrackStyle = {
-  width: "48px",
-  height: "4px",
-  background: "rgba(255,255,255,0.06)",
-  borderRadius: "2px",
-  overflow: "hidden",
-  flexShrink: 0,
-};
-
-const miniBarFillStyle = (pct, color) => ({
-  height: "100%",
-  width: `${Math.min(pct, 100)}%`,
-  background: color,
-  borderRadius: "2px",
-  transition: "width 0.6s ease",
-});
-
-const liveStyle = {
-  width: "5px",
-  height: "5px",
-  borderRadius: "50%",
-  background: "#6ee7b7",
-  animation: "gpuPulse 2s ease-in-out infinite",
-  flexShrink: 0,
-};
-
-const errorStyle = {
-  padding: "6px 16px",
-  borderBottom: "1px solid rgba(255,255,255,0.06)",
-  background: "rgba(255,255,255,0.02)",
-  fontSize: "11px",
-  color: "#6a6a7a",
-  textAlign: "center",
-};
-
-// ── Helpers ─────────────────────────────────────────────────
-
-function tempColor(t) {
-  if (t < 50) return "#6ee7b7";
-  if (t < 70) return "#fcd34d";
-  if (t < 85) return "#fb923c";
-  return "#ff6b6b";
-}
-
-function utilizationColor(p) {
-  if (p < 30) return "#6ee7b7";
-  if (p < 70) return "#60a5fa";
-  if (p < 90) return "#fcd34d";
-  return "#fb923c";
-}
-
-function vramColor(p) {
-  if (p < 50) return "#60a5fa";
-  if (p < 80) return "#fcd34d";
-  return "#fb923c";
-}
-
-// ── Component ───────────────────────────────────────────────
 
 export default function GpuMini() {
   const [gpus, setGpus] = useState([]);
   const [error, setError] = useState(null);
-  const styleInjected = useRef(false);
-
-  useEffect(() => {
-    if (styleInjected.current) return;
-    styleInjected.current = true;
-    const style = document.createElement("style");
-    style.textContent = `
-      @keyframes gpuPulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-      styleInjected.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -134,11 +27,11 @@ export default function GpuMini() {
   }, []);
 
   if (error) {
-    return <div style={errorStyle}>GPU unavailable</div>;
+    return <div className="gpu-mini-error">GPU unavailable</div>;
   }
 
   if (gpus.length === 0) {
-    return <div style={errorStyle}>Detecting GPU…</div>;
+    return <div className="gpu-mini-error">Detecting GPU…</div>;
   }
 
   return (
@@ -146,53 +39,53 @@ export default function GpuMini() {
       {gpus.map((gpu) => {
         const vramPct = (gpu.memoryUsed / gpu.memoryTotal) * 100;
         return (
-          <div key={gpu.index} style={containerStyle}>
-            <span style={gpuLabelStyle}>
-              <span style={liveStyle} />
+          <div key={gpu.index} className="gpu-mini">
+            <span className="gpu-mini-label">
+              <span className="gpu-mini-live" />
               {gpu.name}
             </span>
 
-            <span style={{ color: "rgba(255,255,255,0.1)" }}>│</span>
+            <span className="gpu-mini-separator">│</span>
 
             {/* Utilization */}
-            <span style={metricStyle}>
-              <span style={{ color: "#6a6a7a" }}>GPU</span>
+            <span className="gpu-mini-metric">
+              <span className="gpu-mini-metric-label">GPU</span>
               <span style={{ color: utilizationColor(gpu.utilization), fontWeight: 600 }}>
                 {gpu.utilization}%
               </span>
-              <span style={miniBarTrackStyle}>
-                <span style={miniBarFillStyle(gpu.utilization, utilizationColor(gpu.utilization))} />
+              <span className="gpu-mini-bar-track">
+                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(gpu.utilization, 100)}%`, background: utilizationColor(gpu.utilization) }} />
               </span>
             </span>
 
-            <span style={{ color: "rgba(255,255,255,0.1)" }}>│</span>
+            <span className="gpu-mini-separator">│</span>
 
             {/* VRAM */}
-            <span style={metricStyle}>
-              <span style={{ color: "#6a6a7a" }}>VRAM</span>
+            <span className="gpu-mini-metric">
+              <span className="gpu-mini-metric-label">VRAM</span>
               <span style={{ color: vramColor(vramPct), fontWeight: 600 }}>
                 {gpu.memoryUsed.toLocaleString()}/{gpu.memoryTotal.toLocaleString()} MiB
               </span>
-              <span style={miniBarTrackStyle}>
-                <span style={miniBarFillStyle(vramPct, vramColor(vramPct))} />
+              <span className="gpu-mini-bar-track">
+                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(vramPct, 100)}%`, background: vramColor(vramPct) }} />
               </span>
             </span>
 
-            <span style={{ color: "rgba(255,255,255,0.1)" }}>│</span>
+            <span className="gpu-mini-separator">│</span>
 
             {/* Temperature */}
-            <span style={metricStyle}>
-              <span style={{ color: "#6a6a7a" }}>Temp</span>
+            <span className="gpu-mini-metric">
+              <span className="gpu-mini-metric-label">Temp</span>
               <span style={{ color: tempColor(gpu.temperature), fontWeight: 600 }}>
                 {gpu.temperature}°C
               </span>
             </span>
 
-            <span style={{ color: "rgba(255,255,255,0.1)" }}>│</span>
+            <span className="gpu-mini-separator">│</span>
 
             {/* Power */}
-            <span style={metricStyle}>
-              <span style={{ color: "#6a6a7a" }}>Power</span>
+            <span className="gpu-mini-metric">
+              <span className="gpu-mini-metric-label">Power</span>
               <span style={{ color: "#c4b5fd", fontWeight: 600 }}>
                 {gpu.powerDraw.toFixed(0)}W
               </span>

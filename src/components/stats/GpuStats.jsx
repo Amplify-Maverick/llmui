@@ -1,150 +1,14 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { fetchGpuStats } from "../../services/gpuApi.js";
+import { tempColor, utilizationColor, vramColor } from "../../utils/gpuColors.js";
+import "./GpuStats.css";
 
-const POLL_INTERVAL = 2000; // 2 seconds
-
-// ── Styles ──────────────────────────────────────────────────
-
-const sectionTitleStyle = {
-  fontSize: "16px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-  margin: "0 0 16px 0",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-};
-
-const gpuCardStyle = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: "12px",
-  padding: "20px",
-  marginBottom: "16px",
-};
-
-const gpuNameStyle = {
-  fontSize: "15px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-  marginBottom: "16px",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-};
-
-const metricsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
-};
-
-const metricBoxStyle = {
-  background: "rgba(255,255,255,0.02)",
-  borderRadius: "8px",
-  padding: "12px",
-};
-
-const metricLabelStyle = {
-  fontSize: "11px",
-  color: "#8a8a9a",
-  textTransform: "uppercase",
-  letterSpacing: "0.5px",
-  marginBottom: "6px",
-};
-
-const metricValueStyle = {
-  fontSize: "22px",
-  fontWeight: "700",
-  fontFamily: "'DM Mono', monospace",
-  marginBottom: "6px",
-};
-
-const barTrackStyle = {
-  height: "4px",
-  background: "rgba(255,255,255,0.06)",
-  borderRadius: "2px",
-  overflow: "hidden",
-};
-
-const barFillStyle = (pct, color) => ({
-  height: "100%",
-  width: `${Math.min(pct, 100)}%`,
-  background: color,
-  borderRadius: "2px",
-  transition: "width 0.6s ease",
-});
-
-const subtextStyle = {
-  fontSize: "11px",
-  color: "#6a6a7a",
-  marginTop: "4px",
-  fontFamily: "'DM Mono', monospace",
-};
-
-const errorStyle = {
-  color: "#8a8a9a",
-  textAlign: "center",
-  padding: "24px",
-  fontSize: "13px",
-};
-
-const liveIndicatorStyle = {
-  width: "6px",
-  height: "6px",
-  borderRadius: "50%",
-  background: "#6ee7b7",
-  display: "inline-block",
-  animation: "gpuPulse 2s ease-in-out infinite",
-};
-
-// ── Helpers ─────────────────────────────────────────────────
-
-function tempColor(temp) {
-  if (temp < 50) return "#6ee7b7";
-  if (temp < 70) return "#fcd34d";
-  if (temp < 85) return "#fb923c";
-  return "#ff6b6b";
-}
-
-function utilizationColor(pct) {
-  if (pct < 30) return "#6ee7b7";
-  if (pct < 70) return "#60a5fa";
-  if (pct < 90) return "#fcd34d";
-  return "#fb923c";
-}
-
-function vramColor(pct) {
-  if (pct < 50) return "#60a5fa";
-  if (pct < 80) return "#fcd34d";
-  return "#fb923c";
-}
-
-// ── Component ───────────────────────────────────────────────
+const POLL_INTERVAL = 2000;
 
 export default function GpuStats() {
   const [gpus, setGpus] = useState([]);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const styleInjected = useRef(false);
-
-  // Inject keyframe animation once
-  useEffect(() => {
-    if (styleInjected.current) return;
-    styleInjected.current = true;
-    const style = document.createElement("style");
-    style.textContent = `
-      @keyframes gpuPulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-      styleInjected.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -172,10 +36,10 @@ export default function GpuStats() {
   if (error) {
     return (
       <div>
-        <h3 style={sectionTitleStyle}>GPU</h3>
-        <div style={errorStyle}>
+        <h3 className="gpu-section-title">GPU</h3>
+        <div className="gpu-error">
           <p>GPU monitoring unavailable</p>
-          <p style={{ marginTop: "4px", fontSize: "12px" }}>{error}</p>
+          <p className="gpu-error-detail">{error}</p>
         </div>
       </div>
     );
@@ -184,19 +48,19 @@ export default function GpuStats() {
   if (gpus.length === 0) {
     return (
       <div>
-        <h3 style={sectionTitleStyle}>GPU</h3>
-        <div style={errorStyle}>Detecting GPU…</div>
+        <h3 className="gpu-section-title">GPU</h3>
+        <div className="gpu-error">Detecting GPU…</div>
       </div>
     );
   }
 
   return (
     <div>
-      <h3 style={sectionTitleStyle}>
+      <h3 className="gpu-section-title">
         GPU Monitor
-        <span style={liveIndicatorStyle} title="Live" />
+        <span className="gpu-live-dot" title="Live" />
         {lastUpdate && (
-          <span style={{ fontSize: "11px", color: "#6a6a7a", marginLeft: "auto", fontFamily: "'DM Mono', monospace" }}>
+          <span className="gpu-timestamp">
             updated {new Date(lastUpdate).toLocaleTimeString()}
           </span>
         )}
@@ -207,84 +71,80 @@ export default function GpuStats() {
         const powerPct = gpu.powerLimit > 0 ? (gpu.powerDraw / gpu.powerLimit) * 100 : 0;
 
         return (
-          <div key={gpu.index} style={gpuCardStyle}>
-            <div style={gpuNameStyle}>
-              <span style={{ color: "#60a5fa" }}>GPU {gpu.index}</span>
-              <span style={{ color: "#8a8a9a", fontWeight: 400 }}>—</span>
+          <div key={gpu.index} className="gpu-card">
+            <div className="gpu-name">
+              <span className="gpu-name-index">GPU {gpu.index}</span>
+              <span className="gpu-name-separator">—</span>
               {gpu.name}
             </div>
 
-            <div style={metricsGridStyle}>
+            <div className="gpu-metrics-grid">
               {/* Utilization */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>Utilization</div>
-                <div style={{ ...metricValueStyle, color: utilizationColor(gpu.utilization) }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">Utilization</div>
+                <div className="gpu-metric-value" style={{ color: utilizationColor(gpu.utilization) }}>
                   {gpu.utilization}%
                 </div>
-                <div style={barTrackStyle}>
-                  <div style={barFillStyle(gpu.utilization, utilizationColor(gpu.utilization))} />
+                <div className="gpu-bar-track">
+                  <div className="gpu-bar-fill" style={{ width: `${Math.min(gpu.utilization, 100)}%`, background: utilizationColor(gpu.utilization) }} />
                 </div>
               </div>
 
               {/* VRAM */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>VRAM Usage</div>
-                <div style={{ ...metricValueStyle, color: vramColor(vramPct) }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">VRAM Usage</div>
+                <div className="gpu-metric-value" style={{ color: vramColor(vramPct) }}>
                   {vramPct.toFixed(0)}%
                 </div>
-                <div style={barTrackStyle}>
-                  <div style={barFillStyle(vramPct, vramColor(vramPct))} />
+                <div className="gpu-bar-track">
+                  <div className="gpu-bar-fill" style={{ width: `${Math.min(vramPct, 100)}%`, background: vramColor(vramPct) }} />
                 </div>
-                <div style={subtextStyle}>
+                <div className="gpu-subtext">
                   {gpu.memoryUsed.toLocaleString()} / {gpu.memoryTotal.toLocaleString()} MiB
                 </div>
               </div>
 
               {/* Temperature */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>Temperature</div>
-                <div style={{ ...metricValueStyle, color: tempColor(gpu.temperature) }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">Temperature</div>
+                <div className="gpu-metric-value" style={{ color: tempColor(gpu.temperature) }}>
                   {gpu.temperature}°C
                 </div>
-                <div style={barTrackStyle}>
-                  <div style={barFillStyle(gpu.temperature, tempColor(gpu.temperature))} />
+                <div className="gpu-bar-track">
+                  <div className="gpu-bar-fill" style={{ width: `${Math.min(gpu.temperature, 100)}%`, background: tempColor(gpu.temperature) }} />
                 </div>
               </div>
 
               {/* Power */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>Power</div>
-                <div style={{ ...metricValueStyle, color: "#c4b5fd" }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">Power</div>
+                <div className="gpu-metric-value" style={{ color: "#c4b5fd" }}>
                   {gpu.powerDraw.toFixed(0)}W
                 </div>
-                <div style={barTrackStyle}>
-                  <div style={barFillStyle(powerPct, "#c4b5fd")} />
+                <div className="gpu-bar-track">
+                  <div className="gpu-bar-fill" style={{ width: `${Math.min(powerPct, 100)}%`, background: "#c4b5fd" }} />
                 </div>
-                <div style={subtextStyle}>
-                  limit {gpu.powerLimit.toFixed(0)}W
-                </div>
+                <div className="gpu-subtext">limit {gpu.powerLimit.toFixed(0)}W</div>
               </div>
 
               {/* Fan Speed */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>Fan Speed</div>
-                <div style={{ ...metricValueStyle, color: "#8a8a9a" }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">Fan Speed</div>
+                <div className="gpu-metric-value" style={{ color: "#8a8a9a" }}>
                   {gpu.fanSpeed}%
                 </div>
-                <div style={barTrackStyle}>
-                  <div style={barFillStyle(gpu.fanSpeed, "#8a8a9a")} />
+                <div className="gpu-bar-track">
+                  <div className="gpu-bar-fill" style={{ width: `${Math.min(gpu.fanSpeed, 100)}%`, background: "#8a8a9a" }} />
                 </div>
               </div>
 
               {/* Clocks */}
-              <div style={metricBoxStyle}>
-                <div style={metricLabelStyle}>Clocks</div>
-                <div style={{ ...metricValueStyle, color: "#60a5fa", fontSize: "18px" }}>
+              <div className="gpu-metric-box">
+                <div className="gpu-metric-label">Clocks</div>
+                <div className="gpu-metric-value" style={{ color: "#60a5fa", fontSize: "18px" }}>
                   {gpu.clockGraphics} MHz
                 </div>
-                <div style={subtextStyle}>
-                  mem {gpu.clockMemory} MHz
-                </div>
+                <div className="gpu-subtext">mem {gpu.clockMemory} MHz</div>
               </div>
             </div>
           </div>

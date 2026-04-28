@@ -2,44 +2,7 @@ import { useState, useEffect } from "react";
 import Modal from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
 import Input from "../shared/Input.jsx";
-
-const progressContainerStyle = {
-  marginTop: "16px",
-};
-
-const progressBarStyle = {
-  width: "100%",
-  height: "8px",
-  background: "rgba(255,255,255,0.1)",
-  borderRadius: "4px",
-  overflow: "hidden",
-};
-
-const progressFillStyle = (progress) => ({
-  width: `${progress}%`,
-  height: "100%",
-  background: "linear-gradient(90deg, #6ee7b7, #60a5fa)",
-  borderRadius: "4px",
-  transition: "width 0.3s ease",
-});
-
-const statusStyle = {
-  fontSize: "13px",
-  color: "#8a8a9a",
-  marginTop: "8px",
-  textAlign: "center",
-};
-
-const helpTextStyle = {
-  fontSize: "13px",
-  color: "#8a8a9a",
-  marginTop: "12px",
-};
-
-const linkStyle = {
-  color: "#60a5fa",
-  textDecoration: "none",
-};
+import "./ModelPullDialog.css";
 
 export default function ModelPullDialog({
   isOpen,
@@ -50,7 +13,6 @@ export default function ModelPullDialog({
 }) {
   const [modelName, setModelName] = useState(initialModelName);
 
-  // Update local state when initialModelName changes or dialog opens
   useEffect(() => {
     if (isOpen) {
       setModelName(initialModelName);
@@ -85,11 +47,14 @@ export default function ModelPullDialog({
       }
     >
       {isPulling ? (
-        <div style={progressContainerStyle}>
-          <div style={progressBarStyle}>
-            <div style={progressFillStyle(pullProgress.progress)} />
+        <div className="pull-progress">
+          <div className="pull-progress-bar">
+            <div
+              className="pull-progress-fill"
+              style={{ width: `${pullProgress.progress}%` }}
+            />
           </div>
-          <p style={statusStyle}>
+          <p className="pull-status">
             {pullProgress.status}
             {pullProgress.progress > 0 && ` (${pullProgress.progress}%)`}
           </p>
@@ -102,17 +67,17 @@ export default function ModelPullDialog({
             placeholder="e.g., llama3, mistral, codellama:7b"
             onKeyDown={(e) => e.key === "Enter" && handlePull()}
           />
-          <p style={helpTextStyle}>
+          <p className="pull-help">
             Enter a model name from{" "}
             <a
               href="https://ollama.com/library"
               target="_blank"
               rel="noopener noreferrer"
-              style={linkStyle}
+              className="pull-link"
             >
               ollama.com/library
             </a>
-            . You can specify a tag like <code style={{ color: "#6ee7b7" }}>llama3:8b</code>.
+            . You can specify a tag like <code className="pull-code">llama3:8b</code>.
           </p>
         </>
       )}

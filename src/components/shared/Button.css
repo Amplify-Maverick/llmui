@@ -1,0 +1,63 @@
+.btn {
+  border-radius: var(--radius-lg);
+  padding: 10px 20px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  border: 1px solid;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary */
+.btn-primary {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-bg-hover);
+  border-color: var(--color-primary-border-hover);
+}
+
+/* Secondary */
+.btn-secondary {
+  background: var(--color-secondary-bg);
+  border-color: var(--color-secondary-border);
+  color: var(--color-secondary);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-secondary-bg-hover);
+  border-color: var(--color-secondary-border-hover);
+}
+
+/* Danger */
+.btn-danger {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger-bg-hover);
+  border-color: var(--color-danger-border-hover);
+}
+
+/* Ghost */
+.btn-ghost {
+  background: var(--color-ghost-bg);
+  border-color: var(--color-ghost-border);
+  color: var(--color-text-secondary);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-ghost-bg-hover);
+  border-color: var(--color-ghost-border-hover);
+}

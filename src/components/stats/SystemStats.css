@@ -1,0 +1,62 @@
+.system-stats {
+  padding: 20px;
+}
+
+.system-stats-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 24px 0;
+}
+
+.system-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.system-stats-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 16px 0;
+}
+
+.running-model-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.running-model-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+}
+
+.running-model-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.running-model-detail-mono {
+  font-family: var(--font-mono);
+}
+
+.system-stats-empty {
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: 40px;
+}
+
+.system-stats-empty-hint {
+  font-size: 13px;
+  margin-top: 8px;
+}

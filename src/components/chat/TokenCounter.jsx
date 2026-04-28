@@ -7,51 +7,13 @@ import {
   estimateTokens,
   formatTokenCount,
 } from "../../utils/tokenEstimator.js";
-
-const barContainerStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "10px",
-  padding: "6px 16px",
-  borderBottom: "1px solid rgba(255,255,255,0.06)",
-  background: "rgba(255,255,255,0.01)",
-  fontSize: "12px",
-  fontFamily: "'DM Mono', monospace",
-  color: "#8a8a9a",
-  minHeight: "32px",
-};
-
-const progressBarOuterStyle = {
-  flex: 1,
-  height: "6px",
-  background: "rgba(255,255,255,0.06)",
-  borderRadius: "3px",
-  overflow: "hidden",
-  position: "relative",
-};
-
-const labelStyle = {
-  whiteSpace: "nowrap",
-  fontSize: "11px",
-  display: "flex",
-  alignItems: "center",
-  gap: "4px",
-};
-
-const dotStyle = (color) => ({
-  display: "inline-block",
-  width: "6px",
-  height: "6px",
-  borderRadius: "50%",
-  background: color,
-  flexShrink: 0,
-});
+import "./TokenCounter.css";
 
 function getBarColor(percentage) {
-  if (percentage < 50) return "#6ee7b7"; // green
-  if (percentage < 75) return "#fcd34d"; // yellow
-  if (percentage < 90) return "#fb923c"; // orange
-  return "#ff6b6b"; // red
+  if (percentage < 50) return "#6ee7b7";
+  if (percentage < 75) return "#fcd34d";
+  if (percentage < 90) return "#fb923c";
+  return "#ff6b6b";
 }
 
 function getBarGlow(percentage) {
@@ -67,10 +29,8 @@ export default function TokenCounter({ inputValue = "" }) {
   const { fetchModelInfo, modelInfoCache } = useModelsStore();
   const [contextLength, setContextLength] = useState(null);
 
-  // Fetch model info when model changes
   useEffect(() => {
     if (defaultModel) {
-      // Check cache first
       if (modelInfoCache[defaultModel]) {
         setContextLength(modelInfoCache[defaultModel].contextLength);
       } else {
@@ -81,10 +41,8 @@ export default function TokenCounter({ inputValue = "" }) {
     }
   }, [defaultModel, fetchModelInfo, modelInfoCache]);
 
-  // Calculate token counts
   const { conversationTokens, inputTokens, totalTokens, percentage } =
     useMemo(() => {
-      // Build the effective messages list (with streaming content if active)
       const effectiveMessages = [...messages];
       if (isStreaming && streamingContent && effectiveMessages.length > 0) {
         const last = effectiveMessages[effectiveMessages.length - 1];
@@ -96,10 +54,7 @@ export default function TokenCounter({ inputValue = "" }) {
         }
       }
 
-      const convTokens = estimateConversationTokens(
-        effectiveMessages,
-        systemPrompt
-      );
+      const convTokens = estimateConversationTokens(effectiveMessages, systemPrompt);
       const inpTokens = inputValue ? estimateTokens(inputValue) + 4 : 0;
       const total = convTokens + inpTokens;
       const pct = contextLength ? Math.min((total / contextLength) * 100, 100) : 0;
@@ -117,11 +72,10 @@ export default function TokenCounter({ inputValue = "" }) {
   const barColor = getBarColor(percentage);
 
   return (
-    <div style={barContainerStyle}>
-      {/* Token count */}
-      <span style={labelStyle} title="Estimated tokens used in this conversation">
-        <span style={dotStyle(barColor)} />
-        <span style={{ color: "#e8e8f0", fontWeight: 500 }}>
+    <div className="token-bar">
+      <span className="token-label" title="Estimated tokens used in this conversation">
+        <span className="token-dot" style={{ background: barColor }} />
+        <span className="token-label-value">
           {formatTokenCount(totalTokens)}
         </span>
         {contextLength && (
@@ -130,34 +84,27 @@ export default function TokenCounter({ inputValue = "" }) {
         <span style={{ marginLeft: "2px" }}>tokens</span>
       </span>
 
-      {/* Progress bar */}
       {contextLength && (
-        <div style={progressBarOuterStyle} title={`${percentage.toFixed(1)}% of context window used`}>
+        <div className="token-progress-track" title={`${percentage.toFixed(1)}% of context window used`}>
           <div
+            className="token-progress-fill"
             style={{
               width: `${percentage}%`,
-              height: "100%",
               background: barColor,
-              borderRadius: "3px",
-              transition: "width 0.3s ease, background 0.3s ease",
               boxShadow: getBarGlow(percentage),
             }}
           />
         </div>
       )}
 
-      {/* Context window label */}
       {contextLength && (
-        <span style={{ ...labelStyle, color: percentage >= 90 ? "#ff6b6b" : "#8a8a9a" }}>
-          {percentage >= 90
-            ? "Near limit"
-            : `${percentage.toFixed(0)}%`}
+        <span className="token-label" style={{ color: percentage >= 90 ? "#ff6b6b" : undefined }}>
+          {percentage >= 90 ? "Near limit" : `${percentage.toFixed(0)}%`}
         </span>
       )}
 
-      {/* Breakdown tooltip-style info */}
       {inputTokens > 0 && (
-        <span style={{ ...labelStyle, color: "#60a5fa" }} title="Tokens from your current input">
+        <span className="token-label token-pending" title="Tokens from your current input">
           +{formatTokenCount(inputTokens)} pending
         </span>
       )}

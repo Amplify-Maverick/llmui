@@ -1,243 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import Modal from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
+import ModelTag from "./ModelTag.jsx";
+import { MODEL_TIERS } from "../../constants/hardwareTiers.js";
 import { detectGPU, parseGPUName } from "../../utils/hardwareDetection.js";
-
-function ModelTag({ model, onClick }) {
-  const [isHovered, setIsHovered] = useState(false);
-
-  const style = {
-    fontSize: "12px",
-    padding: "4px 10px",
-    borderRadius: "6px",
-    background: isHovered ? "rgba(110, 231, 183, 0.25)" : "rgba(110, 231, 183, 0.1)",
-    border: isHovered ? "1px solid rgba(110, 231, 183, 0.5)" : "1px solid rgba(110, 231, 183, 0.2)",
-    color: "#6ee7b7",
-    fontFamily: "'DM Mono', monospace",
-    cursor: "pointer",
-    transition: "all 0.15s ease",
-    transform: isHovered ? "translateY(-1px)" : "none",
-  };
-
-  return (
-    <span
-      style={style}
-      onClick={() => onClick(model)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      title={`Click to install ${model}`}
-    >
-      {model}
-    </span>
-  );
-}
-
-const sectionStyle = {
-  marginBottom: "24px",
-};
-
-const sectionTitleStyle = {
-  fontSize: "15px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-  marginBottom: "12px",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-};
-
-const detectedCardStyle = {
-  background: "linear-gradient(135deg, rgba(110, 231, 183, 0.1) 0%, rgba(96, 165, 250, 0.1) 100%)",
-  border: "1px solid rgba(110, 231, 183, 0.3)",
-  borderRadius: "12px",
-  padding: "20px",
-  marginBottom: "24px",
-};
-
-const gpuNameStyle = {
-  fontSize: "18px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-  marginBottom: "8px",
-};
-
-const vramDisplayStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "8px",
-  background: "rgba(0, 0, 0, 0.2)",
-  padding: "6px 12px",
-  borderRadius: "6px",
-  marginBottom: "16px",
-};
-
-const vramValueStyle = {
-  fontSize: "24px",
-  fontWeight: "700",
-  color: "#6ee7b7",
-};
-
-const vramLabelStyle = {
-  fontSize: "13px",
-  color: "#8a8a9a",
-};
-
-const tierBadgeStyle = {
-  display: "inline-block",
-  fontSize: "12px",
-  fontWeight: "600",
-  padding: "4px 10px",
-  borderRadius: "6px",
-  marginLeft: "12px",
-};
-
-const recommendedSectionStyle = {
-  background: "rgba(0, 0, 0, 0.2)",
-  borderRadius: "8px",
-  padding: "14px",
-  marginTop: "12px",
-};
-
-const recommendedTitleStyle = {
-  fontSize: "12px",
-  fontWeight: "600",
-  color: "#8a8a9a",
-  marginBottom: "8px",
-  textTransform: "uppercase",
-  letterSpacing: "0.5px",
-};
-
-const modelListStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "6px",
-};
-
-
-const notDetectedStyle = {
-  background: "rgba(255, 107, 107, 0.1)",
-  border: "1px solid rgba(255, 107, 107, 0.2)",
-  borderRadius: "12px",
-  padding: "20px",
-  marginBottom: "24px",
-  textAlign: "center",
-};
-
-const codeBlockStyle = {
-  background: "rgba(0, 0, 0, 0.3)",
-  border: "1px solid rgba(255, 255, 255, 0.1)",
-  borderRadius: "8px",
-  padding: "12px 16px",
-  fontFamily: "'DM Mono', monospace",
-  fontSize: "13px",
-  color: "#6ee7b7",
-  marginBottom: "8px",
-  overflowX: "auto",
-  cursor: "pointer",
-};
-
-const labelStyle = {
-  fontSize: "12px",
-  color: "#8a8a9a",
-  marginBottom: "4px",
-  fontWeight: "500",
-};
-
-const textStyle = {
-  color: "#8a8a9a",
-  fontSize: "13px",
-  lineHeight: "1.6",
-  margin: "0 0 12px 0",
-};
-
-const collapsibleHeaderStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  cursor: "pointer",
-  padding: "12px 0",
-  borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-  marginTop: "8px",
-};
-
-const tierCardStyle = {
-  background: "rgba(255, 255, 255, 0.03)",
-  border: "1px solid rgba(255, 255, 255, 0.08)",
-  borderRadius: "10px",
-  padding: "14px",
-  marginBottom: "10px",
-};
-
-const tierHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: "8px",
-};
-
-const tierNameStyle = {
-  fontSize: "14px",
-  fontWeight: "600",
-  color: "#e8e8f0",
-};
-
-const vramBadgeStyle = {
-  fontSize: "11px",
-  fontWeight: "600",
-  padding: "3px 8px",
-  borderRadius: "4px",
-  background: "rgba(96, 165, 250, 0.2)",
-  color: "#60a5fa",
-};
-
-const linkStyle = {
-  color: "#60a5fa",
-  textDecoration: "none",
-};
-
-const tipBoxStyle = {
-  background: "rgba(252, 211, 77, 0.1)",
-  border: "1px solid rgba(252, 211, 77, 0.2)",
-  borderRadius: "8px",
-  padding: "12px 16px",
-  fontSize: "13px",
-  color: "#fcd34d",
-};
-
-const MODEL_TIERS = [
-  {
-    name: "Entry Level",
-    vram: "4-6 GB",
-    color: "#fcd34d",
-    gpus: "GTX 1650, RTX 3050, RX 6500 XT",
-    models: ["tinyllama", "phi3:mini", "gemma:2b", "qwen2:0.5b"],
-    notes: "Small models, good for basic tasks and testing",
-  },
-  {
-    name: "Mid Range",
-    vram: "8 GB",
-    color: "#6ee7b7",
-    gpus: "RTX 3060, RTX 4060, RX 6600, RX 7600",
-    models: ["llama3.2:3b", "mistral:7b-q4", "gemma2:9b-q4", "qwen2.5:7b-q4"],
-    notes: "7B parameter models with 4-bit quantization work well",
-  },
-  {
-    name: "High End",
-    vram: "12-16 GB",
-    color: "#60a5fa",
-    gpus: "RTX 3080, RTX 4070, RTX 4080, RX 7800 XT",
-    models: ["llama3.1:8b", "mistral:7b", "codellama:13b-q4", "gemma2:9b"],
-    notes: "Run 7B-13B models at higher quality quantization",
-  },
-  {
-    name: "Enthusiast",
-    vram: "24+ GB",
-    color: "#c4b5fd",
-    gpus: "RTX 3090, RTX 4090, A5000, A6000",
-    models: ["llama3.1:70b-q4", "codellama:34b", "mixtral:8x7b", "qwen2.5:32b"],
-    notes: "Run large 30B-70B models, multiple models simultaneously",
-  },
-];
+import "./HardwareGuideModal.css";
 
 export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) {
   const [gpuInfo, setGpuInfo] = useState(null);
@@ -272,18 +39,18 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
         </Button>
       }
     >
-      <div style={{ maxWidth: "550px" }}>
+      <div className="hw-modal-content">
         {/* Detected Hardware Section */}
         {gpuInfo?.detected && gpuInfo.vram ? (
-          <div style={detectedCardStyle}>
-            <div style={gpuNameStyle}>{parseGPUName(gpuInfo.renderer)}</div>
-            <div style={vramDisplayStyle}>
-              <span style={vramValueStyle}>{gpuInfo.vram} GB</span>
-              <span style={vramLabelStyle}>VRAM</span>
+          <div className="hw-detected-card">
+            <div className="hw-gpu-name">{parseGPUName(gpuInfo.renderer)}</div>
+            <div className="hw-vram-display">
+              <span className="hw-vram-value">{gpuInfo.vram} GB</span>
+              <span className="hw-vram-label">VRAM</span>
               {gpuInfo.tier && (
                 <span
+                  className="hw-tier-badge"
                   style={{
-                    ...tierBadgeStyle,
                     background: `${gpuInfo.tier.color}20`,
                     color: gpuInfo.tier.color,
                   }}
@@ -294,12 +61,10 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
             </div>
             {gpuInfo.tier && (
               <>
-                <div style={{ fontSize: "13px", color: "#8a8a9a", marginBottom: "4px" }}>
-                  {gpuInfo.tier.description}
-                </div>
-                <div style={recommendedSectionStyle}>
-                  <div style={recommendedTitleStyle}>Recommended Models</div>
-                  <div style={modelListStyle}>
+                <div className="hw-tier-description">{gpuInfo.tier.description}</div>
+                <div className="hw-recommended">
+                  <div className="hw-recommended-title">Recommended Models</div>
+                  <div className="hw-model-list">
                     {gpuInfo.tier.models.map((model) => (
                       <ModelTag key={model} model={model} onClick={handleModelClick} />
                     ))}
@@ -309,20 +74,18 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
             )}
           </div>
         ) : gpuInfo?.detected ? (
-          <div style={notDetectedStyle}>
-            <div style={{ fontSize: "16px", color: "#e8e8f0", marginBottom: "8px" }}>
+          <div className="hw-not-detected">
+            <div className="hw-not-detected-title">
               GPU Detected: {parseGPUName(gpuInfo.renderer)}
             </div>
-            <div style={{ fontSize: "13px", color: "#8a8a9a" }}>
+            <div className="hw-not-detected-desc">
               Could not determine VRAM automatically. Use the commands below to check your GPU memory.
             </div>
           </div>
         ) : (
-          <div style={notDetectedStyle}>
-            <div style={{ fontSize: "16px", color: "#ff6b6b", marginBottom: "8px" }}>
-              Could not detect GPU
-            </div>
-            <div style={{ fontSize: "13px", color: "#8a8a9a" }}>
+          <div className="hw-not-detected">
+            <div className="hw-not-detected-error">Could not detect GPU</div>
+            <div className="hw-not-detected-desc">
               {gpuInfo?.error || "WebGL is not available. Use the commands below to check your hardware."}
             </div>
           </div>
@@ -331,43 +94,41 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
         {/* Manual Commands (Collapsible) */}
         <div>
           <div
-            style={collapsibleHeaderStyle}
+            className="hw-collapsible-header"
             onClick={() => setShowManualCommands(!showManualCommands)}
           >
-            <span style={{ fontSize: "14px", color: "#8a8a9a" }}>
-              Manual Detection Commands
-            </span>
-            <span style={{ color: "#8a8a9a", fontSize: "18px" }}>
+            <span className="hw-collapsible-title">Manual Detection Commands</span>
+            <span className="hw-collapsible-icon">
               {showManualCommands ? "−" : "+"}
             </span>
           </div>
           {showManualCommands && (
-            <div style={{ paddingBottom: "16px" }}>
-              <p style={textStyle}>
+            <div className="hw-collapsible-body">
+              <p className="hw-text">
                 Run these commands in your terminal for detailed GPU info:
               </p>
 
-              <div style={labelStyle}>Linux (NVIDIA)</div>
-              <div style={codeBlockStyle} onClick={() => copyToClipboard("nvidia-smi")}>
+              <div className="hw-label">Linux (NVIDIA)</div>
+              <div className="hw-code-block" onClick={() => copyToClipboard("nvidia-smi")}>
                 nvidia-smi
               </div>
 
-              <div style={labelStyle}>Linux (AMD)</div>
-              <div style={codeBlockStyle} onClick={() => copyToClipboard("rocm-smi")}>
+              <div className="hw-label">Linux (AMD)</div>
+              <div className="hw-code-block" onClick={() => copyToClipboard("rocm-smi")}>
                 rocm-smi
               </div>
 
-              <div style={labelStyle}>macOS</div>
+              <div className="hw-label">macOS</div>
               <div
-                style={codeBlockStyle}
+                className="hw-code-block"
                 onClick={() => copyToClipboard("system_profiler SPDisplaysDataType")}
               >
                 system_profiler SPDisplaysDataType
               </div>
 
-              <div style={labelStyle}>Windows (PowerShell)</div>
+              <div className="hw-label">Windows (PowerShell)</div>
               <div
-                style={codeBlockStyle}
+                className="hw-code-block"
                 onClick={() =>
                   copyToClipboard(
                     "Get-WmiObject Win32_VideoController | Select Name, AdapterRAM"
@@ -383,25 +144,25 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
         {/* All Model Tiers (Collapsible) */}
         <div>
           <div
-            style={collapsibleHeaderStyle}
+            className="hw-collapsible-header"
             onClick={() => setShowAllTiers(!showAllTiers)}
           >
-            <span style={{ fontSize: "14px", color: "#8a8a9a" }}>
-              All Hardware Tiers & Models
-            </span>
-            <span style={{ color: "#8a8a9a", fontSize: "18px" }}>
+            <span className="hw-collapsible-title">All Hardware Tiers & Models</span>
+            <span className="hw-collapsible-icon">
               {showAllTiers ? "−" : "+"}
             </span>
           </div>
           {showAllTiers && (
-            <div style={{ paddingBottom: "16px" }}>
+            <div className="hw-collapsible-body">
               {MODEL_TIERS.map((tier) => (
-                <div key={tier.name} style={tierCardStyle}>
-                  <div style={tierHeaderStyle}>
-                    <span style={{ ...tierNameStyle, color: tier.color }}>{tier.name}</span>
+                <div key={tier.name} className="hw-tier-card">
+                  <div className="hw-tier-header">
+                    <span className="hw-tier-name" style={{ color: tier.color }}>
+                      {tier.name}
+                    </span>
                     <span
+                      className="hw-vram-badge"
                       style={{
-                        ...vramBadgeStyle,
                         background: `${tier.color}20`,
                         color: tier.color,
                       }}
@@ -409,11 +170,9 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
                       {tier.vram} VRAM
                     </span>
                   </div>
-                  <div style={{ fontSize: "12px", color: "#8a8a9a", marginBottom: "4px" }}>
-                    {tier.gpus}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#6a6a7a" }}>{tier.notes}</div>
-                  <div style={modelListStyle}>
+                  <div className="hw-tier-gpus">{tier.gpus}</div>
+                  <div className="hw-tier-notes">{tier.notes}</div>
+                  <div className="hw-model-list">
                     {tier.models.map((model) => (
                       <ModelTag key={model} model={model} onClick={handleModelClick} />
                     ))}
@@ -425,28 +184,28 @@ export default function HardwareGuideModal({ isOpen, onClose, onInstallModel }) 
         </div>
 
         {/* Finding Models Section */}
-        <div style={{ ...sectionStyle, marginTop: "8px" }}>
-          <h3 style={sectionTitleStyle}>Finding More Models</h3>
-          <p style={textStyle}>
+        <div className="hw-section" style={{ marginTop: "8px" }}>
+          <h3 className="hw-section-title">Finding More Models</h3>
+          <p className="hw-text">
             Browse the Ollama model library for all available models:
           </p>
-          <p style={{ ...textStyle, marginBottom: "8px" }}>
+          <p className="hw-text" style={{ marginBottom: "8px" }}>
             <a
               href="https://ollama.com/library"
               target="_blank"
               rel="noopener noreferrer"
-              style={linkStyle}
+              className="hw-link"
             >
               ollama.com/library
             </a>
           </p>
-          <p style={textStyle}>
-            Look for tags like <code style={{ color: "#6ee7b7" }}>:7b-q4_K_M</code> which
+          <p className="hw-text">
+            Look for tags like <code style={{ color: "var(--color-primary)" }}>:7b-q4_K_M</code> which
             indicate 7 billion parameters with 4-bit quantization — these use less VRAM.
           </p>
         </div>
 
-        <div style={tipBoxStyle}>
+        <div className="hw-tip-box">
           <strong>Tip:</strong> If a model runs slowly or crashes, try a smaller quantization
           (e.g., <code>mistral:7b-q4</code> instead of <code>mistral:7b</code>) or a smaller
           model.
