@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = {
   enableThinking: false,
   enableTools: false,
   enabledTools: ["web_search", "get_current_time"],
+  theme: "dark",
 };
 
 // Available tools for the UI

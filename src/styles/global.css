@@ -44,6 +44,10 @@
   --color-modal-bg: linear-gradient(145deg, #0a0a10 0%, #080c14 100%);
   --color-code-bg: rgba(0, 0, 0, 0.5);
 
+  --color-body-bg: linear-gradient(145deg, #050508 0%, #08080c 50%, #060810 100%);
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.06);
+  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.12);
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -56,6 +60,57 @@
   --transition-fast: 0.15s ease;
   --transition-normal: 0.2s ease;
   --transition-slow: 0.3s ease;
+}
+
+/* ── Light Theme ─────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-primary: #059669;
+  --color-secondary: #2563eb;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-purple: #7c3aed;
+  --color-orange: #ea580c;
+
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #6b7280;
+
+  --color-surface: rgba(0, 0, 0, 0.02);
+  --color-surface-hover: rgba(0, 0, 0, 0.04);
+  --color-surface-input: rgba(0, 0, 0, 0.03);
+  --color-surface-input-hover: rgba(0, 0, 0, 0.05);
+
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-border-light: rgba(0, 0, 0, 0.12);
+  --color-border-separator: rgba(0, 0, 0, 0.06);
+
+  --color-primary-bg: rgba(5, 150, 105, 0.1);
+  --color-primary-bg-hover: rgba(5, 150, 105, 0.18);
+  --color-primary-border: rgba(5, 150, 105, 0.3);
+  --color-primary-border-hover: rgba(5, 150, 105, 0.5);
+
+  --color-secondary-bg: rgba(37, 99, 235, 0.1);
+  --color-secondary-bg-hover: rgba(37, 99, 235, 0.18);
+  --color-secondary-border: rgba(37, 99, 235, 0.3);
+  --color-secondary-border-hover: rgba(37, 99, 235, 0.5);
+
+  --color-danger-bg: rgba(220, 38, 38, 0.1);
+  --color-danger-bg-hover: rgba(220, 38, 38, 0.18);
+  --color-danger-border: rgba(220, 38, 38, 0.3);
+  --color-danger-border-hover: rgba(220, 38, 38, 0.5);
+
+  --color-ghost-bg: transparent;
+  --color-ghost-bg-hover: rgba(0, 0, 0, 0.04);
+  --color-ghost-border: rgba(0, 0, 0, 0.08);
+  --color-ghost-border-hover: rgba(0, 0, 0, 0.15);
+
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-modal-bg: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  --color-code-bg: rgba(0, 0, 0, 0.05);
+
+  --color-body-bg: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
+  --color-scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --color-scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
 }
 
 /* ── Shared Keyframe Animations ──────────────────────────── */
@@ -85,12 +140,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 /* ── Range Input Styling ─────────────────────────────────── */

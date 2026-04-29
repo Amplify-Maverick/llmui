@@ -16,12 +16,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("chat");
   const [showShortcuts, setShowShortcuts] = useState(false);
   const { loadConversations, createConversation } = useChatStore();
-  const { loadSettings, defaultModel } = useSettingsStore();
+  const { loadSettings, defaultModel, theme } = useSettingsStore();
 
   useEffect(() => {
     loadSettings();
     loadConversations();
   }, [loadSettings, loadConversations]);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme || 'dark');
+  }, [theme]);
 
   // Keyboard shortcuts handlers
   const shortcutHandlers = useMemo(

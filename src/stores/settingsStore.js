@@ -42,6 +42,7 @@ export const useSettingsStore = create((set, get) => ({
       enableThinking: state.enableThinking,
       enableTools: state.enableTools,
       enabledTools: state.enabledTools,
+      theme: state.theme,
     });
   },
 
