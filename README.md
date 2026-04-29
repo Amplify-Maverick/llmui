@@ -13,6 +13,7 @@ A web interface for chatting with local LLMs through Ollama.
 - **Pull and delete models** directly from the UI
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
 - **Conversation history** - stored in SQLite at `~/.llmui/` with full-text search
+- **Conversation branching** - edit any message to create alternate branches, navigate between them
 - **Hardware guide** - helps figure out what models will run on your system
 - Configurable system prompts, temperature, max tokens
 
@@ -172,6 +173,17 @@ ollama serve
 ```
 
 Without this setting, Ollama will swap models in and out of GPU memory sequentially, which significantly reduces the parallelism benefit. The UI will show a warning if your selected models' combined VRAM exceeds your GPU capacity.
+
+### Conversation Branching
+
+Edit any message in a conversation to create an alternate branch. The original conversation is preserved, and you can navigate between branches using the arrow controls that appear when a message has multiple versions.
+
+This is useful for:
+- Trying different phrasings of a prompt to see how the model responds
+- Exploring alternative directions in a conversation without losing the original
+- A/B testing different approaches to a problem
+
+Branches are stored as part of the conversation history and persist across sessions.
 
 ## Data storage
 
