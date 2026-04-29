@@ -10,6 +10,15 @@ import os from "os";
 import { nanoid } from "nanoid";
 import { getToolsSchema, executeTool } from "./tools/index.js";
 
+// Database and API imports
+import { getDb, closeDb } from "./db/index.js";
+import { checkAndMigrate } from "./db/migrate.js";
+import conversationsRouter from "./api/conversations.js";
+import messagesRouter from "./api/messages.js";
+import settingsRouter from "./api/settings.js";
+import searchRouter from "./api/search.js";
+import backupRouter from "./api/backup.js";
+
 const execFileAsync = promisify(execFile);
 
 const app = express();
@@ -663,9 +672,53 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
   }
 });
 
+// ============================================================
+// SQLite-backed API endpoints (new)
+// ============================================================
+app.use("/api/conversations", requireAuth, conversationsRouter);
+app.use("/api", requireAuth, messagesRouter);
+app.use("/api/settings", requireAuth, settingsRouter);
+app.use("/api/search", requireAuth, searchRouter);
+app.use("/api/backup", requireAuth, backupRouter);
+
+// ============================================================
+// Startup
+// ============================================================
+const args = process.argv.slice(2);
+const dryRun = args.includes("--dry-run");
+
 await ensureStorageDir();
 await getOrCreateToken();
 await loadOllamaConfig();
+
+// Initialize database and run migration if needed
+console.log("Initializing database...");
+getDb();
+
+const migrationResult = await checkAndMigrate({ dryRun });
+if (migrationResult.log.length > 0 && migrationResult.migrated) {
+  console.log("Migration completed successfully");
+}
+
+if (dryRun && migrationResult.dryRun) {
+  console.log("Dry run complete. Exiting.");
+  closeDb();
+  process.exit(0);
+}
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("Shutting down...");
+  closeDb();
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  console.log("Shutting down...");
+  closeDb();
+  process.exit(0);
+});
+
 app.listen(PORT, () => {
   console.log(`Storage server running on http://localhost:${PORT}`);
   console.log(`Data directory: ${STORAGE_DIR}`);

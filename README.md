@@ -7,7 +7,7 @@ A web interface for chatting with local LLMs through Ollama.
 - **Compare models** - send the same prompt to 2-4 models and see responses side-by-side
 - **Pull and delete models** directly from the UI
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
-- **Conversation history** - saved to `~/.llmui/` on your device
+- **Conversation history** - stored in SQLite at `~/.llmui/` with full-text search
 - **Hardware guide** - helps figure out what models will run on your system
 - Configurable system prompts, temperature, max tokens
 
@@ -115,7 +115,36 @@ Without this setting, Ollama will swap models in and out of GPU memory sequentia
 
 ## Data storage
 
-Conversations and settings are stored in `~/.llmui/` as JSON files. This persists your data independently of the browser.
+All data is stored locally in `~/.llmui/`:
+
+- **Database**: `llmui.db` - SQLite database (WAL mode) containing conversations, messages, and settings
+- **Auth token**: `token` - bearer token for API authentication
+- **Backups**: `backups/` - database backups created via the API
+
+### Migration from JSON
+
+If you're upgrading from a previous version that used JSON files, the server automatically migrates your data to SQLite on first startup. Your original JSON files are preserved in `~/.llmui/legacy_backup_<timestamp>/`.
+
+To preview what will be migrated without making changes:
+```bash
+node server/index.js --dry-run
+```
+
+### Full-text search
+
+The database includes FTS5 full-text search across all messages. Search endpoint:
+```
+GET /api/search?q=<query>&conversation_id=<optional>
+```
+
+### Backup
+
+Create a database backup:
+```bash
+curl -X POST -H "Authorization: Bearer $(cat ~/.llmui/token)" http://localhost:3001/api/backup
+```
+
+Backups are stored in `~/.llmui/backups/`.
 
 ## Authentication & LAN Access
 

@@ -1,14 +1,75 @@
 import { authHeaders } from "../services/auth.js";
 
-const STORAGE_API = "http://localhost:3001/storage";
+const API_BASE = "http://localhost:3001/api";
+
+// Key pattern handlers - map storage keys to appropriate API calls
+function getKeyHandler(key) {
+  // Conversation index → GET /api/conversations
+  if (key === "llmui_conv_index") {
+    return {
+      load: async () => {
+        const res = await fetch(`${API_BASE}/conversations`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.conversations;
+      },
+      // Saving the index is a no-op - index is derived from conversations table
+      // Individual conversation updates happen via PATCH /api/conversations/:id
+      save: async () => {},
+    };
+  }
+
+  // Conversation messages → GET/PUT /api/conversations/:id/messages
+  const convMatch = key.match(/^llmui_conv_(.+)$/);
+  if (convMatch) {
+    const conversationId = convMatch[1];
+    return {
+      load: async () => {
+        const res = await fetch(
+          `${API_BASE}/conversations/${conversationId}/messages`,
+          { headers: await authHeaders() }
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.messages;
+      },
+      save: async (messages) => {
+        // Bulk replace all messages for this conversation
+        await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
+          method: "PUT",
+          headers: await authHeaders(),
+          body: JSON.stringify({ messages }),
+        });
+      },
+    };
+  }
+
+  // Settings and active conversation → GET/PUT /api/settings/:key
+  return {
+    load: async () => {
+      const res = await fetch(`${API_BASE}/settings/${key}`, {
+        headers: await authHeaders(),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.data;
+    },
+    save: async (value) => {
+      await fetch(`${API_BASE}/settings/${key}`, {
+        method: "PUT",
+        headers: await authHeaders(),
+        body: JSON.stringify({ data: value }),
+      });
+    },
+  };
+}
 
 export async function loadFromStorage(key) {
   try {
-    const response = await fetch(`${STORAGE_API}/${key}`, {
-      headers: await authHeaders(),
-    });
-    const result = await response.json();
-    return result.data;
+    const handler = getKeyHandler(key);
+    return await handler.load();
   } catch (error) {
     console.error(`Error loading ${key} from storage:`, error);
     return null;
@@ -17,11 +78,8 @@ export async function loadFromStorage(key) {
 
 export async function saveToStorage(key, value) {
   try {
-    await fetch(`${STORAGE_API}/${key}`, {
-      method: "PUT",
-      headers: await authHeaders(),
-      body: JSON.stringify({ data: value }),
-    });
+    const handler = getKeyHandler(key);
+    await handler.save(value);
   } catch (error) {
     console.error(`Error saving ${key} to storage:`, error);
   }
@@ -29,7 +87,19 @@ export async function saveToStorage(key, value) {
 
 export async function removeFromStorage(key) {
   try {
-    await fetch(`${STORAGE_API}/${key}`, {
+    // For conversation messages, delete the conversation
+    const convMatch = key.match(/^llmui_conv_(.+)$/);
+    if (convMatch) {
+      const conversationId = convMatch[1];
+      await fetch(`${API_BASE}/conversations/${conversationId}`, {
+        method: "DELETE",
+        headers: await authHeaders(),
+      });
+      return;
+    }
+
+    // For settings, delete the key
+    await fetch(`${API_BASE}/settings/${key}`, {
       method: "DELETE",
       headers: await authHeaders(),
     });

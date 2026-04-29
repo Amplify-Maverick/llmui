@@ -271,6 +271,9 @@ export default function ChatView() {
         </div>
       </div>
 
+      {/* GPU Stats - available in both modes */}
+      {showGpu && <GpuMini />}
+
       {compareMode ? (
         /* Compare Mode View */
         <CompareView
@@ -298,8 +301,6 @@ export default function ChatView() {
               )}
             </div>
           )}
-
-          {showGpu && <GpuMini />}
 
           <TokenCounter inputValue={inputValue} />
 
