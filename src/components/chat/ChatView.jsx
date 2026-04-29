@@ -28,13 +28,14 @@ export default function ChatView() {
     streamingContent,
     streamingTokenCount,
     streamingStartTime,
+    streamingToolCalls,
     deleteMessage,
     editMessageAndTruncate,
     removeLastAssistantMessage,
     getLastUserMessage,
   } = useChatStore();
 
-  const { defaultModel, enableThinking, updateSetting } = useSettingsStore();
+  const { defaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
   const { localModels, fetchModels, modelInfoCache, fetchModelInfo, runningModels, fetchRunningModels, unloadModel } = useModelsStore();
   const { sendMessage, stopStreaming, regenerateLastMessage } = useOllamaStream();
   const [isUnloading, setIsUnloading] = useState(false);
@@ -186,11 +187,33 @@ export default function ChatView() {
             Think
           </button>
           <button
+            className={`tools-toggle ${enableTools ? "active" : ""}`}
+            onClick={() => updateSetting("enableTools", !enableTools)}
+            title={
+              enableTools
+                ? "Disable tool calling"
+                : "Enable tool calling (web search, calculator, etc.)"
+            }
+          >
+            Tools
+            {enableTools && currentModelInfo && !currentModelInfo.supportsTools && (
+              <span className="tools-warning" title="Model may not support tool calling">!</span>
+            )}
+          </button>
+          <button
             className={`gpu-toggle ${showGpu ? "active" : ""}`}
             onClick={() => setShowGpu((v) => !v)}
             title={showGpu ? "Hide GPU stats" : "Show GPU stats"}
           >
             GPU
+          </button>
+          <button
+            className={`unload-btn ${isModelRunning ? "active" : ""}`}
+            onClick={handleUnloadModel}
+            disabled={!isModelRunning || isUnloading || isStreaming}
+            title={isModelRunning ? "Unload model from VRAM" : "Model not loaded in VRAM"}
+          >
+            {isUnloading ? "Unloading..." : "Unload"}
           </button>
           <Select
             value={defaultModel}
@@ -199,16 +222,6 @@ export default function ChatView() {
             placeholder="Select a model"
             style={{ width: "200px" }}
           />
-          {isModelRunning && (
-            <button
-              className="unload-btn"
-              onClick={handleUnloadModel}
-              disabled={isUnloading || isStreaming}
-              title="Unload model from VRAM"
-            >
-              {isUnloading ? "Unloading..." : "Unload"}
-            </button>
-          )}
         </div>
       </div>
 
@@ -260,7 +273,7 @@ export default function ChatView() {
             ))}
             {/* Isolated streaming bubble — only this re-renders per token */}
             {isStreaming && (
-              streamingContent === ""
+              streamingContent === "" && (!streamingToolCalls || streamingToolCalls.length === 0)
                 ? <StreamingIndicator />
                 : <StreamingBubble model={streamingModel} />
             )}

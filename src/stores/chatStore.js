@@ -24,6 +24,7 @@ export const useChatStore = create((set, get) => ({
   streamingContent: "",
   streamingTokenCount: 0,
   streamingStartTime: null,
+  streamingToolCalls: [], // {id, name, arguments, status: 'calling'|'completed', result?, error?}
   isLoading: true,
 
   // ================================================================
@@ -341,12 +342,34 @@ export const useChatStore = create((set, get) => ({
     }));
   },
 
+  appendToolCall: (toolCall) => {
+    set((state) => ({
+      streamingToolCalls: [
+        ...state.streamingToolCalls,
+        { ...toolCall, status: "calling" },
+      ],
+    }));
+  },
+
+  completeToolCall: (id, result, error) => {
+    set((state) => ({
+      streamingToolCalls: state.streamingToolCalls.map((tc) =>
+        tc.id === id ? { ...tc, status: "completed", result, error } : tc
+      ),
+    }));
+  },
+
+  clearToolCalls: () => {
+    set({ streamingToolCalls: [] });
+  },
+
   finalizeStream: (extras = {}) => {
     const {
       streamingContent,
       messages,
       streamingTokenCount,
       streamingStartTime,
+      streamingToolCalls,
     } = get();
 
     // Calculate tokens per second
@@ -358,13 +381,16 @@ export const useChatStore = create((set, get) => ({
       }
     }
 
+    // Include tool calls if any were made
+    const finalExtras = { ...extras, tokensPerSec };
+    if (streamingToolCalls.length > 0) {
+      finalExtras.toolCalls = streamingToolCalls;
+    }
+
     if (messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === "assistant") {
-        get().updateMessage(lastMessage.id, streamingContent, {
-          ...extras,
-          tokensPerSec,
-        });
+        get().updateMessage(lastMessage.id, streamingContent, finalExtras);
       }
     }
     set({
@@ -372,6 +398,7 @@ export const useChatStore = create((set, get) => ({
       streamingContent: "",
       streamingTokenCount: 0,
       streamingStartTime: null,
+      streamingToolCalls: [],
     });
     get()._saveCurrentConversation();
   },

@@ -1,5 +1,6 @@
 import { useChatStore } from "../../stores/chatStore.js";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
+import ToolCallCard from "./ToolCallCard.jsx";
 import "./MessageBubble.css";
 
 /**
@@ -11,6 +12,7 @@ import "./MessageBubble.css";
  */
 export default function StreamingBubble({ model }) {
   const streamingContent = useChatStore((s) => s.streamingContent);
+  const streamingToolCalls = useChatStore((s) => s.streamingToolCalls);
 
   return (
     <div className="message-row">
@@ -19,6 +21,15 @@ export default function StreamingBubble({ model }) {
           Assistant
           {model && <span className="bubble-model">{model}</span>}
         </div>
+
+        {/* Tool calls display */}
+        {streamingToolCalls && streamingToolCalls.length > 0 && (
+          <div className="tool-calls-container">
+            {streamingToolCalls.map((tc) => (
+              <ToolCallCard key={tc.id} toolCall={tc} />
+            ))}
+          </div>
+        )}
 
         <div className="bubble-content">
           {streamingContent ? (

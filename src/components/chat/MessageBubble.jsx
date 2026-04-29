@@ -1,5 +1,6 @@
 import { useState, useCallback, memo } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
+import ToolCallCard from "./ToolCallCard.jsx";
 import "./MessageBubble.css";
 
 // Icons as inline SVGs for better control
@@ -127,6 +128,15 @@ const MessageBubble = memo(function MessageBubble({
             <span className="bubble-tokens-per-sec">{formatTokensPerSec(message.tokensPerSec)}</span>
           )}
         </div>
+
+        {/* Tool calls for assistant messages */}
+        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="tool-calls-container">
+            {message.toolCalls.map((tc) => (
+              <ToolCallCard key={tc.id} toolCall={tc} />
+            ))}
+          </div>
+        )}
 
         {isEditing ? (
           <div className="bubble-edit">

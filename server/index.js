@@ -7,6 +7,8 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { nanoid } from "nanoid";
+import { getToolsSchema, executeTool } from "./tools/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -347,6 +349,175 @@ app.post("/ollama/chat", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Error proxying chat request:", err);
     res.status(502).json({ error: "Failed to connect to Ollama" });
+  }
+});
+
+// POST /ollama/chat-with-tools - Chat with tool calling support (authenticated, streaming)
+const MAX_TOOL_ITERATIONS = 5;
+
+app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
+  const { model, messages, options = {}, enabledTools = null } = req.body;
+
+  if (!model) {
+    return res.status(400).json({ error: "Model is required" });
+  }
+
+  // Get tools schema for enabled tools
+  const tools = getToolsSchema(enabledTools);
+
+  res.setHeader("Content-Type", "application/x-ndjson");
+
+  let currentMessages = [...messages];
+  let iterations = 0;
+
+  try {
+    while (iterations < MAX_TOOL_ITERATIONS) {
+      iterations++;
+
+      // Call Ollama with tools
+      const response = await fetch(`${ollamaUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: currentMessages,
+          tools: tools.length > 0 ? tools : undefined,
+          stream: true,
+          options: options.modelOptions || {},
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        res.write(JSON.stringify({ type: "error", error: errorText }) + "\n");
+        res.end();
+        return;
+      }
+
+      // Stream and collect the response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+      let toolCalls = [];
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const parsed = JSON.parse(line);
+
+            // Stream content to client
+            if (parsed.message?.content) {
+              assistantContent += parsed.message.content;
+              res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
+            }
+
+            // Collect tool calls from the final message
+            if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
+              toolCalls = parsed.message.tool_calls;
+            }
+
+            if (parsed.done) {
+              break;
+            }
+          } catch {
+            // Skip malformed JSON lines
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer);
+          if (parsed.message?.content) {
+            assistantContent += parsed.message.content;
+            res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
+          }
+          if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
+            toolCalls = parsed.message.tool_calls;
+          }
+        } catch {
+          // Skip malformed JSON
+        }
+      }
+
+      // If no tool calls, we're done
+      if (toolCalls.length === 0) {
+        res.write(JSON.stringify({ type: "done", iterations }) + "\n");
+        res.end();
+        return;
+      }
+
+      // Add assistant message with tool calls to history
+      currentMessages.push({
+        role: "assistant",
+        content: assistantContent,
+        tool_calls: toolCalls,
+      });
+
+      // Execute each tool and emit results
+      for (const toolCall of toolCalls) {
+        const { function: fn } = toolCall;
+        const toolId = toolCall.id || nanoid();
+        const toolName = fn.name;
+        let toolArgs = fn.arguments;
+
+        // Parse arguments if they're a string
+        if (typeof toolArgs === "string") {
+          try {
+            toolArgs = JSON.parse(toolArgs);
+          } catch {
+            toolArgs = {};
+          }
+        }
+
+        // Emit tool call event
+        res.write(JSON.stringify({
+          type: "tool_call",
+          id: toolId,
+          name: toolName,
+          arguments: toolArgs,
+        }) + "\n");
+
+        // Execute tool
+        const result = await executeTool(toolName, toolArgs);
+
+        // Emit tool result
+        res.write(JSON.stringify({
+          type: "tool_result",
+          id: toolId,
+          name: toolName,
+          result: result.success ? result.result : null,
+          error: result.success ? null : result.error,
+        }) + "\n");
+
+        // Add tool result to messages (Ollama expects role: "tool")
+        currentMessages.push({
+          role: "tool",
+          content: JSON.stringify(result.success ? result.result : { error: result.error }),
+        });
+      }
+
+      // Continue loop - model will generate new response with tool results
+    }
+
+    // Max iterations reached
+    res.write(JSON.stringify({ type: "error", error: "Max tool iterations reached" }) + "\n");
+    res.end();
+  } catch (err) {
+    console.error("Error in chat-with-tools:", err);
+    res.write(JSON.stringify({ type: "error", error: err.message || "Tool execution failed" }) + "\n");
+    res.end();
   }
 });
 

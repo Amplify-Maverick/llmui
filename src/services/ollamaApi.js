@@ -80,6 +80,53 @@ class OllamaAPI {
     }
   }
 
+  async *chatStreamWithTools(model, messages, options = {}) {
+    const response = await fetch(`${AUTH_SERVER}/ollama/chat-with-tools`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({
+        model,
+        messages,
+        enabledTools: options.enabledTools || null,
+        options: {
+          modelOptions: {
+            temperature: options.temperature,
+            num_predict: options.maxTokens,
+          },
+        },
+      }),
+      signal: options.signal,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || "Failed to start chat with tools");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter(Boolean);
+
+        for (const line of lines) {
+          try {
+            yield JSON.parse(line);
+          } catch {
+            // Skip malformed JSON lines
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   async *pullModel(name) {
     const response = await fetch(`${AUTH_SERVER}/ollama/pull`, {
       method: "POST",

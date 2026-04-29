@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
+import { AVAILABLE_TOOLS } from "../../constants/config.js";
 import { TextArea, Select } from "../shared/Input.jsx";
 import "./SettingsPanel.css";
 
@@ -14,6 +15,8 @@ export default function SettingsPanel() {
     ollamaUrlError,
     defaultModel,
     enableThinking,
+    enableTools,
+    enabledTools,
     updateSetting,
     updateOllamaUrl,
   } = useSettingsStore();
@@ -179,6 +182,51 @@ export default function SettingsPanel() {
           The model will show its thought process before answering.
         </p>
       </div>
+
+      <div className="settings-divider" />
+
+      <div className="settings-section">
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={enableTools}
+            onChange={(e) => updateSetting("enableTools", e.target.checked)}
+            className="settings-checkbox"
+          />
+          <span className="settings-label">Enable Tool Calling</span>
+        </label>
+        <p className="settings-description">
+          Allow models to use tools like web search, URL fetching, and calculations.
+          Only works with models that support tool calling (Llama 3.1+, Qwen 2.5+, Mistral, etc.).
+        </p>
+      </div>
+
+      {enableTools && (
+        <div className="settings-section">
+          <label className="settings-label">Enabled Tools</label>
+          <div className="settings-tools-list">
+            {AVAILABLE_TOOLS.map((tool) => (
+              <label key={tool.name} className="settings-toggle-row settings-tool-item">
+                <input
+                  type="checkbox"
+                  checked={enabledTools?.includes(tool.name) ?? false}
+                  onChange={(e) => {
+                    const newTools = e.target.checked
+                      ? [...(enabledTools || []), tool.name]
+                      : (enabledTools || []).filter((t) => t !== tool.name);
+                    updateSetting("enabledTools", newTools);
+                  }}
+                  className="settings-checkbox"
+                />
+                <div className="settings-tool-info">
+                  <span className="settings-tool-name">{tool.displayName}</span>
+                  <span className="settings-tool-desc">{tool.description}</span>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

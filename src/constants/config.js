@@ -12,7 +12,18 @@ export const DEFAULT_SETTINGS = {
   maxTokens: 2048,
   customTags: [],
   enableThinking: false,
+  enableTools: false,
+  enabledTools: ["web_search", "get_current_time"],
 };
+
+// Available tools for the UI
+export const AVAILABLE_TOOLS = [
+  { name: "web_search", displayName: "Web Search", description: "Search the web using DuckDuckGo" },
+  { name: "fetch_url", displayName: "Fetch URL", description: "Fetch content from a URL" },
+  { name: "get_current_time", displayName: "Current Time", description: "Get the current date and time" },
+  { name: "calculator", displayName: "Calculator", description: "Evaluate mathematical expressions" },
+  { name: "file_read", displayName: "File Read", description: "Read files from the tool sandbox" },
+];
 
 export const STORAGE_KEYS = {
   settings: "llmui_settings",

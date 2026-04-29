@@ -1,0 +1,130 @@
+.tool-call-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.tool-call-card.calling {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-bg);
+}
+
+.tool-call-card.completed {
+  border-color: var(--color-border);
+}
+
+.tool-call-card.error {
+  border-color: var(--color-error-border);
+  background: var(--color-error-bg);
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.tool-call-header:hover {
+  background: var(--color-bg-hover);
+}
+
+.tool-call-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.tool-call-preview {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-call-expand {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.tool-call-expand.expanded {
+  transform: rotate(0deg);
+}
+
+.tool-call-details {
+  border-top: 1px solid var(--color-border);
+  padding: 12px;
+  background: var(--color-bg-tertiary);
+}
+
+.tool-call-section {
+  margin-bottom: 12px;
+}
+
+.tool-call-section:last-child {
+  margin-bottom: 0;
+}
+
+.tool-call-section-label {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.tool-call-json {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.tool-call-json.error-text {
+  color: var(--color-error);
+}
+
+/* Animation for calling state */
+.tool-call-card.calling .tool-call-icon {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Tool calls container */
+.tool-calls-container {
+  margin-bottom: 12px;
+}

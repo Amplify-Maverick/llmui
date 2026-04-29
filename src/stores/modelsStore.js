@@ -108,9 +108,41 @@ export const useModelsStore = create((set, get) => ({
       // Default fallback based on common models
       if (!contextLength) contextLength = 4096;
 
+      // Detect tool calling support
+      let supportsTools = false;
+
+      // Check template for tool-related markers
+      if (info.template) {
+        const template = info.template.toLowerCase();
+        if (
+          template.includes("tool") ||
+          template.includes("<|python") ||
+          template.includes("function") ||
+          template.includes("<tool_call>")
+        ) {
+          supportsTools = true;
+        }
+      }
+
+      // Heuristic: known model families that support tools
+      if (!supportsTools) {
+        const toolFamilies = [
+          "llama3", "llama-3", "llama:3",
+          "qwen", "qwen2",
+          "mistral", "mixtral",
+          "command-r", "command",
+          "granite",
+          "hermes",
+          "firefunction",
+        ];
+        const lowerName = modelName.toLowerCase();
+        supportsTools = toolFamilies.some((f) => lowerName.includes(f));
+      }
+
       const modelInfo = {
         name: modelName,
         contextLength,
+        supportsTools,
         details: info.details || {},
         rawParameters: info.parameters || "",
       };

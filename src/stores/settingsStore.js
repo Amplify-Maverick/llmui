@@ -40,6 +40,8 @@ export const useSettingsStore = create((set, get) => ({
       maxTokens: state.maxTokens,
       customTags: state.customTags,
       enableThinking: state.enableThinking,
+      enableTools: state.enableTools,
+      enabledTools: state.enabledTools,
     });
   },
 

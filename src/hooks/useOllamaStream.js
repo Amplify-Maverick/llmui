@@ -14,6 +14,9 @@ export function useOllamaStream() {
     addMessage,
     setStreaming,
     appendStreamContent,
+    appendToolCall,
+    completeToolCall,
+    clearToolCalls,
     finalizeStream,
     createConversation,
     updateConversationModel,
@@ -21,7 +24,7 @@ export function useOllamaStream() {
     getLastUserMessage,
   } = useChatStore();
 
-  const { defaultModel, systemPrompt, temperature, maxTokens, enableThinking } =
+  const { defaultModel, systemPrompt, temperature, maxTokens, enableThinking, enableTools, enabledTools } =
     useSettingsStore();
 
   const sendMessage = useCallback(
@@ -72,18 +75,52 @@ export function useOllamaStream() {
 
       const startTime = Date.now();
 
-      try {
-        for await (const chunk of ollamaApi.chatStream(
-          selectedModel,
-          chatMessages,
-          { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
-        )) {
-          if (chunk.message?.content) {
-            appendStreamContent(chunk.message.content);
-          }
+      // Clear any previous tool calls
+      clearToolCalls();
 
-          if (chunk.done) {
-            break;
+      try {
+        // Use tools endpoint if tools are enabled
+        if (enableTools && enabledTools && enabledTools.length > 0) {
+          for await (const event of ollamaApi.chatStreamWithTools(
+            selectedModel,
+            chatMessages,
+            { temperature, maxTokens, enabledTools, signal: abortControllerRef.current.signal }
+          )) {
+            switch (event.type) {
+              case "content":
+                appendStreamContent(event.content);
+                break;
+              case "tool_call":
+                appendToolCall({
+                  id: event.id,
+                  name: event.name,
+                  arguments: event.arguments,
+                });
+                break;
+              case "tool_result":
+                completeToolCall(event.id, event.result, event.error);
+                break;
+              case "done":
+                // Stream complete
+                break;
+              case "error":
+                throw new Error(event.error);
+            }
+          }
+        } else {
+          // Regular chat without tools
+          for await (const chunk of ollamaApi.chatStream(
+            selectedModel,
+            chatMessages,
+            { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
+          )) {
+            if (chunk.message?.content) {
+              appendStreamContent(chunk.message.content);
+            }
+
+            if (chunk.done) {
+              break;
+            }
           }
         }
 
@@ -103,6 +140,7 @@ export function useOllamaStream() {
           }
         }
         setStreaming(false, "");
+        clearToolCalls();
       }
     },
     [
@@ -112,9 +150,14 @@ export function useOllamaStream() {
       temperature,
       maxTokens,
       enableThinking,
+      enableTools,
+      enabledTools,
       addMessage,
       setStreaming,
       appendStreamContent,
+      appendToolCall,
+      completeToolCall,
+      clearToolCalls,
       finalizeStream,
       createConversation,
       updateConversationModel,
@@ -162,18 +205,50 @@ export function useOllamaStream() {
 
       const startTime = Date.now();
 
-      try {
-        for await (const chunk of ollamaApi.chatStream(
-          selectedModel,
-          chatMessages,
-          { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
-        )) {
-          if (chunk.message?.content) {
-            appendStreamContent(chunk.message.content);
-          }
+      // Clear any previous tool calls
+      clearToolCalls();
 
-          if (chunk.done) {
-            break;
+      try {
+        // Use tools endpoint if tools are enabled
+        if (enableTools && enabledTools && enabledTools.length > 0) {
+          for await (const event of ollamaApi.chatStreamWithTools(
+            selectedModel,
+            chatMessages,
+            { temperature, maxTokens, enabledTools, signal: abortControllerRef.current.signal }
+          )) {
+            switch (event.type) {
+              case "content":
+                appendStreamContent(event.content);
+                break;
+              case "tool_call":
+                appendToolCall({
+                  id: event.id,
+                  name: event.name,
+                  arguments: event.arguments,
+                });
+                break;
+              case "tool_result":
+                completeToolCall(event.id, event.result, event.error);
+                break;
+              case "done":
+                break;
+              case "error":
+                throw new Error(event.error);
+            }
+          }
+        } else {
+          for await (const chunk of ollamaApi.chatStream(
+            selectedModel,
+            chatMessages,
+            { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
+          )) {
+            if (chunk.message?.content) {
+              appendStreamContent(chunk.message.content);
+            }
+
+            if (chunk.done) {
+              break;
+            }
           }
         }
 
@@ -192,6 +267,7 @@ export function useOllamaStream() {
           }
         }
         setStreaming(false, "");
+        clearToolCalls();
       }
     },
     [
@@ -200,9 +276,14 @@ export function useOllamaStream() {
       temperature,
       maxTokens,
       enableThinking,
+      enableTools,
+      enabledTools,
       addMessage,
       setStreaming,
       appendStreamContent,
+      appendToolCall,
+      completeToolCall,
+      clearToolCalls,
       finalizeStream,
       removeLastAssistantMessage,
       getLastUserMessage,
