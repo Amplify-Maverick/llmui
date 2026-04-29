@@ -54,6 +54,39 @@ const MIGRATIONS = [
         db.exec('ALTER TABLE conversations ADD COLUMN compare_models TEXT');
       }
     }
+  },
+  {
+    version: 3,
+    description: 'Add source tracking for multi-client support (web, telegram, cli, api)',
+    up: (db) => {
+      const tableInfo = db.prepare("PRAGMA table_info(conversations)").all();
+      const existingColumns = new Set(tableInfo.map(col => col.name));
+
+      // Add source column (web, telegram, cli, api, etc.)
+      if (!existingColumns.has('source')) {
+        db.exec("ALTER TABLE conversations ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
+      }
+
+      // Add source_metadata for client-specific data (e.g., telegram_user_id, telegram_chat_id)
+      if (!existingColumns.has('source_metadata')) {
+        db.exec('ALTER TABLE conversations ADD COLUMN source_metadata TEXT');
+      }
+
+      // Add index for filtering by source
+      try {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_conversations_source ON conversations(source, updated_at DESC)');
+      } catch (err) {
+        // Index might already exist
+      }
+
+      // Create telegram_active_conversation table for tracking active conversation per Telegram user
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS telegram_active_conversation (
+          telegram_chat_id INTEGER PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE
+        )
+      `);
+    }
   }
 ];
 

@@ -20,7 +20,16 @@ export const SCHEMA_SQL = `
     enable_thinking INTEGER,
     -- Compare mode support
     is_compare INTEGER DEFAULT 0,
-    compare_models TEXT
+    compare_models TEXT,
+    -- Multi-client source tracking (web, telegram, cli, api)
+    source TEXT NOT NULL DEFAULT 'web',
+    source_metadata TEXT
+  );
+
+  -- Telegram active conversation tracking
+  CREATE TABLE IF NOT EXISTS telegram_active_conversation (
+    telegram_chat_id INTEGER PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE
   );
 
   -- Messages table
@@ -45,6 +54,7 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_conversations_archived ON conversations(archived, updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_conversations_source ON conversations(source, updated_at DESC);
 
   -- Settings table (key-value store)
   CREATE TABLE IF NOT EXISTS settings (

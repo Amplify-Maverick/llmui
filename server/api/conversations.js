@@ -5,26 +5,41 @@ import { getDb } from '../db/index.js';
 const router = express.Router();
 
 // GET /api/conversations - List conversations with pagination
+// Supports ?source=web|telegram|all filter (default: web for backwards compatibility)
+// Note: Messages from Telegram are stored in the same messages table with the same shape
+// as web messages - only the parent conversation's source field distinguishes them.
 router.get('/', (req, res) => {
   const db = getDb();
-  const { page = 1, limit = 50, archived = 'false' } = req.query;
+  const { page = 1, limit = 50, archived = 'false', source = 'web' } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const isArchived = archived === 'true' ? 1 : 0;
+
+  // Build source filter
+  let sourceFilter = '';
+  const params = [isArchived];
+
+  if (source === 'all') {
+    // No source filter
+  } else {
+    sourceFilter = 'AND source = ?';
+    params.push(source);
+  }
 
   const conversations = db.prepare(`
     SELECT id, title, model, tags, created_at as createdAt, updated_at as updatedAt, archived,
            parent_conversation_id as parentConversationId, branch_point_message_id as branchPointMessageId,
            temperature, max_tokens as maxTokens, system_prompt as systemPrompt, enable_thinking as enableThinking,
            is_compare as isCompare, compare_models as compareModels,
+           source, source_metadata as sourceMetadata,
            (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id) as messageCount,
            (SELECT COUNT(*) FROM conversations c2 WHERE c2.parent_conversation_id = conversations.id) as childBranchCount
     FROM conversations
-    WHERE archived = ?
+    WHERE archived = ? ${sourceFilter}
     ORDER BY updated_at DESC
     LIMIT ? OFFSET ?
-  `).all(isArchived, parseInt(limit), offset);
+  `).all(...params, parseInt(limit), offset);
 
-  const total = db.prepare('SELECT COUNT(*) as count FROM conversations WHERE archived = ?').get(isArchived);
+  const total = db.prepare(`SELECT COUNT(*) as count FROM conversations WHERE archived = ? ${sourceFilter}`).get(...params);
 
   res.json({
     conversations: conversations.map(c => ({
@@ -32,7 +47,8 @@ router.get('/', (req, res) => {
       tags: JSON.parse(c.tags || '[]'),
       enableThinking: c.enableThinking === 1 ? true : c.enableThinking === 0 ? false : null,
       isCompare: c.isCompare === 1,
-      compareModels: c.compareModels ? JSON.parse(c.compareModels) : null
+      compareModels: c.compareModels ? JSON.parse(c.compareModels) : null,
+      sourceMetadata: c.sourceMetadata ? JSON.parse(c.sourceMetadata) : null
     })),
     pagination: {
       page: parseInt(page),
@@ -45,14 +61,14 @@ router.get('/', (req, res) => {
 // POST /api/conversations - Create new conversation
 router.post('/', (req, res) => {
   const db = getDb();
-  const { model, title = 'New Chat', tags = [], isCompare = false, compareModels = null } = req.body;
+  const { model, title = 'New Chat', tags = [], isCompare = false, compareModels = null, source = 'web', sourceMetadata = null } = req.body;
   const id = nanoid();
   const now = Date.now();
 
   db.prepare(`
-    INSERT INTO conversations (id, title, model, tags, created_at, updated_at, is_compare, compare_models)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, title, model || null, JSON.stringify(tags), now, now, isCompare ? 1 : 0, compareModels ? JSON.stringify(compareModels) : null);
+    INSERT INTO conversations (id, title, model, tags, created_at, updated_at, is_compare, compare_models, source, source_metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, model || null, JSON.stringify(tags), now, now, isCompare ? 1 : 0, compareModels ? JSON.stringify(compareModels) : null, source, sourceMetadata ? JSON.stringify(sourceMetadata) : null);
 
   res.json({
     id,
@@ -64,7 +80,9 @@ router.post('/', (req, res) => {
     messageCount: 0,
     archived: 0,
     isCompare,
-    compareModels
+    compareModels,
+    source,
+    sourceMetadata
   });
 });
 
@@ -78,6 +96,7 @@ router.get('/:id', (req, res) => {
            parent_conversation_id as parentConversationId, branch_point_message_id as branchPointMessageId,
            temperature, max_tokens as maxTokens, system_prompt as systemPrompt, enable_thinking as enableThinking,
            is_compare as isCompare, compare_models as compareModels,
+           source, source_metadata as sourceMetadata,
            (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id) as messageCount,
            (SELECT COUNT(*) FROM conversations c2 WHERE c2.parent_conversation_id = conversations.id) as childBranchCount
     FROM conversations
@@ -93,7 +112,8 @@ router.get('/:id', (req, res) => {
     tags: JSON.parse(conversation.tags || '[]'),
     enableThinking: conversation.enableThinking === 1 ? true : conversation.enableThinking === 0 ? false : null,
     isCompare: conversation.isCompare === 1,
-    compareModels: conversation.compareModels ? JSON.parse(conversation.compareModels) : null
+    compareModels: conversation.compareModels ? JSON.parse(conversation.compareModels) : null,
+    sourceMetadata: conversation.sourceMetadata ? JSON.parse(conversation.sourceMetadata) : null
   });
 });
 

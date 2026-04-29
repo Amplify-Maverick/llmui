@@ -257,3 +257,125 @@ Multiple origins can be comma-separated.
 ## Keyboard shortcuts
 
 Press `Ctrl+/` (or `Cmd+/` on Mac) to see all shortcuts.
+
+## Telegram Bot
+
+LLMUI includes a Telegram bot integration that lets you chat with your local Ollama models from anywhere via Telegram DMs. The bot uses long polling (outbound connections only), so it works behind any NAT or firewall without needing a public URL or port forwarding.
+
+### Setup
+
+1. **Create a bot with BotFather:**
+   - Open Telegram and message [@BotFather](https://t.me/BotFather)
+   - Send `/newbot` and follow the prompts
+   - Copy the bot token (looks like `123456789:ABCdefGHI...`)
+
+2. **Create the configuration file** at `~/.llmui/telegram.json`:
+   ```json
+   {
+     "enabled": true,
+     "bot_token": "YOUR_BOT_TOKEN_HERE",
+     "allowed_user_ids": [],
+     "default_model": "llama3.2",
+     "system_prompt": "",
+     "command_prefix": "/"
+   }
+   ```
+
+3. **Get your Telegram user ID:**
+   - Start the LLMUI server: `npm run dev`
+   - Send any message to your bot on Telegram
+   - The bot will reply with your user ID (since `allowed_user_ids` is empty, it's in bootstrap mode)
+   - Alternatively, use the helper script:
+     ```bash
+     node scripts/get-telegram-user-id.js YOUR_BOT_TOKEN
+     ```
+
+4. **Add your user ID to the config:**
+   ```json
+   {
+     "enabled": true,
+     "bot_token": "YOUR_BOT_TOKEN_HERE",
+     "allowed_user_ids": [123456789],
+     "default_model": "llama3.2",
+     "system_prompt": "",
+     "command_prefix": "/"
+   }
+   ```
+
+5. **Restart the server.** The bot will now respond to your messages.
+
+### Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `enabled` | Set to `true` to enable the bot |
+| `bot_token` | Your Telegram bot token from BotFather |
+| `allowed_user_ids` | Array of Telegram user IDs allowed to use the bot. **Required for security.** |
+| `default_model` | Default Ollama model for new conversations |
+| `system_prompt` | Default system prompt for new conversations |
+| `command_prefix` | Prefix for commands (default: `/`) |
+
+The config file is created with mode 0600 (owner read/write only) since it contains the bot token.
+
+### Bot Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/model [name]` | Show current model or switch to a different one |
+| `/models` | List available models |
+| `/pull <name>` | Download a model from Ollama |
+| `/new [model]` | Start a new conversation |
+| `/system <prompt>` | Set system prompt for this conversation |
+| `/temp <0.0-2.0>` | Set temperature for this conversation |
+| `/stop` | Stop the current streaming response |
+| `/info` | Show conversation info (model, message count, etc.) |
+| `/regen` | Regenerate the last assistant response |
+| `/forget <n>` | Delete the last n message pairs |
+| `/list` | List your recent conversations |
+| `/switch <id>` | Switch to a different conversation |
+
+### How It Works
+
+- Each Telegram user gets one long-running conversation by default (not one per message)
+- Use `/new` to start a fresh conversation when you want to change topics
+- Responses stream in real-time via message edits (throttled to respect Telegram's rate limits)
+- Long responses are automatically split across multiple messages but stored as one in the database
+- Code blocks and formatting are converted to Telegram's HTML format
+- Conversations are stored in SQLite with `source='telegram'`
+
+### Security
+
+- **The allowlist is the security boundary.** Without your user ID in `allowed_user_ids`, the bot silently ignores all messages.
+- The bot only works in direct messages. Group chat messages are rejected.
+- Only one concurrent Ollama request per user to prevent resource exhaustion.
+- The config file permissions should be 0600 to protect your bot token.
+
+### Viewing Telegram Conversations
+
+Telegram conversations are stored in the same SQLite database but are not yet visible in the web UI sidebar (this is planned for a future update). The data is queryable via the API:
+
+```bash
+# List all conversations including Telegram
+curl -H "Authorization: Bearer $(cat ~/.llmui/token)" \
+  "http://localhost:3001/api/conversations?source=all"
+
+# List only Telegram conversations
+curl -H "Authorization: Bearer $(cat ~/.llmui/token)" \
+  "http://localhost:3001/api/conversations?source=telegram"
+```
+
+### Troubleshooting
+
+**Bot doesn't respond:**
+- Check the server logs for `[Telegram]` messages
+- Verify your user ID is in `allowed_user_ids`
+- Make sure the bot token is correct
+
+**"409 Conflict" error:**
+- Another instance is polling the same bot
+- Stop any other LLMUI servers or scripts using this bot token
+
+**Model not found:**
+- The model needs to be installed in Ollama first
+- Use `/pull <model>` to download it

@@ -20,6 +20,9 @@ import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
 
+// Telegram bot integration
+import { startTelegramBot, stopTelegramBot } from "./telegram/index.js";
+
 const execFileAsync = promisify(execFile);
 
 const app = express();
@@ -708,18 +711,21 @@ if (dryRun && migrationResult.dryRun) {
   process.exit(0);
 }
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("Shutting down...");
-  closeDb();
-  process.exit(0);
+// Start Telegram bot (after DB is ready)
+startTelegramBot().catch(err => {
+  console.error("Failed to start Telegram bot:", err.message);
 });
 
-process.on("SIGINT", () => {
+// Graceful shutdown
+async function shutdown() {
   console.log("Shutting down...");
+  await stopTelegramBot();
   closeDb();
   process.exit(0);
-});
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 app.listen(PORT, () => {
   console.log(`Storage server running on http://localhost:${PORT}`);
