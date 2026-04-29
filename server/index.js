@@ -435,6 +435,7 @@ app.delete("/ollama/delete", requireAuth, async (req, res) => {
 // ============================================================
 // GPU stats endpoint (authenticated)
 // Uses execFile (no shell) + async to avoid blocking the event loop.
+// Caches nvidia-smi output for 1 second — counters don't update faster.
 // ============================================================
 
 const NVIDIA_SMI_ARGS = [
@@ -442,7 +443,18 @@ const NVIDIA_SMI_ARGS = [
   "--format=csv,noheader,nounits",
 ];
 
+const GPU_CACHE_TTL_MS = 1000;
+let gpuCache = { data: null, timestamp: 0 };
+
 app.get("/api/gpu", requireAuth, async (req, res) => {
+  const now = Date.now();
+
+  // Return cached data if still fresh
+  if (gpuCache.data && now - gpuCache.timestamp < GPU_CACHE_TTL_MS) {
+    res.set("Cache-Control", "max-age=1");
+    return res.json(gpuCache.data);
+  }
+
   try {
     const { stdout } = await execFileAsync("nvidia-smi", NVIDIA_SMI_ARGS, {
       timeout: 3000,
@@ -466,7 +478,11 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
       };
     });
 
-    res.json({ ok: true, gpus, timestamp: Date.now() });
+    const response = { ok: true, gpus, timestamp: now };
+    gpuCache = { data: response, timestamp: now };
+
+    res.set("Cache-Control", "max-age=1");
+    res.json(response);
   } catch (err) {
     console.error("GPU stats error:", err);
     res.status(500).json({

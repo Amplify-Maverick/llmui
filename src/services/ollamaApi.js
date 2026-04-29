@@ -1,76 +1,33 @@
 /**
  * Ollama API client — all requests go through the authenticated Express server
  * on port 3001 (/ollama/*). No direct browser-to-Ollama connections.
- *
- * Auth token is fetched from the Vite plugin endpoint (/api/llmui-token),
- * consistent with how storage.js fetches its token.
  */
 
+import { authHeaders } from "./auth.js";
+
 const AUTH_SERVER = "http://localhost:3001";
-const TOKEN_API = "/api/llmui-token";
-
-let authToken = null;
-let tokenPromise = null;
-
-async function getAuthToken() {
-  if (authToken) return authToken;
-  if (tokenPromise) return tokenPromise;
-
-  tokenPromise = fetch(TOKEN_API)
-    .then((res) => {
-      if (!res.ok) {
-        throw new Error(
-          `Failed to fetch auth token (${res.status}). ` +
-            "Ensure the storage server is running (node server/index.js) " +
-            "and the Vite dev server is active."
-        );
-      }
-      return res.json();
-    })
-    .then((data) => {
-      authToken = data.token;
-      return authToken;
-    })
-    .catch((error) => {
-      console.error("[LLMUI] Auth token fetch failed:", error.message);
-      tokenPromise = null;
-      throw error;
-    });
-
-  return tokenPromise;
-}
-
-function authHeaders(token) {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  };
-}
 
 class OllamaAPI {
   async listModels() {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/tags`, {
-      headers: authHeaders(token),
+      headers: await authHeaders(),
     });
     if (!response.ok) throw new Error("Failed to fetch models");
     return response.json();
   }
 
   async listRunningModels() {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/ps`, {
-      headers: authHeaders(token),
+      headers: await authHeaders(),
     });
     if (!response.ok) throw new Error("Failed to fetch running models");
     return response.json();
   }
 
   async showModel(name) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/show`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({ name }),
     });
     if (!response.ok) throw new Error("Failed to fetch model info");
@@ -78,10 +35,9 @@ class OllamaAPI {
   }
 
   async *chatStream(model, messages, options = {}) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/chat`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({
         model,
         messages,
@@ -125,10 +81,9 @@ class OllamaAPI {
   }
 
   async *pullModel(name) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/pull`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({ name, stream: true }),
     });
 
@@ -162,20 +117,18 @@ class OllamaAPI {
   }
 
   async deleteModel(name) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/delete`, {
       method: "DELETE",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({ name }),
     });
     return response.ok;
   }
 
   async unloadModel(name) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/unload`, {
       method: "POST",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({ name }),
     });
     if (!response.ok) {
@@ -186,9 +139,8 @@ class OllamaAPI {
 
   async checkConnection() {
     try {
-      const token = await getAuthToken();
       const response = await fetch(`${AUTH_SERVER}/ollama/tags`, {
-        headers: authHeaders(token),
+        headers: await authHeaders(),
         signal: AbortSignal.timeout(5000),
       });
       return response.ok;
@@ -200,9 +152,8 @@ class OllamaAPI {
   // Ollama URL is now managed server-side. These methods interact with
   // the Express server's /ollama/config endpoint.
   async getOllamaUrl() {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/config`, {
-      headers: authHeaders(token),
+      headers: await authHeaders(),
     });
     if (!response.ok) throw new Error("Failed to fetch Ollama config");
     const data = await response.json();
@@ -210,10 +161,9 @@ class OllamaAPI {
   }
 
   async setOllamaUrl(url) {
-    const token = await getAuthToken();
     const response = await fetch(`${AUTH_SERVER}/ollama/config`, {
       method: "PUT",
-      headers: authHeaders(token),
+      headers: await authHeaders(),
       body: JSON.stringify({ ollamaUrl: url }),
     });
     if (!response.ok) {

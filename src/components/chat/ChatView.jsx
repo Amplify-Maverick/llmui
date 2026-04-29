@@ -35,12 +35,30 @@ export default function ChatView() {
   } = useChatStore();
 
   const { defaultModel, enableThinking, updateSetting } = useSettingsStore();
-  const { localModels, fetchModels, modelInfoCache, fetchModelInfo } = useModelsStore();
+  const { localModels, fetchModels, modelInfoCache, fetchModelInfo, runningModels, fetchRunningModels, unloadModel } = useModelsStore();
   const { sendMessage, stopStreaming, regenerateLastMessage } = useOllamaStream();
+  const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
     fetchModels();
-  }, [fetchModels]);
+    fetchRunningModels();
+    const id = setInterval(fetchRunningModels, 5000);
+    return () => clearInterval(id);
+  }, [fetchModels, fetchRunningModels]);
+
+  const isModelRunning = runningModels.some((m) => m.name === defaultModel);
+
+  const handleUnloadModel = async () => {
+    if (!defaultModel || isUnloading) return;
+    setIsUnloading(true);
+    try {
+      await unloadModel(defaultModel);
+    } catch (err) {
+      console.error("Failed to unload model:", err);
+    } finally {
+      setIsUnloading(false);
+    }
+  };
 
   // Fetch model info when model changes
   useEffect(() => {
@@ -181,6 +199,16 @@ export default function ChatView() {
             placeholder="Select a model"
             style={{ width: "200px" }}
           />
+          {isModelRunning && (
+            <button
+              className="unload-btn"
+              onClick={handleUnloadModel}
+              disabled={isUnloading || isStreaming}
+              title="Unload model from VRAM"
+            >
+              {isUnloading ? "Unloading..." : "Unload"}
+            </button>
+          )}
         </div>
       </div>
 

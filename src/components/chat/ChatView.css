@@ -131,3 +131,26 @@
   color: var(--color-primary);
   border-color: var(--color-primary-border);
 }
+
+.unload-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.unload-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.unload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
