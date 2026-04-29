@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:server\" \"npm:client\"",
+    "dev": "npx concurrently \"npm:server\" \"npm:client\"",
     "server": "node server/index.js",
-    "client": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "client": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
+    "postinstall": "node -e \"console.log('\\n✓ Installation complete! Run: npm run dev\\n')\""
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

@@ -1,6 +1,6 @@
 # LLMUI
 
-> **Beta Software**: This project is under active development. It is optimized for Linux—some features may not work correctly on Windows or macOS.
+> **Beta Software**: This project is under active development. Works on Linux, Windows, and macOS.
 
 A web interface for chatting with local LLMs through Ollama.
 
@@ -54,18 +54,23 @@ For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't hav
 
 ### Windows
 
-1. Install Node.js:
+1. Install Node.js (v18 or higher):
    - Download from [nodejs.org](https://nodejs.org/) and run the installer
    - Or use winget: `winget install OpenJS.NodeJS`
 
 2. Install Ollama:
    - Download from [ollama.com](https://ollama.com/download) and run the installer
 
-3. Clone and install (in PowerShell or Command Prompt):
+3. Clone and install (in PowerShell):
    ```powershell
    git clone <repo-url>
    cd llmui
    npm install
+   ```
+
+   Or use the install script which checks prerequisites:
+   ```powershell
+   .\scripts\install.ps1
    ```
 
 ## Running
@@ -84,14 +89,40 @@ npm run dev
 
 ### Windows
 
-Ollama runs automatically after installation. If needed, start it from the Start Menu.
+Ollama runs automatically after installation. If needed, start it from the Start Menu or system tray.
 
-Then start the UI (in PowerShell or Command Prompt):
+Then start the UI (in PowerShell):
 ```powershell
 npm run dev
 ```
 
+Or use the start script which checks Ollama and port availability:
+```powershell
+.\scripts\start.ps1
+```
+
 Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000).
+
+### Windows Troubleshooting
+
+**"npm install" fails with better-sqlite3 errors:**
+- Install Visual C++ Build Tools: `npm install -g windows-build-tools` (run PowerShell as Administrator)
+- Or install Visual Studio Build Tools manually from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+
+**"vite is not recognized" or similar errors:**
+- Make sure `npm install` completed successfully
+- Try: `npx vite --version` to verify vite is installed
+- Delete `node_modules` and run `npm install` again
+
+**Port already in use:**
+- Another app is using port 3000 or 3001
+- Close other development servers or apps
+- Check with: `netstat -ano | findstr :3000`
+
+**Cannot connect to Ollama:**
+- Make sure Ollama is running (check system tray)
+- Try opening http://localhost:11434 in your browser
+- Restart Ollama from the Start Menu
 
 ## Configuration
 
