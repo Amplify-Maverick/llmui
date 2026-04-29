@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node server/index.js & vite",
+    "dev": "concurrently \"npm:server\" \"npm:client\"",
     "server": "node server/index.js",
     "client": "vite",
     "build": "vite build",
@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.2.1",
     "vite": "^6.0.0"
   }
 }
