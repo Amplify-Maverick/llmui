@@ -4,6 +4,7 @@ A web interface for chatting with local LLMs through Ollama.
 ## What it does
 
 - **Chat** with any model you have installed in Ollama
+- **Compare models** - send the same prompt to 2-4 models and see responses side-by-side
 - **Pull and delete models** directly from the UI
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
 - **Conversation history** - saved to `~/.llmui/` on your device
@@ -95,6 +96,22 @@ Most settings can be changed in the Settings tab:
 - **System Prompt** - gets sent at the start of every conversation
 - **Temperature** - lower = more focused, higher = more creative
 - **Max Tokens** - limit on response length
+
+### Compare Mode
+
+Compare mode lets you send the same prompt to 2-4 models simultaneously and view their responses side-by-side. Click the "Compare" toggle in the chat header to enable it.
+
+For optimal parallel inference performance, set the `OLLAMA_NUM_PARALLEL` environment variable to match the maximum number of models you want to compare at once (Ollama's default is 1):
+
+```bash
+# Linux/macOS
+OLLAMA_NUM_PARALLEL=4 ollama serve
+
+# Or set it in your environment
+export OLLAMA_NUM_PARALLEL=4
+```
+
+Without this setting, Ollama will swap models in and out of GPU memory sequentially, which significantly reduces the parallelism benefit. The UI will show a warning if your selected models' combined VRAM exceeds your GPU capacity.
 
 ## Data storage
 

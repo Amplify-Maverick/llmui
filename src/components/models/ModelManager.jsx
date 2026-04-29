@@ -14,7 +14,9 @@ export default function ModelManager() {
     isLoading,
     error,
     pullProgress,
+    modelInfoCache,
     fetchModels,
+    fetchModelInfo,
     pullModel,
     deleteModel,
     clearError,
@@ -29,6 +31,15 @@ export default function ModelManager() {
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Fetch model info for each model to get tool support status
+  useEffect(() => {
+    localModels.forEach((model) => {
+      if (!modelInfoCache[model.name]) {
+        fetchModelInfo(model.name);
+      }
+    });
+  }, [localModels, modelInfoCache, fetchModelInfo]);
 
   const handlePull = async (name) => {
     try {
@@ -93,6 +104,7 @@ export default function ModelManager() {
             <ModelCard
               key={model.name}
               model={model}
+              modelInfo={modelInfoCache[model.name]}
               isSelected={defaultModel === model.name}
               onSelect={handleSelect}
               onDelete={setDeleteConfirm}

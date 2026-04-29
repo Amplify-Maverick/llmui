@@ -11,6 +11,8 @@ import TokenCounter from "./TokenCounter.jsx";
 import GpuMini from "../stats/GpuMini.jsx";
 import ConnectionStatus from "./ConnectionStatus.jsx";
 import ModelSwitchModal from "./ModelSwitchModal.jsx";
+import CompareView from "../compare/CompareView.jsx";
+import ModelMultiSelect from "../compare/ModelMultiSelect.jsx";
 import { Select } from "../shared/Input.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
 import "./ChatView.css";
@@ -21,6 +23,8 @@ export default function ChatView() {
   const [showGpu, setShowGpu] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [modelSwitchPending, setModelSwitchPending] = useState(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareModels, setCompareModels] = useState([]);
 
   const {
     messages,
@@ -33,6 +37,8 @@ export default function ChatView() {
     editMessageAndTruncate,
     removeLastAssistantMessage,
     getLastUserMessage,
+    createConversation,
+    addMessage,
   } = useChatStore();
 
   const { defaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
@@ -126,6 +132,28 @@ export default function ChatView() {
     setDeleteConfirm(id);
   }, []);
 
+  // Handle "Pick this one" from Compare mode - creates a new conversation
+  const handlePickResponse = useCallback((model, content, userPrompt, stats) => {
+    // Create new conversation with the picked model
+    createConversation(model);
+
+    // Add the user message (the comparison prompt)
+    addMessage({ role: "user", content: userPrompt });
+
+    // Add the assistant message with metadata
+    addMessage({
+      role: "assistant",
+      content,
+      model,
+      duration: stats?.duration ? parseFloat(stats.duration) : undefined,
+      tokensPerSec: stats?.avgTokPerSec ? parseFloat(stats.avgTokPerSec) : undefined,
+    });
+
+    // Exit compare mode
+    setCompareMode(false);
+    setCompareModels([]);
+  }, [createConversation, addMessage]);
+
   // Calculate real-time tokens/sec during streaming
   const currentTokensPerSec = (() => {
     if (!isStreaming || !streamingStartTime || streamingTokenCount === 0) return null;
@@ -208,87 +236,116 @@ export default function ChatView() {
             GPU
           </button>
           <button
-            className={`unload-btn ${isModelRunning ? "active" : ""}`}
-            onClick={handleUnloadModel}
-            disabled={!isModelRunning || isUnloading || isStreaming}
-            title={isModelRunning ? "Unload model from VRAM" : "Model not loaded in VRAM"}
+            className={`compare-toggle ${compareMode ? "active" : ""}`}
+            onClick={() => setCompareMode((v) => !v)}
+            title={compareMode ? "Switch to single model" : "Compare multiple models side by side"}
           >
-            {isUnloading ? "Unloading..." : "Unload"}
+            Compare
           </button>
-          <Select
-            value={defaultModel}
-            onChange={(e) => handleModelChange(e.target.value)}
-            options={modelOptions}
-            placeholder="Select a model"
-            style={{ width: "200px" }}
-          />
+          {!compareMode && (
+            <button
+              className={`unload-btn ${isModelRunning ? "active" : ""}`}
+              onClick={handleUnloadModel}
+              disabled={!isModelRunning || isUnloading || isStreaming}
+              title={isModelRunning ? "Unload model from VRAM" : "Model not loaded in VRAM"}
+            >
+              {isUnloading ? "Unloading..." : "Unload"}
+            </button>
+          )}
+          {compareMode ? (
+            <ModelMultiSelect
+              value={compareModels}
+              onChange={setCompareModels}
+              maxSelections={4}
+              minSelections={2}
+            />
+          ) : (
+            <Select
+              value={defaultModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              options={modelOptions}
+              placeholder="Select a model"
+              style={{ width: "200px" }}
+            />
+          )}
         </div>
       </div>
 
-      {/* Model Info Bar */}
-      {currentModelInfo && (
-        <div className="model-info-bar">
-          <span className="model-info-item">
-            <strong>Context:</strong> {currentModelInfo.contextLength?.toLocaleString() || "?"} tokens
-          </span>
-          {currentModelInfo.parameters && (
-            <span className="model-info-item">
-              <strong>Parameters:</strong> {currentModelInfo.parameters}
-            </span>
+      {compareMode ? (
+        /* Compare Mode View */
+        <CompareView
+          models={compareModels}
+          onPickResponse={handlePickResponse}
+        />
+      ) : (
+        /* Regular Chat View */
+        <>
+          {/* Model Info Bar */}
+          {currentModelInfo && (
+            <div className="model-info-bar">
+              <span className="model-info-item">
+                <strong>Context:</strong> {currentModelInfo.contextLength?.toLocaleString() || "?"} tokens
+              </span>
+              {currentModelInfo.parameters && (
+                <span className="model-info-item">
+                  <strong>Parameters:</strong> {currentModelInfo.parameters}
+                </span>
+              )}
+              {currentModelInfo.quantization && (
+                <span className="model-info-item">
+                  <strong>Quantization:</strong> {currentModelInfo.quantization}
+                </span>
+              )}
+            </div>
           )}
-          {currentModelInfo.quantization && (
-            <span className="model-info-item">
-              <strong>Quantization:</strong> {currentModelInfo.quantization}
-            </span>
-          )}
-        </div>
-      )}
 
-      {showGpu && <GpuMini />}
+          {showGpu && <GpuMini />}
 
-      <TokenCounter inputValue={inputValue} />
+          <TokenCounter inputValue={inputValue} />
 
-      <div className="chat-messages">
-        {displayMessages.length === 0 && !isStreaming ? (
-          <div className="chat-empty">
-            <div className="chat-empty-icon"></div>
-            <h3>Start a conversation</h3>
-            <p>
-              {defaultModel
-                ? `Using ${defaultModel}. Type a message below to begin.`
-                : "Select a model above to get started."}
-            </p>
-          </div>
-        ) : (
-          <>
-            {displayMessages.map((msg, idx) => (
-              <MessageBubble
-                key={msg.id || idx}
-                message={msg}
-                onEdit={handleEditMessage}
-                onDelete={handleSetDeleteConfirm}
-                onRegenerate={handleRegenerate}
-                isLastAssistant={idx === lastAssistantIndex}
-              />
-            ))}
-            {/* Isolated streaming bubble — only this re-renders per token */}
-            {isStreaming && (
-              streamingContent === "" && (!streamingToolCalls || streamingToolCalls.length === 0)
-                ? <StreamingIndicator />
-                : <StreamingBubble model={streamingModel} />
+          <div className="chat-messages">
+            {displayMessages.length === 0 && !isStreaming ? (
+              <div className="chat-empty">
+                <div className="chat-empty-icon"></div>
+                <h3>Start a conversation</h3>
+                <p>
+                  {defaultModel
+                    ? `Using ${defaultModel}. Type a message below to begin.`
+                    : "Select a model above to get started."}
+                </p>
+              </div>
+            ) : (
+              <>
+                {displayMessages.map((msg, idx) => (
+                  <MessageBubble
+                    key={msg.id || idx}
+                    message={msg}
+                    onEdit={handleEditMessage}
+                    onDelete={handleSetDeleteConfirm}
+                    onRegenerate={handleRegenerate}
+                    isLastAssistant={idx === lastAssistantIndex}
+                  />
+                ))}
+                {/* Isolated streaming bubble — only this re-renders per token */}
+                {isStreaming && (
+                  streamingContent === "" && (!streamingToolCalls || streamingToolCalls.length === 0)
+                    ? <StreamingIndicator />
+                    : <StreamingBubble model={streamingModel} />
+                )}
+              </>
             )}
-          </>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+            <div ref={messagesEndRef} />
+          </div>
 
-      <MessageInput
-        onSend={handleSend}
-        onStop={stopStreaming}
-        onInputChange={handleInputChange}
-        disabled={!defaultModel}
-        isStreaming={isStreaming}
-      />
+          <MessageInput
+            onSend={handleSend}
+            onStop={stopStreaming}
+            onInputChange={handleInputChange}
+            disabled={!defaultModel}
+            isStreaming={isStreaming}
+          />
+        </>
+      )}
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal

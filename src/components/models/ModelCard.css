@@ -30,6 +30,12 @@
   word-break: break-word;
 }
 
+.model-card-tags {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .model-card-tag {
   background: var(--color-secondary-bg);
   border: 1px solid var(--color-secondary-border);
@@ -38,6 +44,12 @@
   font-size: 11px;
   color: var(--color-secondary);
   font-weight: 500;
+}
+
+.model-card-tag.tools {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
 }
 
 .model-card-detail {

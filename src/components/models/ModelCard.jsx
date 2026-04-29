@@ -2,7 +2,7 @@ import Button from "../shared/Button.jsx";
 import { formatBytes } from "../../utils/formatters.js";
 import "./ModelCard.css";
 
-export default function ModelCard({ model, onDelete, onSelect, isSelected }) {
+export default function ModelCard({ model, modelInfo, onDelete, onSelect, isSelected }) {
   const modifiedDate = model.modified_at
     ? new Date(model.modified_at).toLocaleDateString()
     : "Unknown";
@@ -11,9 +11,14 @@ export default function ModelCard({ model, onDelete, onSelect, isSelected }) {
     <div className={`model-card ${isSelected ? "selected" : ""}`}>
       <div className="model-card-header">
         <h3 className="model-card-name">{model.name}</h3>
-        {model.details?.family && (
-          <span className="model-card-tag">{model.details.family}</span>
-        )}
+        <div className="model-card-tags">
+          {modelInfo?.supportsTools && (
+            <span className="model-card-tag tools">Tools</span>
+          )}
+          {model.details?.family && (
+            <span className="model-card-tag">{model.details.family}</span>
+          )}
+        </div>
       </div>
 
       <div className="model-card-detail">
