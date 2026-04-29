@@ -1,5 +1,7 @@
 # LLMUI
 
+> **Beta Software**: This project is under active development. It is optimized for Linux—some features may not work correctly on Windows or macOS.
+
 A web interface for chatting with local LLMs through Ollama.
 
 ![LLMUI Chat Interface](screenshots/sc.png)
@@ -114,11 +116,22 @@ OLLAMA_NUM_PARALLEL=4 ollama serve
 export OLLAMA_NUM_PARALLEL=4
 ```
 
+```powershell
+# Windows (PowerShell)
+$env:OLLAMA_NUM_PARALLEL=4
+ollama serve
+
+# Or set it permanently via System Properties > Environment Variables
+```
+
 Without this setting, Ollama will swap models in and out of GPU memory sequentially, which significantly reduces the parallelism benefit. The UI will show a warning if your selected models' combined VRAM exceeds your GPU capacity.
 
 ## Data storage
 
 All data is stored locally in `~/.llmui/`:
+
+- **Linux/macOS**: `/home/<user>/.llmui/`
+- **Windows**: `C:\Users\<user>\.llmui\`
 
 - **Database**: `llmui.db` - SQLite database (WAL mode) containing conversations, messages, and settings
 - **Auth token**: `token` - bearer token for API authentication
@@ -133,6 +146,8 @@ To preview what will be migrated without making changes:
 node server/index.js --dry-run
 ```
 
+This command works the same on Windows (PowerShell or Command Prompt).
+
 ### Full-text search
 
 The database includes FTS5 full-text search across all messages. Search endpoint:
@@ -144,19 +159,36 @@ GET /api/search?q=<query>&conversation_id=<optional>
 
 Create a database backup:
 ```bash
+# Linux/macOS
 curl -X POST -H "Authorization: Bearer $(cat ~/.llmui/token)" http://localhost:3001/api/backup
+```
+
+```powershell
+# Windows (PowerShell)
+$token = Get-Content "$env:USERPROFILE\.llmui\token"
+curl -X POST -H "Authorization: Bearer $token" http://localhost:3001/api/backup
 ```
 
 Backups are stored in `~/.llmui/backups/`.
 
 ## Authentication & LAN Access
 
-The storage server uses bearer token authentication to protect your data. A token is automatically generated on first run and stored at `~/.llmui/token` (mode 0600).
+The storage server uses bearer token authentication to protect your data. A token is automatically generated on first run and stored at `~/.llmui/token`.
+
+- **Linux/macOS**: Token file is created with mode 0600 (owner read/write only)
+- **Windows**: Unix file permissions don't apply. If you have multiple users on your machine, consider restricting access to the `.llmui` folder via folder properties.
 
 **LAN Access**: To access LLMUI from other devices on your network, add your server's LAN IP to the allowed origins:
 
 ```bash
+# Linux/macOS
 LLMUI_ALLOWED_ORIGINS="http://192.168.1.100:3000" npm run dev
+```
+
+```powershell
+# Windows (PowerShell)
+$env:LLMUI_ALLOWED_ORIGINS="http://192.168.1.100:3000"
+npm run dev
 ```
 
 Multiple origins can be comma-separated.
