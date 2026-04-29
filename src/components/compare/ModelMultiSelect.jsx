@@ -85,7 +85,7 @@ export default function ModelMultiSelect({
                 onClick={() => !isDisabled && handleToggle(model.name)}
               >
                 <span className="model-multi-select-checkbox">
-                  {isSelected && "✓"}
+                  {isSelected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>}
                 </span>
                 <div className="model-multi-select-option-info">
                   <span className="model-multi-select-option-name">

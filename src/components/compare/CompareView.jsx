@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useCompareStreams } from "../../hooks/useCompareStreams.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
+import { useChatStore } from "../../stores/chatStore.js";
 import { fetchGpuStats } from "../../services/gpuApi.js";
 import { detectGPU } from "../../utils/hardwareDetection.js";
 import { formatBytes } from "../../utils/formatters.js";
@@ -8,13 +9,15 @@ import CompareColumn from "./CompareColumn.jsx";
 import MessageInput from "../chat/MessageInput.jsx";
 import "./CompareView.css";
 
-export default function CompareView({ models, onPickResponse }) {
+export default function CompareView({ models, onPickResponse, onSaveComplete }) {
   const [userPrompt, setUserPrompt] = useState(null);
   const [gpuVram, setGpuVram] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const { streams, startCompare, stopAll, stopOne, reset, anyStreaming, allComplete } =
     useCompareStreams();
 
   const { localModels, runningModels } = useModelsStore();
+  const { saveCompareConversation } = useChatStore();
 
   // Fetch GPU VRAM on mount
   useEffect(() => {
@@ -89,8 +92,22 @@ export default function CompareView({ models, onPickResponse }) {
     setUserPrompt(null);
   }, [reset]);
 
+  const handleSave = useCallback(async () => {
+    if (!userPrompt || streams.size === 0) return;
+    setIsSaving(true);
+    try {
+      const id = await saveCompareConversation(userPrompt, streams, models);
+      if (id && onSaveComplete) {
+        onSaveComplete();
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }, [userPrompt, streams, models, saveCompareConversation, onSaveComplete]);
+
   const hasStarted = userPrompt !== null;
   const canStartNew = allComplete && hasStarted;
+  const canSave = allComplete && hasStarted && streams.size > 0;
 
   return (
     <div className="compare-view">
@@ -152,6 +169,13 @@ export default function CompareView({ models, onPickResponse }) {
 
       {canStartNew && (
         <div className="compare-new-section">
+          <button
+            className="compare-save-btn"
+            onClick={handleSave}
+            disabled={isSaving || !canSave}
+          >
+            {isSaving ? "Saving..." : "Save Comparison"}
+          </button>
           <button className="compare-new-btn" onClick={handleNewComparison}>
             New Comparison
           </button>

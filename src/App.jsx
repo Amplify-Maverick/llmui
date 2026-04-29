@@ -26,9 +26,9 @@ export default function App() {
   // Keyboard shortcuts handlers
   const shortcutHandlers = useMemo(
     () => ({
-      onNewConversation: () => {
+      onNewConversation: async () => {
         setActiveTab("chat");
-        createConversation(defaultModel);
+        await createConversation(defaultModel);
       },
       onToggleShortcuts: () => setShowShortcuts((v) => !v),
       onOpenSettings: () => setActiveTab("settings"),

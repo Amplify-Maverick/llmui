@@ -4,7 +4,7 @@ const API_BASE = "http://localhost:3001/api";
 
 // Key pattern handlers - map storage keys to appropriate API calls
 function getKeyHandler(key) {
-  // Conversation index → GET /api/conversations
+  // Conversation index -> GET /api/conversations
   if (key === "llmui_conv_index") {
     return {
       load: async () => {
@@ -21,7 +21,7 @@ function getKeyHandler(key) {
     };
   }
 
-  // Conversation messages → GET/PUT /api/conversations/:id/messages
+  // Conversation messages -> GET/PUT /api/conversations/:id/messages
   const convMatch = key.match(/^llmui_conv_(.+)$/);
   if (convMatch) {
     const conversationId = convMatch[1];
@@ -46,7 +46,7 @@ function getKeyHandler(key) {
     };
   }
 
-  // Settings and active conversation → GET/PUT /api/settings/:key
+  // Settings and active conversation -> GET/PUT /api/settings/:key
   return {
     load: async () => {
       const res = await fetch(`${API_BASE}/settings/${key}`, {

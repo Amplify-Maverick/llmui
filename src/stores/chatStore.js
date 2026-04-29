@@ -9,6 +9,9 @@ import {
   cancelDebouncedSave,
   flushDebouncedSave,
 } from "../utils/storage.js";
+import { authHeaders } from "../services/auth.js";
+
+const API_BASE = "http://localhost:3001/api";
 
 // Strip messages from a conversation object, keep only sidebar metadata
 function toMeta(conv) {
@@ -100,26 +103,109 @@ export const useChatStore = create((set, get) => ({
   // ================================================================
   // Conversation CRUD
   // ================================================================
-  createConversation: (model) => {
-    const id = nanoid();
-    const meta = {
-      id,
-      title: "New Chat",
-      model,
-      tags: [],
-      messageCount: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    set((state) => ({
-      conversations: [meta, ...state.conversations],
-      activeConversationId: id,
-      messages: [],
-    }));
-    get()._saveIndex();
-    saveToStorage(STORAGE_KEYS.convMessages(id), []);
-    saveToStorage(STORAGE_KEYS.activeConversation, id);
-    return id;
+  createConversation: async (model, options = {}) => {
+    try {
+      // Create conversation on the server
+      const response = await fetch(`${API_BASE}/conversations`, {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          model,
+          title: options.title || 'New Chat',
+          tags: [],
+          isCompare: options.isCompare || false,
+          compareModels: options.compareModels || null
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to create conversation');
+        return null;
+      }
+
+      const meta = await response.json();
+
+      set((state) => ({
+        conversations: [meta, ...state.conversations],
+        activeConversationId: meta.id,
+        messages: [],
+      }));
+
+      saveToStorage(STORAGE_KEYS.activeConversation, meta.id);
+      return meta.id;
+    } catch (err) {
+      console.error('Error creating conversation:', err);
+      return null;
+    }
+  },
+
+  // Save a compare session as a conversation
+  saveCompareConversation: async (userPrompt, responses, models) => {
+    try {
+      // Create conversation on the server
+      const response = await fetch(`${API_BASE}/conversations`, {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          model: models.join(', '),
+          title: userPrompt.slice(0, 30) + (userPrompt.length > 30 ? '...' : ''),
+          tags: [],
+          isCompare: true,
+          compareModels: models
+        })
+      });
+
+      if (!response.ok) {
+        console.error('Failed to create compare conversation');
+        return null;
+      }
+
+      const meta = await response.json();
+
+      // Build messages array: user prompt + all model responses
+      const messages = [
+        { role: 'user', content: userPrompt, timestamp: Date.now() }
+      ];
+
+      // Add each model's response
+      for (const [model, streamState] of responses) {
+        if (streamState?.content) {
+          // Calculate duration and tokensPerSec from stream state
+          let duration = null;
+          let tokensPerSec = null;
+          if (streamState.startTime && streamState.endTime) {
+            duration = (streamState.endTime - streamState.startTime) / 1000;
+            if (streamState.tokenCount > 0 && duration > 0) {
+              tokensPerSec = streamState.tokenCount / duration;
+            }
+          }
+          messages.push({
+            role: 'assistant',
+            content: streamState.content,
+            model,
+            timestamp: Date.now(),
+            duration,
+            tokensPerSec
+          });
+        }
+      }
+
+      // Save messages to local storage
+      await saveToStorage(STORAGE_KEYS.convMessages(meta.id), messages);
+
+      // Update local state
+      set((state) => ({
+        conversations: [{ ...meta, messageCount: messages.length }, ...state.conversations],
+        activeConversationId: meta.id,
+        messages,
+      }));
+
+      saveToStorage(STORAGE_KEYS.activeConversation, meta.id);
+      return meta.id;
+    } catch (err) {
+      console.error('Error saving compare conversation:', err);
+      return null;
+    }
   },
 
   updateConversationModel: (model) => {
@@ -152,6 +238,48 @@ export const useChatStore = create((set, get) => ({
     get()._saveIndex();
   },
 
+  // Update per-conversation settings
+  updateConversationSettings: async (settings) => {
+    const { activeConversationId, conversations } = get();
+    if (!activeConversationId) return;
+
+    // Update local state
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === state.activeConversationId
+          ? { ...c, ...settings, updatedAt: Date.now() }
+          : c
+      ),
+    }));
+
+    // Persist to server
+    try {
+      const response = await fetch(`${API_BASE}/conversations/${activeConversationId}`, {
+        method: 'PATCH',
+        headers: await authHeaders(),
+        body: JSON.stringify(settings),
+      });
+      if (!response.ok) {
+        console.error('Failed to update conversation settings');
+      }
+    } catch (err) {
+      console.error('Error updating conversation settings:', err);
+    }
+  },
+
+  // Get settings for active conversation (null values mean use global)
+  getActiveConversationSettings: () => {
+    const { conversations, activeConversationId } = get();
+    const conv = conversations.find((c) => c.id === activeConversationId);
+    if (!conv) return null;
+    return {
+      temperature: conv.temperature ?? null,
+      maxTokens: conv.maxTokens ?? null,
+      systemPrompt: conv.systemPrompt ?? null,
+      enableThinking: conv.enableThinking ?? null,
+    };
+  },
+
   setActiveConversation: async (id) => {
     const { conversations, activeConversationId } = get();
     if (id === activeConversationId) return;
@@ -180,9 +308,21 @@ export const useChatStore = create((set, get) => ({
     cancelDebouncedSave(STORAGE_KEYS.convMessages(id));
 
     const wasActive = get().activeConversationId === id;
+    const deletedConv = get().conversations.find((c) => c.id === id);
+    const parentId = deletedConv?.parentConversationId;
 
     set((state) => {
-      const newConversations = state.conversations.filter((c) => c.id !== id);
+      let newConversations = state.conversations.filter((c) => c.id !== id);
+
+      // If the deleted conversation was a branch, decrement the parent's childBranchCount
+      if (parentId) {
+        newConversations = newConversations.map((c) =>
+          c.id === parentId
+            ? { ...c, childBranchCount: Math.max(0, (c.childBranchCount || 1) - 1) }
+            : c
+        );
+      }
+
       const newActiveId = wasActive
         ? newConversations[0]?.id || null
         : state.activeConversationId;
@@ -209,6 +349,85 @@ export const useChatStore = create((set, get) => ({
       }
       saveToStorage(STORAGE_KEYS.activeConversation, activeConversationId);
     }
+  },
+
+  // ================================================================
+  // Branching
+  // ================================================================
+  createBranch: async (messageId, editedContent = null) => {
+    const { activeConversationId } = get();
+    if (!activeConversationId) return null;
+
+    try {
+      // Flush any pending debounced saves to ensure messages are on the server
+      await flushDebouncedSave(STORAGE_KEYS.convMessages(activeConversationId));
+      await flushDebouncedSave(STORAGE_KEYS.convIndex);
+
+      const body = { branchAtMessageId: messageId };
+      if (editedContent !== null) {
+        body.editedContent = editedContent;
+      }
+
+      const response = await fetch(`${API_BASE}/conversations/${activeConversationId}/branch`, {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        console.error('Failed to create branch:', err.error);
+        return null;
+      }
+
+      const branch = await response.json();
+      const parentId = activeConversationId;
+
+      // Add branch to conversations list, increment parent's childBranchCount, and switch to it
+      set((state) => ({
+        conversations: [branch, ...state.conversations].map((c) =>
+          c.id === parentId
+            ? { ...c, childBranchCount: (c.childBranchCount || 0) + 1 }
+            : c
+        ),
+        activeConversationId: branch.id,
+        messages: [], // Will be loaded
+      }));
+
+      // Load messages for the new branch
+      const msgs = await loadFromStorage(STORAGE_KEYS.convMessages(branch.id));
+      if (get().activeConversationId === branch.id) {
+        set({ messages: msgs || [] });
+      }
+
+      saveToStorage(STORAGE_KEYS.activeConversation, branch.id);
+      get()._saveIndex();
+
+      return branch.id;
+    } catch (err) {
+      console.error('Error creating branch:', err);
+      return null;
+    }
+  },
+
+  loadBranches: async (conversationId) => {
+    try {
+      const response = await fetch(`${API_BASE}/conversations/${conversationId}/branches`, {
+        headers: await authHeaders()
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.branches || [];
+    } catch (err) {
+      console.error('Error loading branches:', err);
+      return [];
+    }
+  },
+
+  // Get branch info for a message (how many branches originate from it)
+  getBranchCountForMessage: (messageId) => {
+    const { conversations } = get();
+    return conversations.filter(c => c.branchPointMessageId === messageId).length;
   },
 
   // ================================================================

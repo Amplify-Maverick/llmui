@@ -9,7 +9,18 @@ export const SCHEMA_SQL = `
     tags TEXT DEFAULT '[]',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    archived INTEGER DEFAULT 0
+    archived INTEGER DEFAULT 0,
+    -- Branching support
+    parent_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    branch_point_message_id TEXT,
+    -- Per-conversation settings (NULL = use global defaults)
+    temperature REAL,
+    max_tokens INTEGER,
+    system_prompt TEXT,
+    enable_thinking INTEGER,
+    -- Compare mode support
+    is_compare INTEGER DEFAULT 0,
+    compare_models TEXT
   );
 
   -- Messages table
@@ -33,6 +44,7 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, position);
   CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_conversations_archived ON conversations(archived, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id);
 
   -- Settings table (key-value store)
   CREATE TABLE IF NOT EXISTS settings (

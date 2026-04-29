@@ -9,6 +9,7 @@ export function useOllamaStream() {
   const {
     messages,
     activeConversationId,
+    conversations,
     isStreaming,
     streamingContent,
     addMessage,
@@ -24,8 +25,20 @@ export function useOllamaStream() {
     getLastUserMessage,
   } = useChatStore();
 
-  const { defaultModel, systemPrompt, temperature, maxTokens, enableThinking, enableTools, enabledTools } =
-    useSettingsStore();
+  // Global settings as fallback
+  const globalSettings = useSettingsStore();
+
+  // Get current conversation for per-conversation settings
+  const currentConv = conversations.find(c => c.id === activeConversationId);
+
+  // Use per-conversation settings if set, otherwise fall back to global
+  const defaultModel = globalSettings.defaultModel;
+  const temperature = currentConv?.temperature ?? globalSettings.temperature;
+  const maxTokens = currentConv?.maxTokens ?? globalSettings.maxTokens;
+  const systemPrompt = currentConv?.systemPrompt ?? globalSettings.systemPrompt;
+  const enableThinking = currentConv?.enableThinking ?? globalSettings.enableThinking;
+  const enableTools = globalSettings.enableTools;
+  const enabledTools = globalSettings.enabledTools;
 
   const sendMessage = useCallback(
     async (content, model, images = []) => {
@@ -37,7 +50,7 @@ export function useOllamaStream() {
       // Create conversation if none exists, or update model if changed
       let convId = activeConversationId;
       if (!convId) {
-        convId = createConversation(selectedModel);
+        convId = await createConversation(selectedModel);
       } else {
         updateConversationModel(selectedModel);
       }
@@ -145,6 +158,7 @@ export function useOllamaStream() {
     },
     [
       activeConversationId,
+      currentConv,
       defaultModel,
       systemPrompt,
       temperature,
@@ -271,6 +285,7 @@ export function useOllamaStream() {
       }
     },
     [
+      currentConv,
       defaultModel,
       systemPrompt,
       temperature,

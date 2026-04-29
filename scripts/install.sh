@@ -7,37 +7,37 @@ echo
 
 # Check for Node.js
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js first."
+    echo "[ERROR] Node.js is not installed. Please install Node.js first."
     echo "   https://nodejs.org/"
     exit 1
 fi
-echo "✓ Node.js $(node --version)"
+echo "[OK] Node.js $(node --version)"
 
 # Check for npm
 if ! command -v npm &> /dev/null; then
-    echo "❌ npm is not installed. Please install npm first."
+    echo "[ERROR] npm is not installed. Please install npm first."
     exit 1
 fi
-echo "✓ npm $(npm --version)"
+echo "[OK] npm $(npm --version)"
 
 # Install Ollama if not present
 if command -v ollama &> /dev/null; then
-    echo "✓ Ollama $(ollama --version 2>/dev/null | head -1 || echo 'installed')"
+    echo "[OK] Ollama $(ollama --version 2>/dev/null | head -1 || echo 'installed')"
 else
-    echo "→ Installing Ollama..."
+    echo "Installing Ollama..."
     curl -fsSL https://ollama.com/install.sh | sh
-    echo "✓ Ollama installed"
+    echo "[OK] Ollama installed"
 fi
 
 # Install npm dependencies if needed
 cd "$(dirname "$0")/.."
 
 if [ -d "node_modules" ] && [ -f "node_modules/.package-lock.json" ]; then
-    echo "✓ npm dependencies already installed"
+    echo "[OK] npm dependencies already installed"
 else
-    echo "→ Installing npm dependencies..."
+    echo "Installing npm dependencies..."
     npm install
-    echo "✓ npm dependencies installed"
+    echo "[OK] npm dependencies installed"
 fi
 
 echo

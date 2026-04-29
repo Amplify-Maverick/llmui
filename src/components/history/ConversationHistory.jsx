@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
+import { authHeaders } from "../../services/auth.js";
 import ConversationItem from "./ConversationItem.jsx";
 import Button from "../shared/Button.jsx";
 import Input from "../shared/Input.jsx";
@@ -36,10 +37,13 @@ export default function ConversationHistory() {
   const [tagsModal, setTagsModal] = useState(null);
   const [exportModal, setExportModal] = useState(null);
   const [newTagName, setNewTagName] = useState("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
-  // Filter conversations
-  const filteredConversations = useMemo(() => {
-    return conversations.filter((c) => {
+  // Filter and organize conversations with branches
+  const { rootConversations, branchMap } = useMemo(() => {
+    // Filter all conversations first
+    const filtered = conversations.filter((c) => {
       // Filter by tag
       if (selectedTag && (!c.tags || !c.tags.includes(selectedTag))) {
         return false;
@@ -63,10 +67,25 @@ export default function ConversationHistory() {
 
       return true;
     });
+
+    // Separate root conversations and branches
+    const roots = filtered.filter((c) => !c.parentConversationId);
+    const branches = new Map();
+
+    for (const conv of filtered) {
+      if (conv.parentConversationId) {
+        if (!branches.has(conv.parentConversationId)) {
+          branches.set(conv.parentConversationId, []);
+        }
+        branches.get(conv.parentConversationId).push(conv);
+      }
+    }
+
+    return { rootConversations: roots, branchMap: branches };
   }, [conversations, search, searchInContent, selectedTag]);
 
-  const handleNewChat = () => {
-    createConversation(defaultModel);
+  const handleNewChat = async () => {
+    await createConversation(defaultModel);
   };
 
   const handleDelete = () => {
@@ -99,22 +118,107 @@ export default function ConversationHistory() {
     updateConversationTags(tagsModal, newTags);
   };
 
-  const handleExport = async (format) => {
-    if (!exportModal) return;
-    const content = await exportConversation(exportModal, format);
-    if (!content) return;
-
-    const conv = conversations.find((c) => c.id === exportModal);
-    const filename = `${conv.title.replace(/[^a-z0-9]/gi, "_")}.${format === "json" ? "json" : "md"}`;
-
-    const blob = new Blob([content], { type: "text/plain" });
+  // Helper to save file using File System Access API or fallback
+  const saveFile = async (content, filename, mimeType) => {
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [
+            mimeType.includes('json')
+              ? { description: 'JSON', accept: { 'application/json': ['.json'] } }
+              : { description: 'Markdown', accept: { 'text/markdown': ['.md'] } }
+          ]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        // Fall through to blob method
+      }
+    }
+    // Fallback
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExport = async (format) => {
+    if (!exportModal) return;
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/export/conversations/${exportModal}?format=${format}`, {
+        headers: await authHeaders()
+      });
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const conv = conversations.find((c) => c.id === exportModal);
+      const filename = `${conv.title.replace(/[^a-z0-9]/gi, "_")}.${format === "json" ? "json" : "md"}`;
+
+      if (format === 'json') {
+        const data = await response.json();
+        await saveFile(JSON.stringify(data, null, 2), filename, 'application/json');
+      } else {
+        const text = await response.text();
+        await saveFile(text, filename, 'text/markdown');
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+
     setExportModal(null);
+  };
+
+  const toggleSelectMode = () => {
+    setSelectMode(!selectMode);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkExport = async (format) => {
+    if (selectedIds.size === 0) return;
+
+    try {
+      const response = await fetch('http://localhost:3001/api/export/bulk', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ ids: [...selectedIds], format })
+      });
+
+      if (!response.ok) throw new Error('Bulk export failed');
+
+      if (format === 'json') {
+        const data = await response.json();
+        await saveFile(JSON.stringify(data, null, 2), 'llmui_export.json', 'application/json');
+      } else {
+        // For markdown, we get array of files
+        const { files } = await response.json();
+        // Download each file
+        for (const file of files) {
+          await saveFile(file.content, file.filename, 'text/markdown');
+        }
+      }
+
+      setSelectMode(false);
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error('Bulk export failed:', err);
+    }
   };
 
   const getConversationTags = (id) => {
@@ -125,13 +229,37 @@ export default function ConversationHistory() {
   return (
     <div className="history-container">
       <div className="history-header">
-        <h3 className="history-title">Conversations</h3>
-        <Button
-          onClick={handleNewChat}
-          style={{ width: "100%", marginBottom: "12px" }}
-        >
-          + New Chat
-        </Button>
+        <div className="history-title-row">
+          <h3 className="history-title">Conversations</h3>
+          <button
+            className={`select-mode-btn ${selectMode ? 'active' : ''}`}
+            onClick={toggleSelectMode}
+            title={selectMode ? 'Cancel selection' : 'Select multiple'}
+          >
+            {selectMode ? 'Cancel' : 'Select'}
+          </button>
+        </div>
+
+        {selectMode && selectedIds.size > 0 && (
+          <div className="bulk-actions">
+            <span className="bulk-count">{selectedIds.size} selected</span>
+            <button className="bulk-export-btn" onClick={() => handleBulkExport('json')}>
+              Export JSON
+            </button>
+            <button className="bulk-export-btn" onClick={() => handleBulkExport('markdown')}>
+              Export MD
+            </button>
+          </div>
+        )}
+
+        {!selectMode && (
+          <Button
+            onClick={handleNewChat}
+            style={{ width: "100%", marginBottom: "12px" }}
+          >
+            + New Chat
+          </Button>
+        )}
 
         <div className="history-search">
           <Input
@@ -173,25 +301,28 @@ export default function ConversationHistory() {
       </div>
 
       <div className="history-list">
-        {filteredConversations.length === 0 ? (
+        {rootConversations.length === 0 && branchMap.size === 0 ? (
           <div className="history-empty">
             {search || selectedTag
               ? "No matching conversations"
               : "No conversations yet"}
           </div>
         ) : (
-          filteredConversations.map((conversation) => (
-            <ConversationItem
-              key={conversation.id}
-              conversation={conversation}
-              isActive={conversation.id === activeConversationId}
-              onClick={() => setActiveConversation(conversation.id)}
-              onDelete={setDeleteConfirm}
-              onRename={(id) => openRenameModal(id, conversation.title)}
-              onTags={setTagsModal}
-              onExport={setExportModal}
-              availableTags={tags}
-            />
+          rootConversations.map((conversation) => (
+            <div key={conversation.id} className="conversation-with-branches">
+              <ConversationItem
+                conversation={conversation}
+                isActive={conversation.id === activeConversationId}
+                onClick={() => selectMode ? toggleSelect(conversation.id) : setActiveConversation(conversation.id)}
+                onDelete={setDeleteConfirm}
+                onRename={(id) => openRenameModal(id, conversation.title)}
+                onTags={setTagsModal}
+                onExport={setExportModal}
+                availableTags={tags}
+                selectMode={selectMode}
+                isSelected={selectedIds.has(conversation.id)}
+              />
+            </div>
           ))
         )}
       </div>

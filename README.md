@@ -1,6 +1,9 @@
 # LLMUI
 
-A web interface for chatting with local LLMs through Ollama. 
+A web interface for chatting with local LLMs through Ollama.
+
+![LLMUI Chat Interface](screenshots/chat.png)
+
 ## What it does
 
 - **Chat** with any model you have installed in Ollama

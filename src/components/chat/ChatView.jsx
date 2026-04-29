@@ -8,9 +8,11 @@ import StreamingBubble from "./StreamingBubble.jsx";
 import MessageInput from "./MessageInput.jsx";
 import StreamingIndicator from "./StreamingIndicator.jsx";
 import TokenCounter from "./TokenCounter.jsx";
+import BranchRow from "./BranchRow.jsx";
 import GpuMini from "../stats/GpuMini.jsx";
 import ConnectionStatus from "./ConnectionStatus.jsx";
 import ModelSwitchModal from "./ModelSwitchModal.jsx";
+import ConversationSettingsPopover from "./ConversationSettingsPopover.jsx";
 import CompareView from "../compare/CompareView.jsx";
 import ModelMultiSelect from "../compare/ModelMultiSelect.jsx";
 import { Select } from "../shared/Input.jsx";
@@ -25,6 +27,7 @@ export default function ChatView() {
   const [modelSwitchPending, setModelSwitchPending] = useState(null);
   const [compareMode, setCompareMode] = useState(false);
   const [compareModels, setCompareModels] = useState([]);
+  const [showConvSettings, setShowConvSettings] = useState(false);
 
   const {
     messages,
@@ -39,6 +42,8 @@ export default function ChatView() {
     getLastUserMessage,
     createConversation,
     addMessage,
+    createBranch,
+    getBranchCountForMessage,
   } = useChatStore();
 
   const { defaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
@@ -53,15 +58,16 @@ export default function ChatView() {
     return () => clearInterval(id);
   }, [fetchModels, fetchRunningModels]);
 
-  const isModelRunning = runningModels.some((m) => m.name === defaultModel);
+  const hasRunningModels = runningModels.length > 0;
 
   const handleUnloadModel = async () => {
-    if (!defaultModel || isUnloading) return;
+    if (runningModels.length === 0 || isUnloading) return;
     setIsUnloading(true);
     try {
-      await unloadModel(defaultModel);
+      // Unload all running models
+      await Promise.all(runningModels.map((m) => unloadModel(m.name)));
     } catch (err) {
-      console.error("Failed to unload model:", err);
+      console.error("Failed to unload models:", err);
     } finally {
       setIsUnloading(false);
     }
@@ -111,11 +117,14 @@ export default function ChatView() {
 
   // Stable callback refs — these don't change between renders so
   // memoized MessageBubble children won't re-render.
-  const handleEditMessage = useCallback((id, newContent) => {
-    editMessageAndTruncate(id, newContent);
-    // Auto-regenerate after edit
-    sendMessage(newContent, defaultModel);
-  }, [editMessageAndTruncate, sendMessage, defaultModel]);
+  const handleEditMessage = useCallback(async (id, newContent) => {
+    // Create a branch instead of truncating the conversation
+    const branchId = await createBranch(id, newContent);
+    if (branchId) {
+      // Auto-regenerate in the new branch
+      sendMessage(newContent, defaultModel);
+    }
+  }, [createBranch, sendMessage, defaultModel]);
 
   const handleDeleteMessage = useCallback(() => {
     if (deleteConfirm) {
@@ -132,10 +141,15 @@ export default function ChatView() {
     setDeleteConfirm(id);
   }, []);
 
+  // Create a branch from a specific message without editing
+  const handleBranch = useCallback(async (messageId) => {
+    await createBranch(messageId);
+  }, [createBranch]);
+
   // Handle "Pick this one" from Compare mode - creates a new conversation
-  const handlePickResponse = useCallback((model, content, userPrompt, stats) => {
+  const handlePickResponse = useCallback(async (model, content, userPrompt, stats) => {
     // Create new conversation with the picked model
-    createConversation(model);
+    await createConversation(model);
 
     // Add the user message (the comparison prompt)
     addMessage({ role: "user", content: userPrompt });
@@ -202,6 +216,22 @@ export default function ChatView() {
         <div className="chat-header-left">
           <span className="chat-header-title">Chat</span>
           <ConnectionStatus />
+          <div className="conv-settings-wrapper">
+            <button
+              className={`conv-settings-btn ${showConvSettings ? 'active' : ''}`}
+              onClick={() => setShowConvSettings(v => !v)}
+              title="Conversation settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+            <ConversationSettingsPopover
+              isOpen={showConvSettings}
+              onClose={() => setShowConvSettings(false)}
+            />
+          </div>
         </div>
         <div className="chat-header-actions">
           {isStreaming && currentTokensPerSec && (
@@ -244,10 +274,10 @@ export default function ChatView() {
           </button>
           {!compareMode && (
             <button
-              className={`unload-btn ${isModelRunning ? "active" : ""}`}
+              className={`unload-btn ${hasRunningModels ? "active" : ""}`}
               onClick={handleUnloadModel}
-              disabled={!isModelRunning || isUnloading || isStreaming}
-              title={isModelRunning ? "Unload model from VRAM" : "Model not loaded in VRAM"}
+              disabled={!hasRunningModels || isUnloading || isStreaming}
+              title={hasRunningModels ? `Unload ${runningModels.length} model(s) from VRAM` : "No models loaded in VRAM"}
             >
               {isUnloading ? "Unloading..." : "Unload"}
             </button>
@@ -279,6 +309,10 @@ export default function ChatView() {
         <CompareView
           models={compareModels}
           onPickResponse={handlePickResponse}
+          onSaveComplete={() => {
+            setCompareMode(false);
+            setCompareModels([]);
+          }}
         />
       ) : (
         /* Regular Chat View */
@@ -304,6 +338,8 @@ export default function ChatView() {
 
           <TokenCounter inputValue={inputValue} />
 
+          <BranchRow />
+
           <div className="chat-messages">
             {displayMessages.length === 0 && !isStreaming ? (
               <div className="chat-empty">
@@ -324,7 +360,9 @@ export default function ChatView() {
                     onEdit={handleEditMessage}
                     onDelete={handleSetDeleteConfirm}
                     onRegenerate={handleRegenerate}
+                    onBranch={handleBranch}
                     isLastAssistant={idx === lastAssistantIndex}
+                    branchCount={getBranchCountForMessage(msg.id)}
                   />
                 ))}
                 {/* Isolated streaming bubble — only this re-renders per token */}

@@ -187,3 +187,34 @@
   color: var(--color-text-secondary);
   border-color: var(--color-border);
 }
+
+/* ── Conversation Settings Button ─────────────────────────── */
+.conv-settings-wrapper {
+  position: relative;
+}
+
+.conv-settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.conv-settings-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.conv-settings-btn.active {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+}

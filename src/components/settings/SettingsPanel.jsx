@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
+import { useChatStore } from "../../stores/chatStore.js";
 import { AVAILABLE_TOOLS } from "../../constants/config.js";
 import { TextArea, Select } from "../shared/Input.jsx";
 import "./SettingsPanel.css";
@@ -22,10 +23,13 @@ export default function SettingsPanel() {
   } = useSettingsStore();
 
   const { localModels, fetchModels } = useModelsStore();
+  const { loadConversations } = useChatStore();
 
   // Local state for the URL input so we can edit without saving on every keystroke
   const [urlInput, setUrlInput] = useState(ollamaUrl);
   const [urlSaved, setUrlSaved] = useState(false);
+  const [importStatus, setImportStatus] = useState(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     setUrlInput(ollamaUrl);
@@ -53,6 +57,65 @@ export default function SettingsPanel() {
     value: m.name,
     label: m.name,
   }));
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus({ loading: true });
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+
+        // Handle both formats: { conversations: [...] } or direct array
+        const conversations = data.conversations || (Array.isArray(data) ? data : null);
+
+        if (!conversations || !Array.isArray(conversations)) {
+          throw new Error('Invalid format: expected conversations array');
+        }
+
+        const response = await fetch('/api/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('llmui_token')}`
+          },
+          body: JSON.stringify({ conversations })
+        });
+
+        if (!response.ok) {
+          throw new Error('Import failed');
+        }
+
+        const result = await response.json();
+        setImportStatus({
+          success: true,
+          message: `Imported ${result.imported} conversation${result.imported !== 1 ? 's' : ''}${result.errors?.length > 0 ? ` (${result.errors.length} failed)` : ''}`
+        });
+
+        // Refresh conversation list
+        loadConversations();
+
+        // Clear status after 3 seconds
+        setTimeout(() => setImportStatus(null), 3000);
+      } catch (err) {
+        setImportStatus({ error: err.message });
+        setTimeout(() => setImportStatus(null), 3000);
+      }
+    };
+
+    reader.onerror = () => {
+      setImportStatus({ error: 'Failed to read file' });
+      setTimeout(() => setImportStatus(null), 3000);
+    };
+
+    reader.readAsText(file);
+
+    // Reset file input
+    e.target.value = '';
+  };
 
   return (
     <div className="settings">
@@ -227,6 +290,40 @@ export default function SettingsPanel() {
           </div>
         </div>
       )}
+
+      <div className="settings-divider" />
+
+      <div className="settings-section">
+        <label className="settings-label">Import Conversations</label>
+        <input
+          type="file"
+          accept=".json"
+          onChange={handleImport}
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+        />
+        <button
+          className="btn"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importStatus?.loading}
+        >
+          {importStatus?.loading ? 'Importing...' : 'Choose JSON File'}
+        </button>
+        {importStatus?.success && (
+          <p className="settings-description" style={{ color: '#6ee7b7' }}>
+            {importStatus.message}
+          </p>
+        )}
+        {importStatus?.error && (
+          <p className="settings-description" style={{ color: '#f87171' }}>
+            Error: {importStatus.error}
+          </p>
+        )}
+        <p className="settings-description">
+          Import conversations from a previously exported JSON file. All imported conversations
+          will be assigned new IDs to avoid conflicts.
+        </p>
+      </div>
     </div>
   );
 }

@@ -149,6 +149,10 @@
   color: var(--color-danger);
 }
 
+.bubble-action-btn.branch:hover {
+  color: #22c55e;
+}
+
 /* ── Edit Mode ──────────────────────────────────────────── */
 .bubble-edit {
   display: flex;
@@ -239,4 +243,23 @@
 
 .bubble-image:hover {
   transform: scale(1.02);
+}
+
+/* ── Branch Indicator ──────────────────────────────────────── */
+.bubble-branch-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  margin-bottom: 8px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 500;
+  color: #22c55e;
+}
+
+.bubble-branch-indicator svg {
+  flex-shrink: 0;
 }

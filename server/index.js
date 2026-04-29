@@ -18,6 +18,7 @@ import messagesRouter from "./api/messages.js";
 import settingsRouter from "./api/settings.js";
 import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
+import exportRouter from "./api/export.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -680,6 +681,7 @@ app.use("/api", requireAuth, messagesRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
+app.use("/api/export", requireAuth, exportRouter);
 
 // ============================================================
 // Startup

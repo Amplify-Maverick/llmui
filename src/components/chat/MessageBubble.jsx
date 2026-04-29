@@ -38,6 +38,15 @@ const TrashIcon = () => (
   </svg>
 );
 
+const BranchIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="6" y1="3" x2="6" y2="15"/>
+    <circle cx="18" cy="6" r="3"/>
+    <circle cx="6" cy="18" r="3"/>
+    <path d="M18 9a9 9 0 0 1-9 9"/>
+  </svg>
+);
+
 export function formatDuration(seconds) {
   if (!seconds) return null;
   if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
@@ -61,7 +70,9 @@ const MessageBubble = memo(function MessageBubble({
   onEdit,
   onDelete,
   onRegenerate,
+  onBranch,
   isLastAssistant = false,
+  branchCount = 0,
 }) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -113,6 +124,10 @@ const MessageBubble = memo(function MessageBubble({
     onRegenerate?.(message.id);
   }, [message.id, onRegenerate]);
 
+  const handleBranch = useCallback(() => {
+    onBranch?.(message.id);
+  }, [message.id, onBranch]);
+
   return (
     <div className="message-row">
       <div className={`bubble ${isUser ? "bubble-user" : "bubble-assistant"}`}>
@@ -128,6 +143,14 @@ const MessageBubble = memo(function MessageBubble({
             <span className="bubble-tokens-per-sec">{formatTokensPerSec(message.tokensPerSec)}</span>
           )}
         </div>
+
+        {/* Branch indicator */}
+        {branchCount > 0 && (
+          <div className="bubble-branch-indicator">
+            <BranchIcon />
+            <span>{branchCount} branch{branchCount > 1 ? 'es' : ''}</span>
+          </div>
+        )}
 
         {/* Tool calls for assistant messages */}
         {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
@@ -177,11 +200,18 @@ const MessageBubble = memo(function MessageBubble({
             >
               {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
+            <button
+              className="bubble-action-btn branch"
+              onClick={handleBranch}
+              title="Create branch from here"
+            >
+              <BranchIcon />
+            </button>
             {isUser && (
               <button
                 className="bubble-action-btn"
                 onClick={handleEdit}
-                title="Edit message"
+                title="Edit message (creates branch)"
               >
                 <EditIcon />
               </button>
