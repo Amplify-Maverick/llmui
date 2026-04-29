@@ -105,14 +105,30 @@ Open http://localhost:3000 in your browser. This runs both the storage server (p
 
 ### Windows Troubleshooting
 
-**"npm install" fails with better-sqlite3 errors:**
-- Install Visual C++ Build Tools: `npm install -g windows-build-tools` (run PowerShell as Administrator)
-- Or install Visual Studio Build Tools manually from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+**Node.js version requirement:** Node.js v20 LTS is required. Node v21+ will fail to compile `better-sqlite3` due to missing prebuilt binaries and node-gyp compatibility issues.
 
-**"vite is not recognized" or similar errors:**
-- Make sure `npm install` completed successfully
-- Try: `npx vite --version` to verify vite is installed
-- Delete `node_modules` and run `npm install` again
+Use [nvm-windows](https://github.com/coreybutler/nvm-windows) to manage Node versions:
+1. Download and run `nvm-setup.exe` as Administrator
+2. Open **Command Prompt** (not PowerShell) as Administrator
+3. Run:
+   ```cmd
+   nvm install 20
+   nvm use 20
+   node --version
+   ```
+
+**Visual Studio Build Tools:** `better-sqlite3` requires native compilation. Install [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select the **"Desktop development with C++"** workload.
+
+**Python:** Also required by node-gyp. Install from [python.org](https://www.python.org/downloads/) and check **"Add Python to PATH"** during installation.
+
+Once all prerequisites are installed:
+```cmd
+cd llmui
+npm install
+npm run dev
+```
+
+> ⚠️ **All commands must be run in Command Prompt, not PowerShell.**
 
 **Port already in use:**
 - Another app is using port 3000 or 3001
