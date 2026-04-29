@@ -31,8 +31,17 @@ import {
   streamPull,
   isModelInstalled,
   getInstalledModels,
-  isOllamaReachable
+  isOllamaReachable,
+  showModel,
+  getRunningModels,
+  matchModel
 } from '../ollama/chat.js';
+import {
+  getGpuStats,
+  utilizationIndicator,
+  temperatureIndicator,
+  vramIndicator
+} from '../gpu/stats.js';
 import {
   markdownToTelegramHtml,
   splitMessage,
@@ -66,6 +75,9 @@ const activeStreams = new Map(); // telegram_chat_id -> AbortController
 
 // Track concurrent operations per user
 const userOperations = new Map(); // telegram_chat_id -> Set of operation types
+
+// Track live hwinfo sessions per user
+const liveHwinfoSessions = new Map(); // telegram_chat_id -> { timer, messageId, endTime }
 
 /**
  * Load configuration from file
@@ -251,6 +263,16 @@ function deleteLastMessages(conversationId, pairCount) {
   }
 
   return messages.length;
+}
+
+/**
+ * Delete all messages from a conversation (clear context)
+ */
+function clearConversation(conversationId) {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conversationId);
+  db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(Date.now(), conversationId);
+  return result.changes;
 }
 
 /**
@@ -521,20 +543,31 @@ async function handleHelp(msg) {
   const helpText = `
 <b>LLMUI Telegram Bot</b>
 
-<b>Chat Commands:</b>
-${prefix}help - Show this help message
-${prefix}model [name] - Show or switch model
+<b>Model Commands:</b>
+${prefix}current_model - Show active model details
+${prefix}switch_model [name] - List or switch models
+${prefix}model [name] - Alias for switch_model
 ${prefix}models - List available models
 ${prefix}pull &lt;name&gt; - Download a model
+
+<b>Chat Commands:</b>
 ${prefix}new [model] - Start new conversation
+${prefix}clear - Clear conversation history
 ${prefix}system &lt;prompt&gt; - Set system prompt
 ${prefix}temp &lt;0.0-2.0&gt; - Set temperature
 ${prefix}stop - Stop current response
-${prefix}info - Show conversation info
 ${prefix}regen - Regenerate last response
 ${prefix}forget &lt;n&gt; - Delete last n message pairs
+
+<b>Conversation Management:</b>
+${prefix}info - Show conversation info
 ${prefix}list - List your conversations
 ${prefix}switch &lt;id&gt; - Switch conversation
+
+<b>System:</b>
+${prefix}hwinfo - Show GPU stats
+${prefix}hwinfo live [sec] - Live GPU stats (30s default, max 120s)
+${prefix}help - Show this help message
 
 Just send a message to chat with the AI.
   `.trim();
@@ -986,6 +1019,419 @@ async function handleSwitch(msg, args) {
 }
 
 /**
+ * Format model size in human-readable form
+ */
+function formatSize(bytes) {
+  if (!bytes || isNaN(bytes)) return 'N/A';
+  const gb = bytes / 1e9;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / 1e6;
+  return `${mb.toFixed(0)} MB`;
+}
+
+/**
+ * Format parameter count
+ */
+function formatParams(params) {
+  if (!params) return 'N/A';
+  // params might be a string like "3B" or a number
+  if (typeof params === 'string') return params;
+  const b = params / 1e9;
+  if (b >= 1) return `${b.toFixed(1)}B`;
+  const m = params / 1e6;
+  return `${m.toFixed(0)}M`;
+}
+
+/**
+ * Format seconds to m:ss
+ */
+function formatDuration(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+/**
+ * Handle /current_model command
+ */
+async function handleCurrentModel(msg) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const username = msg.from.username;
+
+  const conversationId = getOrCreateConversation(chatId, userId, username);
+  const conversation = getConversation(conversationId);
+  const modelName = conversation.model;
+
+  // No model set
+  if (!modelName) {
+    await sendFormattedMessage(bot, chatId,
+      `<b>No model is set for this conversation.</b>\nUse /switch_model &lt;name&gt; to pick one.`
+    );
+    return;
+  }
+
+  // Check if model is still installed
+  const installed = await isModelInstalled(ollamaUrl, modelName);
+  if (!installed) {
+    await sendFormattedMessage(bot, chatId,
+      `<b>Model</b> <code>${modelName}</code> <b>is no longer installed.</b>\n` +
+      `Use /switch_model to pick a different one, or /pull ${modelName} to reinstall.`
+    );
+    return;
+  }
+
+  // Get model details
+  const showResult = await showModel(ollamaUrl, modelName);
+
+  // Get running models to check if loaded
+  const runningResult = await getRunningModels(ollamaUrl);
+
+  let text = `<b>Current model</b>\n<code>${modelName}</code>\n\n`;
+
+  if (showResult.ok && showResult.data) {
+    const info = showResult.data;
+    const details = info.details || {};
+
+    if (details.family) {
+      text += `<b>Family:</b> ${details.family}\n`;
+    }
+    if (details.parameter_size) {
+      text += `<b>Parameters:</b> ${details.parameter_size}\n`;
+    }
+    if (details.quantization_level) {
+      text += `<b>Quantization:</b> ${details.quantization_level}\n`;
+    }
+    // Context length from model_info if available
+    const modelInfo = info.model_info || {};
+    const contextLength = Object.entries(modelInfo).find(([k]) => k.includes('context_length'));
+    if (contextLength) {
+      const ctxLen = contextLength[1];
+      text += `<b>Context:</b> ${ctxLen.toLocaleString()} tokens\n`;
+    }
+  } else {
+    text += `<i>(details unavailable)</i>\n`;
+  }
+
+  text += '\n';
+
+  // Check if model is loaded
+  if (runningResult.ok && runningResult.models) {
+    const runningModel = runningResult.models.find(m =>
+      m.name === modelName || m.name.startsWith(modelName.split(':')[0] + ':')
+    );
+
+    if (runningModel) {
+      const vramGb = (runningModel.size / 1e9).toFixed(1);
+      text += `<b>Status:</b> Loaded (${vramGb} GB VRAM)\n`;
+
+      // Calculate time until unload if expires_at is available
+      if (runningModel.expires_at) {
+        const expiresAt = new Date(runningModel.expires_at);
+        const now = new Date();
+        const secondsRemaining = Math.max(0, (expiresAt - now) / 1000);
+        if (secondsRemaining > 0) {
+          text += `<b>Unloads in:</b> ${formatDuration(secondsRemaining)}\n`;
+        }
+      }
+    } else {
+      text += `<b>Status:</b> Not loaded\n`;
+    }
+  } else {
+    text += `<b>Status:</b> Unknown\n`;
+  }
+
+  await sendFormattedMessage(bot, chatId, text.trim());
+}
+
+/**
+ * Handle /switch_model command
+ */
+async function handleSwitchModel(msg, args) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const username = msg.from.username;
+
+  // Check for active stream
+  if (activeStreams.has(chatId)) {
+    await sendFormattedMessage(bot, chatId,
+      `<b>Cannot switch models while a response is streaming.</b>\nUse /stop first, or wait for it to finish.`
+    );
+    return;
+  }
+
+  // Get installed models
+  const models = await getInstalledModels(ollamaUrl);
+
+  if (models.length === 0) {
+    await bot.sendMessage(chatId, 'No models installed. Use /pull <name> to download one.');
+    return;
+  }
+
+  const conversationId = getOrCreateConversation(chatId, userId, username);
+  const conversation = getConversation(conversationId);
+  const currentModel = conversation.model;
+
+  if (!args || args.trim() === '') {
+    // List models
+    let text = `<b>Installed models</b>`;
+    if (currentModel) {
+      text += ` (current: <code>${currentModel}</code>)`;
+    }
+    text += '\n\n';
+
+    // Sort by recently used (we don't track this, so just show all)
+    const displayModels = models.length > 15 ? models.slice(0, 15) : models;
+
+    for (const m of displayModels) {
+      const marker = m.name === currentModel ? '✓ ' : '  ';
+      const size = formatSize(m.size);
+      text += `${marker}<code>${m.name}</code> — ${size}\n`;
+    }
+
+    if (models.length > 15) {
+      text += `\n<i>(...and ${models.length - 15} more — use /models to see all)</i>\n`;
+    }
+
+    text += `\nTo switch: <code>/switch_model &lt;name&gt;</code>`;
+
+    await sendFormattedMessage(bot, chatId, text);
+    return;
+  }
+
+  // Switch to specified model
+  const query = args.trim();
+  const { match, multiple } = matchModel(models, query);
+
+  if (multiple) {
+    let text = `<b>Multiple models match</b> <code>${query}</code><b>:</b>\n`;
+    for (const m of multiple.slice(0, 10)) {
+      text += `• <code>${m.name}</code>\n`;
+    }
+    text += '\nBe more specific.';
+    await sendFormattedMessage(bot, chatId, text);
+    return;
+  }
+
+  if (!match) {
+    await sendFormattedMessage(bot, chatId,
+      `<b>Model</b> <code>${query}</code> <b>not installed.</b>\n` +
+      `Use /switch_model with no args to see available models.`
+    );
+    return;
+  }
+
+  // Update the conversation's model
+  const previousModel = currentModel;
+  updateConversationModel(conversationId, match.name);
+
+  let text = `✓ <b>Switched to</b> <code>${match.name}</code>`;
+  if (previousModel && previousModel !== match.name) {
+    text += `\n(was <code>${previousModel}</code>)`;
+  }
+
+  await sendFormattedMessage(bot, chatId, text);
+  console.log(`[Telegram] User ${userId} switched model to ${match.name}`);
+}
+
+/**
+ * Handle /clear command
+ */
+async function handleClear(msg) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const username = msg.from.username;
+
+  // Check for active stream
+  if (activeStreams.has(chatId)) {
+    await sendFormattedMessage(bot, chatId,
+      `<b>Cannot clear while a response is streaming.</b>\nUse /stop first, or wait for it to finish.`
+    );
+    return;
+  }
+
+  const conversationId = getOrCreateConversation(chatId, userId, username);
+  const messages = getMessages(conversationId);
+
+  if (messages.length === 0) {
+    await bot.sendMessage(chatId, 'Conversation is already empty.');
+    return;
+  }
+
+  const deleted = clearConversation(conversationId);
+  await sendFormattedMessage(bot, chatId,
+    `✓ <b>Cleared conversation</b>\nDeleted ${deleted} message${deleted !== 1 ? 's' : ''}. Context window is now empty.`
+  );
+  console.log(`[Telegram] User ${userId} cleared conversation (${deleted} messages)`);
+}
+
+/**
+ * Handle /hwinfo command
+ */
+async function handleHwinfo(msg, args) {
+  const chatId = msg.chat.id;
+
+  // Parse args for live mode
+  const argParts = (args || '').trim().toLowerCase().split(/\s+/);
+  const isLive = argParts[0] === 'live';
+  let liveDuration = 30; // default 30 seconds
+
+  if (isLive && argParts[1]) {
+    const parsed = parseInt(argParts[1], 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 120) {
+      liveDuration = parsed;
+    }
+  }
+
+  // Cancel any existing live session for this user
+  const existingSession = liveHwinfoSessions.get(chatId);
+  if (existingSession) {
+    clearInterval(existingSession.timer);
+    liveHwinfoSessions.delete(chatId);
+  }
+
+  // Get GPU stats
+  const result = await getGpuStats();
+
+  if (!result.ok) {
+    let errorText;
+    if (result.error === 'nvidia-smi not found') {
+      errorText = `❌ <b>GPU monitoring unavailable.</b>\n` +
+        `/hwinfo requires nvidia-smi (NVIDIA GPU with drivers).\n` +
+        `On the host: <code>which nvidia-smi</code> should return a path.`;
+    } else {
+      errorText = `⚠️ <b>Failed to read GPU stats:</b> ${result.error}`;
+    }
+    await sendFormattedMessage(bot, chatId, errorText);
+    return;
+  }
+
+  // Format GPU stats
+  const formatGpuStats = (gpus, liveInfo = null) => {
+    let text = '';
+
+    for (const gpu of gpus) {
+      const vramPct = (gpu.memoryUsed / gpu.memoryTotal) * 100;
+      const vramUsedGb = (gpu.memoryUsed / 1024).toFixed(1);
+      const vramTotalGb = (gpu.memoryTotal / 1024).toFixed(1);
+
+      text += `<b>GPU ${gpu.index}</b> — ${gpu.name}\n\n`;
+      text += `<b>Utilization:</b> ${gpu.utilization}% ${utilizationIndicator(gpu.utilization)}\n`;
+      text += `<b>VRAM:</b> ${vramUsedGb} / ${vramTotalGb} GB (${vramPct.toFixed(0)}%) ${vramIndicator(vramPct)}\n`;
+      text += `<b>Temperature:</b> ${gpu.temperature}°C ${temperatureIndicator(gpu.temperature)}\n`;
+
+      if (!isNaN(gpu.powerDraw) && !isNaN(gpu.powerLimit)) {
+        text += `<b>Power:</b> ${Math.round(gpu.powerDraw)} / ${Math.round(gpu.powerLimit)} W\n`;
+      }
+      if (!isNaN(gpu.fanSpeed)) {
+        text += `<b>Fan:</b> ${Math.round(gpu.fanSpeed)}%\n`;
+      }
+      if (!isNaN(gpu.clockGraphics)) {
+        text += `<b>Graphics Clock:</b> ${Math.round(gpu.clockGraphics)} MHz\n`;
+      }
+      if (!isNaN(gpu.clockMemory)) {
+        text += `<b>Memory Clock:</b> ${Math.round(gpu.clockMemory)} MHz\n`;
+      }
+
+      text += '\n';
+    }
+
+    // Multi-GPU summary
+    if (gpus.length > 1) {
+      const totalUsed = gpus.reduce((sum, g) => sum + g.memoryUsed, 0);
+      const totalMem = gpus.reduce((sum, g) => sum + g.memoryTotal, 0);
+      text += `<b>Total VRAM:</b> ${(totalUsed / 1024).toFixed(1)} / ${(totalMem / 1024).toFixed(1)} GB across ${gpus.length} GPUs\n\n`;
+    }
+
+    // Timestamp
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (liveInfo) {
+      text += `<i>Live since ${liveInfo.startTime} (${liveInfo.remaining}s remaining)</i>`;
+    } else {
+      text += `<i>Snapshot at ${timeStr}</i>`;
+    }
+
+    return text.trim();
+  };
+
+  if (!isLive) {
+    // Single snapshot
+    await sendFormattedMessage(bot, chatId, formatGpuStats(result.gpus));
+    return;
+  }
+
+  // Live mode
+  const startTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const endTime = Date.now() + liveDuration * 1000;
+
+  // Send initial message
+  const initialText = formatGpuStats(result.gpus, { startTime, remaining: liveDuration });
+  const sentMsg = await sendFormattedMessage(bot, chatId, initialText);
+  const messageId = sentMsg.message_id;
+
+  // Set up live updates
+  const updateInterval = setInterval(async () => {
+    const now = Date.now();
+    const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
+
+    if (remaining <= 0 || !liveHwinfoSessions.has(chatId)) {
+      // Live session ended
+      clearInterval(updateInterval);
+      liveHwinfoSessions.delete(chatId);
+
+      // Final update
+      const finalResult = await getGpuStats();
+      if (finalResult.ok) {
+        const finalTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        let finalText = formatGpuStats(finalResult.gpus);
+        // Replace the timestamp line with "live ended"
+        finalText = finalText.replace(/<i>Snapshot at [^<]+<\/i>/, `<i>Snapshot at ${finalTime} (live ended)</i>`);
+        try {
+          await editFormattedMessage(bot, finalText, { chat_id: chatId, message_id: messageId });
+        } catch {
+          // Message may have been deleted
+        }
+      }
+      return;
+    }
+
+    // Update with fresh stats
+    const freshResult = await getGpuStats();
+    if (freshResult.ok) {
+      const text = formatGpuStats(freshResult.gpus, { startTime, remaining });
+      try {
+        await editFormattedMessage(bot, text, { chat_id: chatId, message_id: messageId });
+      } catch (err) {
+        if (!err.message?.includes('message is not modified')) {
+          // Stop live mode on error
+          clearInterval(updateInterval);
+          liveHwinfoSessions.delete(chatId);
+        }
+      }
+    }
+  }, 3000);
+
+  liveHwinfoSessions.set(chatId, { timer: updateInterval, messageId, endTime });
+
+  console.log(`[Telegram] User ${msg.from.id} started /hwinfo live for ${liveDuration}s`);
+}
+
+/**
+ * Abort live hwinfo session if user sends another message
+ */
+function abortLiveHwinfo(chatId) {
+  const session = liveHwinfoSessions.get(chatId);
+  if (session) {
+    clearInterval(session.timer);
+    liveHwinfoSessions.delete(chatId);
+    // Note: we don't edit the message here, it will show stale data
+    // which is acceptable for early abort
+  }
+}
+
+/**
  * Process incoming message
  */
 async function processMessage(msg) {
@@ -1065,6 +1511,18 @@ async function processMessage(msg) {
         case 'switch':
           await handleSwitch(msg, args);
           break;
+        case 'current_model':
+          await handleCurrentModel(msg);
+          break;
+        case 'switch_model':
+          await handleSwitchModel(msg, args);
+          break;
+        case 'hwinfo':
+          await handleHwinfo(msg, args);
+          break;
+        case 'clear':
+          await handleClear(msg);
+          break;
         default:
           await bot.sendMessage(msg.chat.id, `Unknown command. Use ${config.command_prefix}help for available commands.`);
       }
@@ -1074,6 +1532,9 @@ async function processMessage(msg) {
     }
     return;
   }
+
+  // Abort live hwinfo if user sends any message
+  abortLiveHwinfo(msg.chat.id);
 
   // Handle as chat message
   try {
@@ -1133,6 +1594,31 @@ export async function startTelegramBot() {
     // Get bot info
     const me = await bot.getMe();
     const userCount = config.allowed_user_ids.length;
+
+    // Register bot commands for autocomplete menu
+    try {
+      await bot.setMyCommands([
+        { command: 'help', description: 'Show help message' },
+        { command: 'current_model', description: 'Show active model details' },
+        { command: 'switch_model', description: 'List or switch models' },
+        { command: 'models', description: 'List available models' },
+        { command: 'pull', description: 'Download a model' },
+        { command: 'new', description: 'Start new conversation' },
+        { command: 'clear', description: 'Clear conversation history' },
+        { command: 'system', description: 'Set system prompt' },
+        { command: 'temp', description: 'Set temperature (0.0-2.0)' },
+        { command: 'stop', description: 'Stop current response' },
+        { command: 'regen', description: 'Regenerate last response' },
+        { command: 'forget', description: 'Delete last n message pairs' },
+        { command: 'info', description: 'Show conversation info' },
+        { command: 'list', description: 'List your conversations' },
+        { command: 'switch', description: 'Switch conversation' },
+        { command: 'hwinfo', description: 'Show GPU stats' },
+      ]);
+      console.log('[Telegram] Registered bot commands for autocomplete menu');
+    } catch (err) {
+      console.error('[Telegram] Failed to register bot commands:', err.message);
+    }
 
     console.log(`[Telegram] Bot started, username: @${me.username}, allowed users: ${userCount}`);
 

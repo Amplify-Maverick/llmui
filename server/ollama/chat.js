@@ -247,3 +247,87 @@ export async function isOllamaReachable(ollamaUrl) {
     return false;
   }
 }
+
+/**
+ * Get model details from Ollama
+ *
+ * @param {string} ollamaUrl - Base URL for Ollama API
+ * @param {string} modelName - Model name to show
+ * @returns {Promise<{ok: boolean, data?: Object, error?: string}>}
+ */
+export async function showModel(ollamaUrl, modelName) {
+  try {
+    const response = await fetch(`${ollamaUrl}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: modelName }),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: errorText || `HTTP ${response.status}` };
+    }
+
+    const data = await response.json();
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Get list of currently running/loaded models from Ollama
+ *
+ * @param {string} ollamaUrl - Base URL for Ollama API
+ * @returns {Promise<{ok: boolean, models?: Array, error?: string}>}
+ */
+export async function getRunningModels(ollamaUrl) {
+  try {
+    const response = await fetch(`${ollamaUrl}/api/ps`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: errorText || `HTTP ${response.status}` };
+    }
+
+    const data = await response.json();
+    return { ok: true, models: data.models || [] };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Match a model name against installed models
+ * Priority: exact match → case-insensitive exact → case-insensitive prefix
+ *
+ * @param {Array} models - Array of model objects with `name` property
+ * @param {string} query - Model name/prefix to match
+ * @returns {{match: Object|null, multiple: Array|null}}
+ */
+export function matchModel(models, query) {
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+
+  // Exact match
+  const exact = models.find(m => m.name === q);
+  if (exact) return { match: exact, multiple: null };
+
+  // Case-insensitive exact match
+  const ciExact = models.find(m => m.name.toLowerCase() === qLower);
+  if (ciExact) return { match: ciExact, multiple: null };
+
+  // Case-insensitive prefix match
+  const prefixMatches = models.filter(m => m.name.toLowerCase().startsWith(qLower));
+  if (prefixMatches.length === 1) {
+    return { match: prefixMatches[0], multiple: null };
+  } else if (prefixMatches.length > 1) {
+    return { match: null, multiple: prefixMatches };
+  }
+
+  return { match: null, multiple: null };
+}
