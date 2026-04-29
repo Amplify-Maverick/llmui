@@ -171,6 +171,19 @@ class OllamaAPI {
     return response.ok;
   }
 
+  async unloadModel(name) {
+    const token = await getAuthToken();
+    const response = await fetch(`${AUTH_SERVER}/ollama/unload`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to unload model");
+    }
+    return response.json();
+  }
+
   async checkConnection() {
     try {
       const token = await getAuthToken();

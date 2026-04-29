@@ -69,6 +69,16 @@ export const useModelsStore = create((set, get) => ({
     }
   },
 
+  unloadModel: async (name) => {
+    try {
+      await ollamaApi.unloadModel(name);
+      await get().fetchRunningModels();
+    } catch (error) {
+      set({ error: error.message });
+      throw error;
+    }
+  },
+
   fetchModelInfo: async (modelName) => {
     if (!modelName) return null;
     const { modelInfoCache } = get();

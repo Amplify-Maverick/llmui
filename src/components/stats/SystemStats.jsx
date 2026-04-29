@@ -7,22 +7,36 @@ import GpuStats from "./GpuStats.jsx";
 import "./SystemStats.css";
 
 export default function SystemStats() {
-  const { localModels } = useModelsStore();
+  const { localModels, unloadModel } = useModelsStore();
   const [runningModels, setRunningModels] = useState([]);
+  const [unloadingModel, setUnloadingModel] = useState(null);
+
+  const fetchRunning = async () => {
+    try {
+      const data = await ollamaApi.listRunningModels();
+      setRunningModels(data.models || []);
+    } catch (err) {
+      console.error("Failed to fetch running models:", err);
+    }
+  };
 
   useEffect(() => {
-    const fetchRunning = async () => {
-      try {
-        const data = await ollamaApi.listRunningModels();
-        setRunningModels(data.models || []);
-      } catch (err) {
-        console.error("Failed to fetch running models:", err);
-      }
-    };
     fetchRunning();
     const id = setInterval(fetchRunning, 5000);
     return () => clearInterval(id);
   }, []);
+
+  const handleUnload = async (modelName) => {
+    setUnloadingModel(modelName);
+    try {
+      await unloadModel(modelName);
+      await fetchRunning();
+    } catch (err) {
+      console.error("Failed to unload model:", err);
+    } finally {
+      setUnloadingModel(null);
+    }
+  };
 
   const totalSize = localModels.reduce((acc, m) => acc + (m.size || 0), 0);
 
@@ -55,7 +69,17 @@ export default function SystemStats() {
           <h3 className="system-stats-section-title">Running Models</h3>
           {runningModels.map((model) => (
             <div key={model.name} className="running-model-card">
-              <div className="running-model-name">{model.name}</div>
+              <div className="running-model-header">
+                <div className="running-model-name">{model.name}</div>
+                <button
+                  className="running-model-unload-btn"
+                  onClick={() => handleUnload(model.name)}
+                  disabled={unloadingModel === model.name}
+                  title="Unload model from VRAM"
+                >
+                  {unloadingModel === model.name ? "Unloading..." : "Unload"}
+                </button>
+              </div>
               {model.size && (
                 <div className="running-model-detail">
                   <span>Size</span>

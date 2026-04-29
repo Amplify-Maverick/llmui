@@ -384,6 +384,33 @@ app.post("/ollama/pull", requireAuth, async (req, res) => {
   }
 });
 
+// POST /ollama/unload - Unload a model from VRAM (authenticated)
+app.post("/ollama/unload", requireAuth, async (req, res) => {
+  const { name } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: "Model name is required" });
+  }
+
+  try {
+    // Ollama unloads a model when you send a generate request with keep_alive=0
+    const response = await fetch(`${ollamaUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: name, keep_alive: 0 }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return res.status(response.status).send(error);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error unloading model:", err);
+    res.status(502).json({ error: "Failed to unload model" });
+  }
+});
+
 // DELETE /ollama/delete - Delete a model (authenticated)
 app.delete("/ollama/delete", requireAuth, async (req, res) => {
   try {

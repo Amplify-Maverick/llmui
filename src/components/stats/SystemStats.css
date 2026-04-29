@@ -31,11 +31,39 @@
   margin-bottom: 12px;
 }
 
+.running-model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .running-model-name {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: 8px;
+}
+
+.running-model-unload-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.running-model-unload-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-secondary);
+}
+
+.running-model-unload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .running-model-detail {
