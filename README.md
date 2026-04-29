@@ -2,7 +2,7 @@
 
 A web interface for chatting with local LLMs through Ollama.
 
-(screenshots/signal-2026-04-28-223525.png)
+![LLMUI Chat Interface](screenshots/chat.png)
 
 ## What it does
 
