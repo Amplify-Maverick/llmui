@@ -27,19 +27,44 @@ async function ensureSandboxDir() {
 }
 
 /**
- * Resolve and validate a path within the sandbox
+ * Check if a path is within the sandbox directory
  */
-function resolveSandboxPath(filePath) {
+function isWithinSandbox(resolvedPath) {
+  return resolvedPath.startsWith(SANDBOX_DIR + path.sep) || resolvedPath === SANDBOX_DIR;
+}
+
+/**
+ * Resolve and validate a path within the sandbox.
+ * Uses fs.realpath() to resolve symlinks and prevent symlink escape attacks.
+ */
+async function resolveSandboxPath(filePath) {
   // Normalize and resolve the path
   const normalized = path.normalize(filePath);
   const resolved = path.resolve(SANDBOX_DIR, normalized);
 
-  // Ensure the resolved path is within the sandbox
-  if (!resolved.startsWith(SANDBOX_DIR + path.sep) && resolved !== SANDBOX_DIR) {
+  // First check: ensure the logical path is within the sandbox
+  if (!isWithinSandbox(resolved)) {
     throw new Error("Access denied: Path is outside the sandbox directory");
   }
 
-  return resolved;
+  // Second check: resolve symlinks and verify the real path is also within sandbox.
+  // This prevents symlink escape attacks where a symlink inside the sandbox
+  // points to a file outside it.
+  try {
+    const realPath = await fs.realpath(resolved);
+    if (!isWithinSandbox(realPath)) {
+      throw new Error("Access denied: Path resolves to location outside the sandbox directory");
+    }
+    return realPath;
+  } catch (error) {
+    // If the path doesn't exist, realpath throws ENOENT.
+    // In that case, return the resolved path - the actual file operation
+    // will fail with ENOENT which is handled appropriately.
+    if (error.code === "ENOENT") {
+      return resolved;
+    }
+    throw error;
+  }
 }
 
 export default {
@@ -65,8 +90,8 @@ export default {
     // Ensure sandbox exists
     await ensureSandboxDir();
 
-    // Resolve path within sandbox
-    const resolvedPath = resolveSandboxPath(filePath);
+    // Resolve path within sandbox (uses realpath to prevent symlink escape)
+    const resolvedPath = await resolveSandboxPath(filePath);
 
     try {
       // Check file stats first
