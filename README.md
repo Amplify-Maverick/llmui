@@ -230,30 +230,6 @@ curl -X POST -H "Authorization: Bearer $token" http://localhost:3001/api/backup
 
 Backups are stored in `~/.llmui/backups/`.
 
-## Authentication & LAN Access
-
-The storage server uses bearer token authentication to protect your data. A token is automatically generated on first run and stored at `~/.llmui/token`.
-
-- **Linux/macOS**: Token file is created with mode 0600 (owner read/write only)
-- **Windows**: Unix file permissions don't apply. If you have multiple users on your machine, consider restricting access to the `.llmui` folder via folder properties.
-
-**LAN Access**: To access LLMUI from other devices on your network, add your server's LAN IP to the allowed origins:
-
-```bash
-# Linux/macOS
-LLMUI_ALLOWED_ORIGINS="http://192.168.1.100:3000" npm run dev
-```
-
-```powershell
-# Windows (PowerShell)
-$env:LLMUI_ALLOWED_ORIGINS="http://192.168.1.100:3000"
-npm run dev
-```
-
-Multiple origins can be comma-separated.
-
-**Production Deployment Note**: The current token delivery mechanism (via Vite plugin at `/api/llmui-token`) only works during development. For production deployment after `vite build`, you'll need to serve `dist/` from the Express server and have it inject the token into `index.html` at serve time, or use a reverse proxy that handles token injection.
-
 ## Keyboard shortcuts
 
 Press `Ctrl+/` (or `Cmd+/` on Mac) to see all shortcuts.
