@@ -8,6 +8,7 @@
     "client": "npx vite",
     "build": "npx vite build",
     "preview": "npx vite preview",
+    "test": "node --test server/tools/*.test.js",
     "postinstall": "node -e \"console.log('\\n✓ Installation complete! Run: npm run dev\\n')\""
   },
   "dependencies": {
