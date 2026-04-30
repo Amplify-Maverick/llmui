@@ -363,6 +363,12 @@ app.post("/ollama/chat", requireAuth, async (req, res) => {
 });
 
 // POST /ollama/chat-with-tools - Chat with tool calling support (authenticated, streaming)
+//
+// Manual test for abort handling:
+// 1. Start a chat that triggers a slow tool (e.g., web_search or fetch_url with a slow endpoint)
+// 2. Close the browser tab while the tool is executing
+// 3. Check server logs - you should see "chat-with-tools aborted: client disconnected"
+//    instead of the tool result being logged/processed
 const MAX_TOOL_ITERATIONS = 5;
 
 app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
@@ -371,6 +377,17 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
   if (!model) {
     return res.status(400).json({ error: "Model is required" });
   }
+
+  // Create abort controller for cancellation on client disconnect
+  const controller = new AbortController();
+  const { signal } = controller;
+
+  // Abort all pending operations when client disconnects
+  req.on("close", () => {
+    if (!res.writableEnded) {
+      controller.abort();
+    }
+  });
 
   // Get tools schema for enabled tools
   const tools = getToolsSchema(enabledTools);
@@ -382,6 +399,11 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
 
   try {
     while (iterations < MAX_TOOL_ITERATIONS) {
+      // Check if aborted before starting new iteration
+      if (signal.aborted) {
+        throw new DOMException("Request aborted", "AbortError");
+      }
+
       iterations++;
 
       // Call Ollama with tools
@@ -395,6 +417,7 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
           stream: true,
           options: options.modelOptions || {},
         }),
+        signal,
       });
 
       if (!response.ok) {
@@ -411,37 +434,52 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
       let toolCalls = [];
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-
-          try {
-            const parsed = JSON.parse(line);
-
-            // Stream content to client
-            if (parsed.message?.content) {
-              assistantContent += parsed.message.content;
-              res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
-            }
-
-            // Collect tool calls from the final message
-            if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
-              toolCalls = parsed.message.tool_calls;
-            }
-
-            if (parsed.done) {
-              break;
-            }
-          } catch {
-            // Skip malformed JSON lines
+      try {
+        while (true) {
+          // Check abort before each read
+          if (signal.aborted) {
+            reader.cancel();
+            throw new DOMException("Request aborted", "AbortError");
           }
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+              const parsed = JSON.parse(line);
+
+              // Stream content to client
+              if (parsed.message?.content) {
+                assistantContent += parsed.message.content;
+                res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
+              }
+
+              // Collect tool calls from the final message
+              if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
+                toolCalls = parsed.message.tool_calls;
+              }
+
+              if (parsed.done) {
+                break;
+              }
+            } catch {
+              // Skip malformed JSON lines
+            }
+          }
+        }
+      } finally {
+        // Ensure reader is released even on abort
+        try {
+          reader.releaseLock();
+        } catch {
+          // Reader may already be released
         }
       }
 
@@ -477,6 +515,11 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
 
       // Execute each tool and emit results
       for (const toolCall of toolCalls) {
+        // Check if aborted before executing each tool
+        if (signal.aborted) {
+          throw new DOMException("Request aborted", "AbortError");
+        }
+
         const { function: fn } = toolCall;
         const toolId = toolCall.id || nanoid();
         const toolName = fn.name;
@@ -502,6 +545,11 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
         // Execute tool
         const result = await executeTool(toolName, toolArgs);
 
+        // Check if aborted after tool execution (before emitting result)
+        if (signal.aborted) {
+          throw new DOMException("Request aborted", "AbortError");
+        }
+
         // Emit tool result
         res.write(JSON.stringify({
           type: "tool_result",
@@ -525,9 +573,21 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
     res.write(JSON.stringify({ type: "error", error: "Max tool iterations reached" }) + "\n");
     res.end();
   } catch (err) {
+    // Handle abort gracefully - don't treat as crash
+    if (err.name === "AbortError") {
+      console.log("chat-with-tools aborted: client disconnected");
+      // Response already closed by client, just clean up and return
+      if (!res.writableEnded) {
+        res.end();
+      }
+      return;
+    }
+
     console.error("Error in chat-with-tools:", err);
-    res.write(JSON.stringify({ type: "error", error: err.message || "Tool execution failed" }) + "\n");
-    res.end();
+    if (!res.writableEnded) {
+      res.write(JSON.stringify({ type: "error", error: err.message || "Tool execution failed" }) + "\n");
+      res.end();
+    }
   }
 });
 
