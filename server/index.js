@@ -2,7 +2,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
 import crypto from "crypto";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
@@ -675,62 +675,133 @@ app.delete("/ollama/delete", requireAuth, async (req, res) => {
 
 // ============================================================
 // GPU stats endpoint (authenticated)
-// Uses execFile (no shell) + async to avoid blocking the event loop.
-// Caches nvidia-smi output for 1 second — counters don't update faster.
+// Uses a persistent nvidia-smi --loop=1 subprocess to avoid cold-start
+// overhead from spawning a new process on each poll. The subprocess
+// outputs GPU stats every second; we parse stdout continuously and
+// cache the latest data for the API endpoint to return.
 // ============================================================
 
 const NVIDIA_SMI_ARGS = [
   "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,fan.speed,power.draw,power.limit,clocks.current.graphics,clocks.current.memory",
   "--format=csv,noheader,nounits",
+  "--loop=1", // Output stats every 1 second continuously
 ];
 
-const GPU_CACHE_TTL_MS = 1000;
 let gpuCache = { data: null, timestamp: 0 };
+let nvidiaSmiProcess = null;
+let nvidiaSmiBuffer = "";
+
+/**
+ * Parse a single CSV line from nvidia-smi output into a GPU object.
+ */
+function parseGpuLine(line) {
+  const parts = line.split(",").map((s) => s.trim());
+  if (parts.length < 11) return null;
+  return {
+    index: parseInt(parts[0], 10),
+    name: parts[1],
+    utilization: parseFloat(parts[2]),       // %
+    memoryUsed: parseFloat(parts[3]),         // MiB
+    memoryTotal: parseFloat(parts[4]),        // MiB
+    temperature: parseFloat(parts[5]),        // °C
+    fanSpeed: parseFloat(parts[6]),           // %
+    powerDraw: parseFloat(parts[7]),          // W
+    powerLimit: parseFloat(parts[8]),         // W
+    clockGraphics: parseFloat(parts[9]),      // MHz
+    clockMemory: parseFloat(parts[10]),       // MHz
+  };
+}
+
+/**
+ * Start the persistent nvidia-smi subprocess.
+ * Parses stdout continuously and updates gpuCache with latest stats.
+ */
+function startNvidiaSmiLoop() {
+  if (nvidiaSmiProcess) return; // Already running
+
+  try {
+    nvidiaSmiProcess = spawn("nvidia-smi", NVIDIA_SMI_ARGS, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    nvidiaSmiProcess.stdout.on("data", (chunk) => {
+      nvidiaSmiBuffer += chunk.toString();
+
+      // Process complete lines
+      const lines = nvidiaSmiBuffer.split("\n");
+      nvidiaSmiBuffer = lines.pop(); // Keep incomplete line in buffer
+
+      // nvidia-smi --loop outputs all GPUs, then a blank line, then repeats.
+      // We collect GPU lines until we hit a blank or the next cycle.
+      const gpus = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue; // Skip blank lines between cycles
+        const gpu = parseGpuLine(trimmed);
+        if (gpu) gpus.push(gpu);
+      }
+
+      if (gpus.length > 0) {
+        const now = Date.now();
+        gpuCache = {
+          data: { ok: true, gpus, timestamp: now },
+          timestamp: now,
+        };
+      }
+    });
+
+    nvidiaSmiProcess.stderr.on("data", (chunk) => {
+      console.error("nvidia-smi stderr:", chunk.toString());
+    });
+
+    nvidiaSmiProcess.on("error", (err) => {
+      console.error("nvidia-smi process error:", err);
+      nvidiaSmiProcess = null;
+    });
+
+    nvidiaSmiProcess.on("exit", (code, signal) => {
+      if (signal !== "SIGTERM" && signal !== "SIGINT") {
+        console.error(`nvidia-smi exited unexpectedly (code=${code}, signal=${signal})`);
+      }
+      nvidiaSmiProcess = null;
+    });
+
+    console.log("Started persistent nvidia-smi subprocess (--loop=1)");
+  } catch (err) {
+    console.error("Failed to start nvidia-smi:", err);
+    nvidiaSmiProcess = null;
+  }
+}
+
+/**
+ * Stop the persistent nvidia-smi subprocess.
+ */
+function stopNvidiaSmiLoop() {
+  if (nvidiaSmiProcess) {
+    nvidiaSmiProcess.kill("SIGTERM");
+    nvidiaSmiProcess = null;
+    console.log("Stopped nvidia-smi subprocess");
+  }
+}
 
 app.get("/api/gpu", requireAuth, async (req, res) => {
-  const now = Date.now();
+  // Start the persistent process on first request (lazy initialization)
+  if (!nvidiaSmiProcess) {
+    startNvidiaSmiLoop();
+    // Give it a moment to produce first output
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  }
 
-  // Return cached data if still fresh
-  if (gpuCache.data && now - gpuCache.timestamp < GPU_CACHE_TTL_MS) {
+  if (gpuCache.data) {
     res.set("Cache-Control", "max-age=1");
     return res.json(gpuCache.data);
   }
 
-  try {
-    const { stdout } = await execFileAsync("nvidia-smi", NVIDIA_SMI_ARGS, {
-      timeout: 3000,
-    });
-
-    const raw = stdout.trim();
-    const gpus = raw.split("\n").map((line) => {
-      const parts = line.split(",").map((s) => s.trim());
-      return {
-        index: parseInt(parts[0], 10),
-        name: parts[1],
-        utilization: parseFloat(parts[2]),       // %
-        memoryUsed: parseFloat(parts[3]),         // MiB
-        memoryTotal: parseFloat(parts[4]),        // MiB
-        temperature: parseFloat(parts[5]),        // °C
-        fanSpeed: parseFloat(parts[6]),           // %
-        powerDraw: parseFloat(parts[7]),          // W
-        powerLimit: parseFloat(parts[8]),         // W
-        clockGraphics: parseFloat(parts[9]),      // MHz
-        clockMemory: parseFloat(parts[10]),       // MHz
-      };
-    });
-
-    const response = { ok: true, gpus, timestamp: now };
-    gpuCache = { data: response, timestamp: now };
-
-    res.set("Cache-Control", "max-age=1");
-    res.json(response);
-  } catch (err) {
-    console.error("GPU stats error:", err);
-    res.status(500).json({
-      ok: false,
-      error: "nvidia-smi not available or failed",
-    });
-  }
+  // No data yet (nvidia-smi might not be available)
+  res.status(500).json({
+    ok: false,
+    error: "nvidia-smi not available or no data yet",
+  });
 });
 
 // ============================================================
@@ -771,12 +842,14 @@ if (dryRun && migrationResult.dryRun) {
 // Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("Shutting down...");
+  stopNvidiaSmiLoop();
   closeDb();
   process.exit(0);
 });
 
 process.on("SIGINT", () => {
   console.log("Shutting down...");
+  stopNvidiaSmiLoop();
   closeDb();
   process.exit(0);
 });
