@@ -9,6 +9,12 @@
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
   min-height: 32px;
+  transition: background 0.3s, border-color 0.3s;
+}
+
+.token-bar--exceeded {
+  background: rgba(255, 107, 107, 0.06);
+  border-bottom-color: rgba(255, 107, 107, 0.25);
 }
 
 .token-label {
@@ -21,7 +27,16 @@
 
 .token-label-value {
   color: var(--color-text-primary);
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.token-label-limit {
+  opacity: 0.7;
+}
+
+.token-label-unit {
+  margin-left: 2px;
+  opacity: 0.6;
 }
 
 .token-dot {
@@ -30,7 +45,14 @@
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: background 0.3s;
 }
+
+.token-bar--exceeded .token-dot {
+  animation: token-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Progress bar ── */
 
 .token-progress-track {
   flex: 1;
@@ -39,6 +61,12 @@
   border-radius: 3px;
   overflow: hidden;
   position: relative;
+  min-width: 80px;
+  transition: box-shadow 0.3s;
+}
+
+.token-progress-track--exceeded {
+  box-shadow: 0 0 6px rgba(255, 107, 107, 0.2);
 }
 
 .token-progress-fill {
@@ -47,6 +75,70 @@
   transition: width var(--transition-slow), background var(--transition-slow);
 }
 
+.token-progress-fill--exceeded {
+  animation: token-bar-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Status label (percentage / overflow) ── */
+
+.token-status {
+  font-weight: 500;
+  transition: color 0.3s;
+}
+
+.token-status--ok {
+  color: var(--color-text-secondary);
+}
+
+.token-status--warning {
+  color: #fcd34d;
+}
+
+.token-status--danger {
+  color: #fb923c;
+}
+
+.token-status--exceeded {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+/* ── Pending input tokens ── */
+
 .token-pending {
   color: var(--color-secondary);
+}
+
+/* ── Truncation warning badge ── */
+
+.token-truncation-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  animation: token-pulse 1.5s ease-in-out infinite;
+  cursor: help;
+}
+
+.token-truncation-warning svg {
+  flex-shrink: 0;
+}
+
+/* ── Animations ── */
+
+@keyframes token-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes token-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }

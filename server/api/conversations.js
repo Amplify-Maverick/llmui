@@ -7,24 +7,32 @@ const router = express.Router();
 // GET /api/conversations - List conversations with pagination
 router.get('/', (req, res) => {
   const db = getDb();
-  const { page = 1, limit = 50, archived = 'false' } = req.query;
+  const { page = 1, limit = 50, archived = 'false', source } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const isArchived = archived === 'true' ? 1 : 0;
+
+  let whereClause = 'WHERE archived = ?';
+  const params = [isArchived];
+
+  if (source) {
+    whereClause += ' AND source = ?';
+    params.push(source);
+  }
 
   const conversations = db.prepare(`
     SELECT id, title, model, tags, created_at as createdAt, updated_at as updatedAt, archived,
            parent_conversation_id as parentConversationId, branch_point_message_id as branchPointMessageId,
            temperature, max_tokens as maxTokens, system_prompt as systemPrompt, enable_thinking as enableThinking,
-           is_compare as isCompare, compare_models as compareModels,
+           is_compare as isCompare, compare_models as compareModels, source,
            (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id) as messageCount,
            (SELECT COUNT(*) FROM conversations c2 WHERE c2.parent_conversation_id = conversations.id) as childBranchCount
     FROM conversations
-    WHERE archived = ?
+    ${whereClause}
     ORDER BY updated_at DESC
     LIMIT ? OFFSET ?
-  `).all(isArchived, parseInt(limit), offset);
+  `).all(...params, parseInt(limit), offset);
 
-  const total = db.prepare('SELECT COUNT(*) as count FROM conversations WHERE archived = ?').get(isArchived);
+  const total = db.prepare(`SELECT COUNT(*) as count FROM conversations ${whereClause}`).get(...params);
 
   res.json({
     conversations: conversations.map(c => ({

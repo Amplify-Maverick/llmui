@@ -28,6 +28,7 @@ export default function ConversationHistory() {
   const { defaultModel, customTags = [], updateSetting } = useSettingsStore();
   const tags = customTags || [];
 
+  const [activeSourceTab, setActiveSourceTab] = useState("local");
   const [search, setSearch] = useState("");
   const [searchInContent, setSearchInContent] = useState(false);
   const [selectedTag, setSelectedTag] = useState(null);
@@ -40,10 +41,20 @@ export default function ConversationHistory() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
 
+  // Check if there are any Telegram conversations to show the tab
+  const hasTelegramChats = useMemo(
+    () => conversations.some((c) => c.source === "telegram"),
+    [conversations]
+  );
+
   // Filter and organize conversations with branches
   const { rootConversations, branchMap } = useMemo(() => {
     // Filter all conversations first
     const filtered = conversations.filter((c) => {
+      // Filter by source tab
+      if (activeSourceTab === "local" && c.source === "telegram") return false;
+      if (activeSourceTab === "telegram" && c.source !== "telegram") return false;
+
       // Filter by tag
       if (selectedTag && (!c.tags || !c.tags.includes(selectedTag))) {
         return false;
@@ -82,7 +93,7 @@ export default function ConversationHistory() {
     }
 
     return { rootConversations: roots, branchMap: branches };
-  }, [conversations, search, searchInContent, selectedTag]);
+  }, [conversations, search, searchInContent, selectedTag, activeSourceTab]);
 
   const handleNewChat = async () => {
     await createConversation(defaultModel);
@@ -252,7 +263,7 @@ export default function ConversationHistory() {
           </div>
         )}
 
-        {!selectMode && (
+        {!selectMode && activeSourceTab !== "telegram" && (
           <Button
             onClick={handleNewChat}
             style={{ width: "100%", marginBottom: "12px" }}
@@ -300,12 +311,38 @@ export default function ConversationHistory() {
         )}
       </div>
 
+      {/* Source Tabs — only shown when Telegram chats exist */}
+      {hasTelegramChats && (
+        <div className="history-source-tabs">
+          <button
+            className={`source-tab ${activeSourceTab === "local" ? "active" : ""}`}
+            onClick={() => setActiveSourceTab("local")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            Chats
+          </button>
+          <button
+            className={`source-tab ${activeSourceTab === "telegram" ? "active" : ""}`}
+            onClick={() => setActiveSourceTab("telegram")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+            </svg>
+            Telegram
+          </button>
+        </div>
+      )}
+
       <div className="history-list">
         {rootConversations.length === 0 && branchMap.size === 0 ? (
           <div className="history-empty">
             {search || selectedTag
               ? "No matching conversations"
-              : "No conversations yet"}
+              : activeSourceTab === "telegram"
+                ? "No Telegram conversations"
+                : "No conversations yet"}
           </div>
         ) : (
           rootConversations.map((conversation) => (

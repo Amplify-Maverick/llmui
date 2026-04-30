@@ -134,6 +134,55 @@
   color: var(--tag-color, var(--color-primary));
 }
 
+/* ── Source Tabs (Chats / Telegram) ─────────────────────── */
+.history-source-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.source-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.source-tab:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+}
+
+.source-tab.active {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.source-tab.active svg {
+  color: var(--color-primary);
+}
+
+/* Telegram-specific active state */
+.source-tab:last-child.active {
+  border-bottom-color: #2AABEE;
+}
+
+.source-tab:last-child.active svg {
+  color: #2AABEE;
+}
+
 .history-list {
   flex: 1;
   overflow: auto;

@@ -219,6 +219,24 @@
   flex-shrink: 0;
 }
 
+/* Telegram indicator */
+.conv-item-telegram-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #2AABEE;
+  background: rgba(42, 171, 238, 0.15);
+  border: 1px solid rgba(42, 171, 238, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
+}
+
+.conv-item-telegram-indicator svg {
+  flex-shrink: 0;
+}
+
 /* Compare indicator */
 .conv-item-compare-indicator {
   display: inline-flex;

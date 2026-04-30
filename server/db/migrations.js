@@ -54,6 +54,28 @@ const MIGRATIONS = [
         db.exec('ALTER TABLE conversations ADD COLUMN compare_models TEXT');
       }
     }
+  },
+  {
+    version: 3,
+    description: 'Add source column to conversations and backfill Telegram chats',
+    up: (db) => {
+      const tableInfo = db.prepare("PRAGMA table_info(conversations)").all();
+      const existingColumns = new Set(tableInfo.map(col => col.name));
+
+      if (!existingColumns.has('source')) {
+        db.exec("ALTER TABLE conversations ADD COLUMN source TEXT NOT NULL DEFAULT 'local'");
+      }
+
+      // Backfill: tag existing conversations with titles starting with "Telegram:" as telegram source
+      db.prepare("UPDATE conversations SET source = 'telegram' WHERE title LIKE 'Telegram:%'").run();
+
+      // Add index for filtering by source
+      try {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_conversations_source ON conversations(source, updated_at DESC)');
+      } catch (err) {
+        // Index might already exist
+      }
+    }
   }
 ];
 

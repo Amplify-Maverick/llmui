@@ -318,11 +318,8 @@ export default function ChatView() {
         /* Regular Chat View */
         <>
           {/* Model Info Bar */}
-          {currentModelInfo && (
+          {currentModelInfo && (currentModelInfo.parameters || currentModelInfo.quantization) && (
             <div className="model-info-bar">
-              <span className="model-info-item">
-                <strong>Context:</strong> {currentModelInfo.contextLength?.toLocaleString() || "?"} tokens
-              </span>
               {currentModelInfo.parameters && (
                 <span className="model-info-item">
                   <strong>Parameters:</strong> {currentModelInfo.parameters}

@@ -20,7 +20,9 @@ export const SCHEMA_SQL = `
     enable_thinking INTEGER,
     -- Compare mode support
     is_compare INTEGER DEFAULT 0,
-    compare_models TEXT
+    compare_models TEXT,
+    -- Source tracking (local, telegram, etc.)
+    source TEXT NOT NULL DEFAULT 'local'
   );
 
   -- Messages table

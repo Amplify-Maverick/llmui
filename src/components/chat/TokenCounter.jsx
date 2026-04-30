@@ -5,7 +5,6 @@ import { useModelsStore } from "../../stores/modelsStore.js";
 import {
   estimateConversationTokens,
   estimateTokens,
-  formatTokenCount,
 } from "../../utils/tokenEstimator.js";
 import "./TokenCounter.css";
 
@@ -23,11 +22,22 @@ function getBarGlow(percentage) {
   return "0 0 8px rgba(255, 107, 107, 0.4)";
 }
 
+function getStatusLevel(percentage) {
+  if (percentage >= 100) return "exceeded";
+  if (percentage >= 90) return "danger";
+  if (percentage >= 75) return "warning";
+  return "ok";
+}
+
 export default function TokenCounter({ inputValue = "" }) {
-  const { messages, streamingContent, isStreaming } = useChatStore();
-  const { defaultModel, systemPrompt } = useSettingsStore();
+  const { messages, streamingContent, isStreaming, getActiveConversationSettings } = useChatStore();
+  const { defaultModel, systemPrompt: globalSystemPrompt } = useSettingsStore();
   const { fetchModelInfo, modelInfoCache } = useModelsStore();
   const [contextLength, setContextLength] = useState(null);
+
+  // Use per-conversation system prompt if set, otherwise fall back to global
+  const convSettings = getActiveConversationSettings();
+  const systemPrompt = convSettings?.systemPrompt ?? globalSystemPrompt;
 
   useEffect(() => {
     if (defaultModel) {
@@ -57,7 +67,8 @@ export default function TokenCounter({ inputValue = "" }) {
       const convTokens = estimateConversationTokens(effectiveMessages, systemPrompt);
       const inpTokens = inputValue ? estimateTokens(inputValue) + 4 : 0;
       const total = convTokens + inpTokens;
-      const pct = contextLength ? Math.min((total / contextLength) * 100, 100) : 0;
+      // Don't cap at 100 — we need to know when context is exceeded
+      const pct = contextLength ? (total / contextLength) * 100 : 0;
 
       return {
         conversationTokens: convTokens,
@@ -70,26 +81,39 @@ export default function TokenCounter({ inputValue = "" }) {
   if (!defaultModel) return null;
 
   const barColor = getBarColor(percentage);
+  const statusLevel = getStatusLevel(percentage);
+  const barWidth = Math.min(percentage, 100); // visual bar caps at 100%
+  const exceeded = percentage >= 100;
 
   return (
-    <div className="token-bar">
-      <span className="token-label" title="Estimated tokens used in this conversation">
+    <div className={`token-bar ${exceeded ? "token-bar--exceeded" : ""}`}>
+      {/* Left: token count label */}
+      <span
+        className="token-label"
+        title={`Estimated tokens used in this conversation${exceeded ? " — context window exceeded, older messages may be truncated" : ""}`}
+      >
         <span className="token-dot" style={{ background: barColor }} />
         <span className="token-label-value">
-          {formatTokenCount(totalTokens)}
+          {totalTokens.toLocaleString()}
         </span>
         {contextLength && (
-          <span>/ {formatTokenCount(contextLength)}</span>
+          <span className="token-label-limit">
+            / {contextLength.toLocaleString()}
+          </span>
         )}
-        <span style={{ marginLeft: "2px" }}>tokens</span>
+        <span className="token-label-unit">tokens</span>
       </span>
 
+      {/* Middle: progress bar */}
       {contextLength && (
-        <div className="token-progress-track" title={`${percentage.toFixed(1)}% of context window used`}>
+        <div
+          className={`token-progress-track ${statusLevel === "exceeded" ? "token-progress-track--exceeded" : ""}`}
+          title={`${percentage.toFixed(1)}% of context window used`}
+        >
           <div
-            className="token-progress-fill"
+            className={`token-progress-fill ${exceeded ? "token-progress-fill--exceeded" : ""}`}
             style={{
-              width: `${percentage}%`,
+              width: `${barWidth}%`,
               background: barColor,
               boxShadow: getBarGlow(percentage),
             }}
@@ -97,15 +121,33 @@ export default function TokenCounter({ inputValue = "" }) {
         </div>
       )}
 
+      {/* Right: percentage / status */}
       {contextLength && (
-        <span className="token-label" style={{ color: percentage >= 90 ? "#ff6b6b" : undefined }}>
-          {percentage >= 90 ? "Near limit" : `${percentage.toFixed(0)}%`}
+        <span
+          className={`token-label token-status token-status--${statusLevel}`}
+        >
+          {exceeded
+            ? `${Math.round(percentage)}% — overflowing`
+            : `${percentage.toFixed(0)}%`}
         </span>
       )}
 
+      {/* Pending input tokens */}
       {inputTokens > 0 && (
         <span className="token-label token-pending" title="Tokens from your current input">
-          +{formatTokenCount(inputTokens)} pending
+          +{inputTokens.toLocaleString()} pending
+        </span>
+      )}
+
+      {/* Truncation warning */}
+      {exceeded && (
+        <span className="token-truncation-warning" title="The model's context window has been exceeded. Ollama will silently drop older messages to fit within num_ctx.">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          Truncating
         </span>
       )}
     </div>
