@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../stores/chatStore.js';
 import { useSettingsStore } from '../../stores/settingsStore.js';
+import { AVAILABLE_TOOLS } from '../../constants/config.js';
 import './ConversationSettingsPopover.css';
 
 export default function ConversationSettingsPopover({ isOpen, onClose }) {
@@ -16,6 +17,7 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
   const [maxTokens, setMaxTokens] = useState(conv?.maxTokens ?? null);
   const [systemPrompt, setSystemPrompt] = useState(conv?.systemPrompt ?? null);
   const [enableThinking, setEnableThinking] = useState(conv?.enableThinking ?? null);
+  const [enabledTools, setEnabledTools] = useState(conv?.enabledTools ?? null);
 
   // Update local state when conversation changes
   useEffect(() => {
@@ -24,6 +26,7 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
       setMaxTokens(conv.maxTokens ?? null);
       setSystemPrompt(conv.systemPrompt ?? null);
       setEnableThinking(conv.enableThinking ?? null);
+      setEnabledTools(conv.enabledTools ?? null);
     }
   }, [conv, activeConversationId]);
 
@@ -57,6 +60,7 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
       case 'maxTokens': return maxTokens === null;
       case 'systemPrompt': return systemPrompt === null;
       case 'enableThinking': return enableThinking === null;
+      case 'enabledTools': return enabledTools === null;
       default: return true;
     }
   };
@@ -67,6 +71,7 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
       case 'maxTokens': return maxTokens ?? globalSettings.maxTokens;
       case 'systemPrompt': return systemPrompt ?? globalSettings.systemPrompt;
       case 'enableThinking': return enableThinking ?? globalSettings.enableThinking;
+      case 'enabledTools': return enabledTools ?? globalSettings.enabledTools;
       default: return null;
     }
   };
@@ -77,6 +82,7 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
       max_tokens: maxTokens,
       system_prompt: systemPrompt,
       enable_thinking: enableThinking,
+      enabledTools,
     });
     onClose();
   };
@@ -86,11 +92,13 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
     setMaxTokens(null);
     setSystemPrompt(null);
     setEnableThinking(null);
+    setEnabledTools(null);
     updateConversationSettings({
       temperature: null,
       max_tokens: null,
       system_prompt: null,
       enable_thinking: null,
+      enabledTools: null,
     });
   };
 
@@ -100,6 +108,21 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
 
   const handleMaxTokensChange = (value) => {
     setMaxTokens(value === '' ? null : parseInt(value, 10));
+  };
+
+  const handleToolToggle = (toolName) => {
+    const current = getEffectiveValue('enabledTools') || [];
+    let next;
+    if (current.includes(toolName)) {
+      next = current.filter(t => t !== toolName);
+    } else {
+      next = [...current, toolName];
+    }
+    setEnabledTools(next);
+  };
+
+  const handleToolsResetToGlobal = () => {
+    setEnabledTools(null);
   };
 
   return (
@@ -170,6 +193,40 @@ export default function ConversationSettingsPopover({ isOpen, onClose }) {
           >
             {getEffectiveValue('enableThinking') ? 'On' : 'Off'}
           </button>
+        </div>
+
+        <div className="conv-settings-field">
+          <label>
+            Enabled Tools
+            {isUsingGlobal('enabledTools') && <span className="global-badge">Global</span>}
+            {!isUsingGlobal('enabledTools') && (
+              <button
+                className="conv-settings-reset-link"
+                onClick={handleToolsResetToGlobal}
+              >
+                Use global
+              </button>
+            )}
+          </label>
+          <div className="conv-settings-tools-list">
+            {AVAILABLE_TOOLS.map(tool => {
+              const effectiveTools = getEffectiveValue('enabledTools') || [];
+              const checked = effectiveTools.includes(tool.name);
+              return (
+                <label key={tool.name} className="conv-settings-tool-item">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => handleToolToggle(tool.name)}
+                  />
+                  <div className="conv-settings-tool-info">
+                    <span className="conv-settings-tool-name">{tool.displayName}</span>
+                    <span className="conv-settings-tool-desc">{tool.description}</span>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
         </div>
       </div>
 

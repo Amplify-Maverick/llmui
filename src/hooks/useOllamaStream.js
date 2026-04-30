@@ -37,8 +37,8 @@ export function useOllamaStream() {
   const maxTokens = currentConv?.maxTokens ?? globalSettings.maxTokens;
   const systemPrompt = currentConv?.systemPrompt ?? globalSettings.systemPrompt;
   const enableThinking = currentConv?.enableThinking ?? globalSettings.enableThinking;
-  const enableTools = globalSettings.enableTools;
-  const enabledTools = globalSettings.enabledTools;
+  const enableTools = currentConv?.enableTools ?? globalSettings.enableTools;
+  const enabledTools = currentConv?.enabledTools ?? globalSettings.enabledTools;
 
   const sendMessage = useCallback(
     async (content, model, images = []) => {

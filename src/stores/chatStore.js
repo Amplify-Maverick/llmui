@@ -277,6 +277,7 @@ export const useChatStore = create((set, get) => ({
       maxTokens: conv.maxTokens ?? null,
       systemPrompt: conv.systemPrompt ?? null,
       enableThinking: conv.enableThinking ?? null,
+      enabledTools: conv.enabledTools ?? null,
     };
   },
 
