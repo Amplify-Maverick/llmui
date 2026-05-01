@@ -118,6 +118,7 @@ export default function ModelManager() {
         onClose={() => setShowPullDialog(false)}
         onPull={handlePull}
         pullProgress={pullProgress}
+        localModels={localModels}
       />
 
       <ConfirmModal

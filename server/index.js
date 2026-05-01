@@ -805,6 +805,50 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
 });
 
 // ============================================================
+// Hardware info endpoint (authenticated)
+// Returns system RAM + GPU VRAM from nvidia-smi cache
+// ============================================================
+app.get("/api/hardware", requireAuth, async (req, res) => {
+  const totalRamBytes = os.totalmem();
+  const freeRamBytes = os.freemem();
+  const totalRamGb = +(totalRamBytes / (1024 ** 3)).toFixed(1);
+  const freeRamGb = +(freeRamBytes / (1024 ** 3)).toFixed(1);
+  const cpuModel = os.cpus()[0]?.model || "Unknown";
+  const cpuCores = os.cpus().length;
+
+  // GPU info from nvidia-smi cache (if available)
+  let gpus = [];
+  if (!nvidiaSmiProcess) {
+    startNvidiaSmiLoop();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+  }
+  if (gpuCache.data?.gpus) {
+    gpus = gpuCache.data.gpus.map((g) => ({
+      index: g.index,
+      name: g.name,
+      vramTotalMb: g.memoryTotal,
+      vramFreeMb: g.memoryTotal - g.memoryUsed,
+      vramUsedMb: g.memoryUsed,
+      vramTotalGb: +(g.memoryTotal / 1024).toFixed(1),
+      vramFreeGb: +((g.memoryTotal - g.memoryUsed) / 1024).toFixed(1),
+    }));
+  }
+
+  // Derive total available VRAM across all GPUs (for model compatibility)
+  const totalVramGb = gpus.length > 0
+    ? +gpus.reduce((sum, g) => sum + g.vramTotalGb, 0).toFixed(1)
+    : null;
+
+  res.json({
+    ok: true,
+    cpu: { model: cpuModel, cores: cpuCores },
+    ram: { totalGb: totalRamGb, freeGb: freeRamGb },
+    gpus,
+    totalVramGb,
+  });
+});
+
+// ============================================================
 // SQLite-backed API endpoints (new)
 // ============================================================
 app.use("/api/conversations", requireAuth, conversationsRouter);

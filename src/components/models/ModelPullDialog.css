@@ -1,5 +1,23 @@
+/* ── Pull Dialog Container ────────────────────────────────── */
+.pull-dialog {
+  width: 680px;
+  max-width: 80vw;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(85vh - 100px);
+}
+
+/* ── Progress ────────────────────────────────────────────── */
 .pull-progress {
   margin-top: 16px;
+}
+
+.pull-progress-model {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 12px;
+  text-align: center;
 }
 
 .pull-progress-bar {
@@ -24,10 +42,383 @@
   text-align: center;
 }
 
-.pull-help {
+/* ── Hardware Summary ────────────────────────────────────── */
+.pull-hw-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.pull-hw-loading {
   font-size: 13px;
+  color: var(--color-text-muted);
+  padding: 8px 0;
+}
+
+.pull-hw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-lg);
+  font-size: 12px;
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+}
+
+.pull-hw-chip.gpu {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-bg);
+}
+
+.pull-hw-chip.ram {
+  border-color: var(--color-border-light);
+}
+
+.pull-hw-chip.unknown {
+  border-color: var(--color-border-light);
+  color: var(--color-text-muted);
+}
+
+.pull-hw-icon {
+  font-size: 14px;
+  color: var(--color-primary);
+}
+
+.pull-hw-chip.ram .pull-hw-icon {
+  color: var(--color-secondary);
+}
+
+.pull-hw-chip.unknown .pull-hw-icon {
+  color: var(--color-text-muted);
+}
+
+.pull-hw-label {
   color: var(--color-text-secondary);
-  margin-top: 12px;
+  font-weight: 500;
+}
+
+.pull-hw-value {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.pull-hw-free {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+/* ── Search & Filters ────────────────────────────────────── */
+.pull-controls {
+  margin-bottom: 12px;
+}
+
+.pull-search {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.pull-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pull-cat-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.pull-cat-btn:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.pull-cat-btn.active {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* ── Model Library ───────────────────────────────────────── */
+.pull-library {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.pull-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* ── Catalog Card ────────────────────────────────────────── */
+.catalog-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  transition: border-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.catalog-card:hover {
+  border-color: var(--color-border-light);
+}
+
+.catalog-card-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 16px;
+  cursor: pointer;
+  gap: 12px;
+}
+
+.catalog-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.catalog-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.catalog-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.catalog-card-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.catalog-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.catalog-badge.tools {
+  background: var(--color-primary-bg);
+  border: 1px solid var(--color-primary-border);
+  color: var(--color-primary);
+}
+
+.catalog-badge.cat {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.catalog-card-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-expand-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.catalog-expand-btn:hover {
+  border-color: var(--color-border-light);
+  color: var(--color-text-secondary);
+}
+
+/* ── Variants ────────────────────────────────────────────── */
+.catalog-variants {
+  border-top: 1px solid var(--color-border);
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.variant-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-lg);
+  background: rgba(0, 0, 0, 0.1);
+  flex-wrap: wrap;
+}
+
+.variant-row.variant-default {
+  background: transparent;
+  padding: 6px 0 0 0;
+}
+
+.variant-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+}
+
+.variant-tag {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-secondary);
+  font-family: var(--font-mono);
+  min-width: 48px;
+}
+
+.variant-params {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.variant-quant {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.variant-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.variant-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 52px;
+}
+
+.variant-stat-label {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.variant-stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.variant-compat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.variant-compat-icon {
+  font-size: 12px;
+}
+
+.variant-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.variant-installed {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 500;
+  padding: 4px 12px;
+}
+
+.variant-pull-btn {
+  font-size: 12px;
+  padding: 4px 14px;
+}
+
+/* ── Custom Pull Section ─────────────────────────────────── */
+.pull-custom-section {
+  border-top: 1px solid var(--color-border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.pull-custom-toggle {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  font-family: var(--font-sans);
+  transition: color var(--transition-fast);
+}
+
+.pull-custom-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.pull-custom-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.pull-custom-input {
+  flex: 1;
+}
+
+.pull-help {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 8px 0 0 0;
 }
 
 .pull-link {
@@ -39,6 +430,23 @@
   text-decoration: underline;
 }
 
-.pull-code {
-  color: var(--color-primary);
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .pull-dialog {
+    width: 100%;
+  }
+
+  .variant-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .variant-stats {
+    flex-wrap: wrap;
+  }
+
+  .variant-info {
+    min-width: 0;
+  }
 }
