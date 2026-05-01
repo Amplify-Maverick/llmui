@@ -9,11 +9,48 @@
   margin-bottom: 24px;
 }
 
+.model-manager-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .model-manager-title {
   font-size: 20px;
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
+}
+
+.model-manager-subtabs {
+  display: flex;
+  gap: 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.model-subtab {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.model-subtab:hover {
+  color: var(--color-text-primary);
+}
+
+.model-subtab.active {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .model-manager-actions {
@@ -61,4 +98,64 @@
   color: var(--color-danger);
   cursor: pointer;
   font-size: 18px;
+}
+
+/* ── Image Models (ComfyUI) ────────────────────────────────── */
+.image-models-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.image-models-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-models-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.image-models-none {
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  padding: 16px 0;
+}
+
+.image-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.image-model-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.image-model-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.image-model-name {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  word-break: break-all;
 }

@@ -76,6 +76,48 @@ const MIGRATIONS = [
         // Index might already exist
       }
     }
+  },
+  {
+    version: 4,
+    description: 'Add image generation tables for ComfyUI integration',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS image_generations (
+          id TEXT PRIMARY KEY,
+          prompt TEXT NOT NULL,
+          negative_prompt TEXT DEFAULT '',
+          model TEXT,
+          width INTEGER NOT NULL,
+          height INTEGER NOT NULL,
+          steps INTEGER NOT NULL,
+          cfg_scale REAL NOT NULL,
+          sampler TEXT,
+          scheduler TEXT,
+          seed INTEGER,
+          batch_count INTEGER DEFAULT 1,
+          loras TEXT,
+          workflow_json TEXT,
+          created_at INTEGER NOT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS generated_images (
+          id TEXT PRIMARY KEY,
+          generation_id TEXT NOT NULL,
+          filename TEXT NOT NULL,
+          image_data BLOB,
+          width INTEGER,
+          height INTEGER,
+          position INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (generation_id) REFERENCES image_generations(id) ON DELETE CASCADE
+        )
+      `);
+
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generations_created ON image_generations(created_at DESC)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generated_images_gen ON generated_images(generation_id)');
+    }
   }
 ];
 

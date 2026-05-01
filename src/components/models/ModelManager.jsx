@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
+import { useImageStore } from "../../stores/imageStore.js";
 import ModelCard from "./ModelCard.jsx";
 import ModelPullDialog from "./ModelPullDialog.jsx";
 import HardwareGuideModal from "./HardwareGuideModal.jsx";
+import CivitaiModelBrowser from "./CivitaiModelBrowser.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
 import "./ModelManager.css";
@@ -24,13 +26,32 @@ export default function ModelManager() {
 
   const { defaultModel, updateSetting } = useSettingsStore();
 
+  const {
+    checkpoints,
+    loras,
+    isConnected: comfyConnected,
+    fetchAll: fetchImageModels,
+    checkConnection: checkComfyConnection,
+  } = useImageStore();
+
+  const { comfyModelsPath } = useSettingsStore();
+
+  const [subTab, setSubTab] = useState("text"); // "text" | "image"
   const [showPullDialog, setShowPullDialog] = useState(false);
   const [showHardwareGuide, setShowHardwareGuide] = useState(false);
+  const [showCivitaiBrowser, setShowCivitaiBrowser] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Fetch image models when switching to image sub-tab
+  useEffect(() => {
+    if (subTab === "image") {
+      fetchImageModels();
+    }
+  }, [subTab, fetchImageModels]);
 
   // Fetch model info for each model to get tool support status
   useEffect(() => {
@@ -67,17 +88,47 @@ export default function ModelManager() {
   return (
     <div className="model-manager">
       <div className="model-manager-header">
-        <h2 className="model-manager-title">Models</h2>
+        <div className="model-manager-header-left">
+          <h2 className="model-manager-title">Models</h2>
+          <div className="model-manager-subtabs">
+            <button
+              className={`model-subtab ${subTab === "text" ? "active" : ""}`}
+              onClick={() => setSubTab("text")}
+            >
+              Text (Ollama)
+            </button>
+            <button
+              className={`model-subtab ${subTab === "image" ? "active" : ""}`}
+              onClick={() => setSubTab("image")}
+            >
+              Image (ComfyUI)
+            </button>
+          </div>
+        </div>
         <div className="model-manager-actions">
-          <Button variant="secondary" onClick={() => setShowHardwareGuide(true)}>
-            Check Hardware
-          </Button>
-          <Button variant="ghost" onClick={fetchModels} disabled={isLoading}>
-            Refresh
-          </Button>
-          <Button onClick={() => setShowPullDialog(true)}>
-            Pull Model
-          </Button>
+          {subTab === "text" && (
+            <>
+              <Button variant="secondary" onClick={() => setShowHardwareGuide(true)}>
+                Check Hardware
+              </Button>
+              <Button variant="ghost" onClick={fetchModels} disabled={isLoading}>
+                Refresh
+              </Button>
+              <Button onClick={() => setShowPullDialog(true)}>
+                Pull Model
+              </Button>
+            </>
+          )}
+          {subTab === "image" && (
+            <>
+              <Button variant="ghost" onClick={fetchImageModels}>
+                Refresh
+              </Button>
+              <Button onClick={() => setShowCivitaiBrowser(true)}>
+                Download Model
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -90,27 +141,102 @@ export default function ModelManager() {
         </div>
       )}
 
-      {isLoading && localModels.length === 0 ? (
-        <div className="model-manager-empty">Loading models...</div>
-      ) : localModels.length === 0 ? (
-        <div className="model-manager-empty">
-          <p className="model-manager-empty-icon"></p>
-          <h3>No models found</h3>
-          <p>Pull a model to get started.</p>
-        </div>
-      ) : (
-        <div className="model-grid">
-          {localModels.map((model) => (
-            <ModelCard
-              key={model.name}
-              model={model}
-              modelInfo={modelInfoCache[model.name]}
-              isSelected={defaultModel === model.name}
-              onSelect={handleSelect}
-              onDelete={setDeleteConfirm}
-            />
-          ))}
-        </div>
+      {/* ── Text Models (Ollama) ──────────────────────────────── */}
+      {subTab === "text" && (
+        <>
+          {isLoading && localModels.length === 0 ? (
+            <div className="model-manager-empty">Loading models...</div>
+          ) : localModels.length === 0 ? (
+            <div className="model-manager-empty">
+              <p className="model-manager-empty-icon"></p>
+              <h3>No models found</h3>
+              <p>Pull a model to get started.</p>
+            </div>
+          ) : (
+            <div className="model-grid">
+              {localModels.map((model) => (
+                <ModelCard
+                  key={model.name}
+                  model={model}
+                  modelInfo={modelInfoCache[model.name]}
+                  isSelected={defaultModel === model.name}
+                  onSelect={handleSelect}
+                  onDelete={setDeleteConfirm}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Image Models (ComfyUI) ───────────────────────────── */}
+      {subTab === "image" && (
+        <>
+          {!comfyConnected ? (
+            <div className="model-manager-empty">
+              <h3>ComfyUI Not Connected</h3>
+              <p>
+                Configure the ComfyUI URL in Settings to manage image generation
+                models.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={checkComfyConnection}
+                style={{ marginTop: 12 }}
+              >
+                Retry Connection
+              </Button>
+            </div>
+          ) : (
+            <div className="image-models-sections">
+              {/* Checkpoints */}
+              <div className="image-models-section">
+                <h3 className="image-models-section-title">
+                  Checkpoints
+                  <span className="image-models-count">{checkpoints.length}</span>
+                </h3>
+                {checkpoints.length === 0 ? (
+                  <p className="image-models-none">
+                    No checkpoints found. Place .safetensors files in your ComfyUI
+                    models/checkpoints directory.
+                  </p>
+                ) : (
+                  <div className="image-models-list">
+                    {checkpoints.map((name) => (
+                      <div key={name} className="image-model-item">
+                        <div className="image-model-icon">🖼️</div>
+                        <div className="image-model-name">{name}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* LoRAs */}
+              <div className="image-models-section">
+                <h3 className="image-models-section-title">
+                  LoRAs
+                  <span className="image-models-count">{loras.length}</span>
+                </h3>
+                {loras.length === 0 ? (
+                  <p className="image-models-none">
+                    No LoRAs found. Place .safetensors files in your ComfyUI
+                    models/loras directory.
+                  </p>
+                ) : (
+                  <div className="image-models-list">
+                    {loras.map((name) => (
+                      <div key={name} className="image-model-item">
+                        <div className="image-model-icon">🎨</div>
+                        <div className="image-model-name">{name}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ModelPullDialog
@@ -132,6 +258,16 @@ export default function ModelManager() {
       <HardwareGuideModal
         isOpen={showHardwareGuide}
         onClose={() => setShowHardwareGuide(false)}
+      />
+
+      <CivitaiModelBrowser
+        isOpen={showCivitaiBrowser}
+        onClose={() => {
+          setShowCivitaiBrowser(false);
+          // Refresh image models after closing browser (in case new models were downloaded)
+          if (comfyConnected) fetchImageModels();
+        }}
+        modelsPath={comfyModelsPath}
       />
     </div>
   );

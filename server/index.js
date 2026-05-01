@@ -19,6 +19,7 @@ import settingsRouter from "./api/settings.js";
 import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
+import comfyuiRouter from "./api/comfyui.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -29,6 +30,7 @@ const PORT = 3001;
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
 const TOKEN_FILE = path.join(STORAGE_DIR, "token");
 const OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
+const COMFYUI_CONFIG_FILE = path.join(STORAGE_DIR, "comfyui_config.json");
 
 let authToken = null;
 
@@ -56,6 +58,38 @@ async function saveOllamaConfig() {
   await fs.writeFile(
     OLLAMA_CONFIG_FILE,
     JSON.stringify({ ollamaUrl }, null, 2)
+  );
+}
+
+// Default ComfyUI URL, overridable by env var or persisted config
+const DEFAULT_COMFYUI_URL = "http://localhost:8188";
+let comfyuiUrl = process.env.COMFYUI_URL || DEFAULT_COMFYUI_URL;
+let comfyModelsPath = "";
+
+async function loadComfyuiConfig() {
+  try {
+    const data = await fs.readFile(COMFYUI_CONFIG_FILE, "utf-8");
+    const config = JSON.parse(data);
+    if (config.comfyuiUrl) {
+      comfyuiUrl = config.comfyuiUrl;
+    }
+    if (config.comfyModelsPath) {
+      comfyModelsPath = config.comfyModelsPath;
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("Error loading ComfyUI config:", err);
+    }
+  }
+}
+
+async function saveComfyuiConfig(url, modelsPathOverride) {
+  await ensureStorageDir();
+  if (typeof url === "string") comfyuiUrl = url;
+  if (typeof modelsPathOverride === "string") comfyModelsPath = modelsPathOverride;
+  await fs.writeFile(
+    COMFYUI_CONFIG_FILE,
+    JSON.stringify({ comfyuiUrl, comfyModelsPath }, null, 2)
   );
 }
 
@@ -813,6 +847,7 @@ app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
 app.use("/api/export", requireAuth, exportRouter);
+app.use("/comfyui", requireAuth, comfyuiRouter);
 
 // ============================================================
 // Startup
@@ -823,6 +858,12 @@ const dryRun = args.includes("--dry-run");
 await ensureStorageDir();
 await getOrCreateToken();
 await loadOllamaConfig();
+await loadComfyuiConfig();
+
+// Make ComfyUI URL and models path available to the router via app.set
+app.set("comfyuiUrl", comfyuiUrl);
+app.set("comfyModelsPath", comfyModelsPath);
+app.set("saveComfyuiConfig", saveComfyuiConfig);
 
 // Initialize database and run migration if needed
 console.log("Initializing database...");
