@@ -1,6 +1,6 @@
 # LLMUI
 
-> **Beta Software**: This project is under active development. Works on Linux, Windows, and macOS.
+> **Beta Software**: This project is under active development. Works on Linux, Windows (sort of), and macOS.
 
 A web interface for chatting with local LLMs through Ollama.
 
