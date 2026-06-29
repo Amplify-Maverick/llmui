@@ -24,6 +24,7 @@ export const AVAILABLE_TOOLS = [
   { name: "get_current_time", displayName: "Current Time", description: "Get the current date and time" },
   { name: "calculator", displayName: "Calculator", description: "Evaluate mathematical expressions" },
   { name: "file_read", displayName: "File Read", description: "Read files from the tool sandbox" },
+  { name: "blender_execute", displayName: "Blender Execute", description: "Run Python scripts inside Blender via the LLMUI bridge addon" },
 ];
 
 export const STORAGE_KEYS = {

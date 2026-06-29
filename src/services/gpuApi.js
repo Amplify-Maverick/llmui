@@ -1,6 +1,6 @@
 import { getAuthToken } from "./auth.js";
 
-const GPU_API = "http://localhost:3001/api/gpu";
+const GPU_API = "/api/gpu";
 
 /**
  * Fetches live GPU stats from the authenticated Express server endpoint.

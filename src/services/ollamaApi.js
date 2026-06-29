@@ -5,7 +5,7 @@
 
 import { authHeaders } from "./auth.js";
 
-const AUTH_SERVER = "http://localhost:3001";
+const AUTH_SERVER = ""; // relative — proxied through Vite to localhost:3001
 
 class OllamaAPI {
   async listModels() {

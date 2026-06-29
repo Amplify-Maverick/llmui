@@ -8,6 +8,7 @@ import fetchUrl from "./fetch_url.js";
 import getCurrentTime from "./get_current_time.js";
 import calculator from "./calculator.js";
 import fileRead from "./file_read.js";
+import blenderExecute from "./blender_execute.js";
 
 // All available tools
 export const TOOLS = {
@@ -16,6 +17,7 @@ export const TOOLS = {
   get_current_time: getCurrentTime,
   calculator: calculator,
   file_read: fileRead,
+  blender_execute: blenderExecute,
 };
 
 // Tool metadata for UI display
@@ -43,6 +45,11 @@ export const TOOL_INFO = {
   file_read: {
     displayName: "File Read",
     description: "Read files from the tool sandbox directory",
+    defaultEnabled: false,
+  },
+  blender_execute: {
+    displayName: "Blender Execute",
+    description: "Run Python scripts inside Blender via the LLMUI bridge addon",
     defaultEnabled: false,
   },
 };

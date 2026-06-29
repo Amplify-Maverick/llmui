@@ -1,6 +1,6 @@
 import { authHeaders } from "../services/auth.js";
 
-const API_BASE = "http://localhost:3001/api";
+const API_BASE = "/api";
 
 // Key pattern handlers - map storage keys to appropriate API calls
 function getKeyHandler(key) {
