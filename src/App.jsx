@@ -10,18 +10,29 @@ import SettingsPanel from "./components/settings/SettingsPanel.jsx";
 import KeyboardShortcutsPanel, {
   useKeyboardShortcuts,
 } from "./components/shared/KeyboardShortcuts.jsx";
+import SetupWizard from "./components/setup/SetupWizard.jsx";
 import "./App.css";
 
 export default function App() {
+  const [setupComplete, setSetupComplete] = useState(null); // null = checking
   const [activeTab, setActiveTab] = useState("chat");
   const [showShortcuts, setShowShortcuts] = useState(false);
   const { loadConversations, createConversation } = useChatStore();
   const { loadSettings, defaultModel, theme } = useSettingsStore();
 
+  // Check setup status before loading anything else
   useEffect(() => {
+    fetch("/api/setup/status")
+      .then((r) => r.json())
+      .then((d) => setSetupComplete(d.complete))
+      .catch(() => setSetupComplete(true)); // if check fails, don't block the UI
+  }, []);
+
+  useEffect(() => {
+    if (!setupComplete) return;
     loadSettings();
     loadConversations();
-  }, [loadSettings, loadConversations]);
+  }, [setupComplete, loadSettings, loadConversations]);
 
   // Apply theme to document
   useEffect(() => {
@@ -58,6 +69,14 @@ export default function App() {
         return <ChatView />;
     }
   };
+
+  // Wait for setup status check
+  if (setupComplete === null) return null;
+
+  // Show wizard on first run
+  if (!setupComplete) {
+    return <SetupWizard onComplete={() => setSetupComplete(true)} />;
+  }
 
   return (
     <div className="app">

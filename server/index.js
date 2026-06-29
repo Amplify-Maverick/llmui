@@ -19,6 +19,7 @@ import settingsRouter from "./api/settings.js";
 import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
+import setupRouter from "./api/setup.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,27 +37,28 @@ let authToken = null;
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 let ollamaUrl = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
 
+// Optional remote GPU stats server URL (e.g. http://workstation-tailscale-ip:3002)
+// When set, /api/gpu and /api/hardware proxy to this server instead of running nvidia-smi locally.
+let remoteGpuUrl = process.env.REMOTE_GPU_URL || null;
+
 async function loadOllamaConfig() {
   try {
     const data = await fs.readFile(OLLAMA_CONFIG_FILE, "utf-8");
     const config = JSON.parse(data);
-    if (config.ollamaUrl) {
-      ollamaUrl = config.ollamaUrl;
-    }
+    if (config.ollamaUrl) ollamaUrl = config.ollamaUrl;
+    if (config.remoteGpuUrl) remoteGpuUrl = config.remoteGpuUrl;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("Error loading Ollama config:", err);
     }
-    // Use default or env var
   }
 }
 
 async function saveOllamaConfig() {
   await ensureStorageDir();
-  await fs.writeFile(
-    OLLAMA_CONFIG_FILE,
-    JSON.stringify({ ollamaUrl }, null, 2)
-  );
+  const config = { ollamaUrl };
+  if (remoteGpuUrl) config.remoteGpuUrl = remoteGpuUrl;
+  await fs.writeFile(OLLAMA_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 function validateOllamaUrl(url) {
@@ -272,6 +274,38 @@ app.put("/ollama/config", requireAuth, async (req, res) => {
     res.json({ success: true, ollamaUrl });
   } catch (err) {
     console.error("Error saving Ollama config:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/gpu-config - Get current remote GPU stats URL
+app.get("/api/gpu-config", requireAuth, (req, res) => {
+  res.json({ remoteGpuUrl });
+});
+
+// PUT /api/gpu-config - Set remote GPU stats server URL (or null to use local)
+app.put("/api/gpu-config", requireAuth, async (req, res) => {
+  const { remoteGpuUrl: newUrl } = req.body;
+
+  if (newUrl !== null && newUrl !== undefined && newUrl !== "") {
+    try {
+      const parsed = new URL(newUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        return res.status(400).json({ error: "URL must use http or https" });
+      }
+    } catch {
+      return res.status(400).json({ error: "Invalid URL format" });
+    }
+    remoteGpuUrl = newUrl;
+  } else {
+    remoteGpuUrl = null;
+  }
+
+  try {
+    await saveOllamaConfig();
+    res.json({ ok: true, remoteGpuUrl });
+  } catch (err) {
+    console.error("Error saving GPU config:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -785,6 +819,23 @@ function stopNvidiaSmiLoop() {
 }
 
 app.get("/api/gpu", requireAuth, async (req, res) => {
+  // Proxy to remote GPU stats server if configured
+  if (remoteGpuUrl) {
+    try {
+      const response = await fetch(`${remoteGpuUrl}/api/gpu`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await response.json();
+      res.set("Cache-Control", "max-age=1");
+      return res.json(data);
+    } catch (err) {
+      return res.status(502).json({
+        ok: false,
+        error: `Cannot reach remote GPU stats server: ${err.message}`,
+      });
+    }
+  }
+
   // Start the persistent process on first request (lazy initialization)
   if (!nvidiaSmiProcess) {
     startNvidiaSmiLoop();
@@ -806,9 +857,25 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
 
 // ============================================================
 // Hardware info endpoint (authenticated)
-// Returns system RAM + GPU VRAM from nvidia-smi cache
+// Returns system RAM + GPU VRAM. When remoteGpuUrl is set, fetches from
+// the remote GPU stats server (the machine actually doing compute).
 // ============================================================
 app.get("/api/hardware", requireAuth, async (req, res) => {
+  if (remoteGpuUrl) {
+    try {
+      const response = await fetch(`${remoteGpuUrl}/api/hardware`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await response.json();
+      return res.json(data);
+    } catch (err) {
+      return res.status(502).json({
+        ok: false,
+        error: `Cannot reach remote GPU stats server: ${err.message}`,
+      });
+    }
+  }
+
   const totalRamBytes = os.totalmem();
   const freeRamBytes = os.freemem();
   const totalRamGb = +(totalRamBytes / (1024 ** 3)).toFixed(1);
@@ -847,6 +914,22 @@ app.get("/api/hardware", requireAuth, async (req, res) => {
     totalVramGb,
   });
 });
+
+// ============================================================
+// Setup wizard endpoints
+// /api/setup/status is unauthenticated (wizard checks before auth is known)
+// all other /api/setup/* routes require auth
+// ============================================================
+const SETUP_FILE = path.join(STORAGE_DIR, "setup_complete");
+app.get("/api/setup/status", async (req, res) => {
+  try {
+    await fs.access(SETUP_FILE);
+    res.json({ complete: true });
+  } catch {
+    res.json({ complete: false });
+  }
+});
+app.use("/api/setup", requireAuth, setupRouter);
 
 // ============================================================
 // SQLite-backed API endpoints (new)

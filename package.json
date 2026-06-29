@@ -9,6 +9,7 @@
     "build": "npx vite build",
     "preview": "npx vite preview",
     "tui": "node tui/index.js",
+    "gpu-stats": "node scripts/gpu-stats-server.js",
     "test": "node --test server/tools/*.test.js",
     "postinstall": "node -e \"console.log('\\n✓ Installation complete! Run: npm run dev\\n')\""
   },
