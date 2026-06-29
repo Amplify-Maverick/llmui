@@ -292,15 +292,13 @@ export const useChatStore = create((set, get) => ({
       flushDebouncedSave(STORAGE_KEYS.convIndex);
     }
 
-    // Immediately update the active ID; clear messages while loading
-    set({ activeConversationId: id, messages: [] });
-    saveToStorage(STORAGE_KEYS.activeConversation, id);
-
-    // Load messages for the target conversation
+    // Load messages BEFORE switching to avoid flash of empty state
     const msgs = await loadFromStorage(STORAGE_KEYS.convMessages(id));
-    // Guard against rapid switching — only apply if still on this conversation
-    if (get().activeConversationId === id) {
-      set({ messages: msgs || [] });
+
+    // Guard against rapid switching — only apply if we haven't started another switch
+    if (get().activeConversationId === activeConversationId) {
+      set({ activeConversationId: id, messages: msgs || [] });
+      saveToStorage(STORAGE_KEYS.activeConversation, id);
     }
   },
 
