@@ -10,11 +10,15 @@ A web interface for chatting with local LLMs through Ollama.
 
 - **Chat** with any model you have installed in Ollama
 - **Compare models** - send the same prompt to 2-4 models and see responses side-by-side
-- **Pull and delete models** directly from the UI
+- **Browse and pull models** - search a curated catalog with VRAM estimates, or pull any tag from the registry
+- **Tool calling** - web search, URL fetch, calculator, current time, sandboxed file reads, and a Blender bridge for models that support function calling
+- **Per-chat settings** - override model, system prompt, temperature, or max tokens for a single conversation without touching your defaults
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
 - **Conversation history** - stored in SQLite at `~/.llmui/` with full-text search
 - **Conversation branching** - edit any message to create alternate branches, navigate between them
 - **Hardware guide** - helps figure out what models will run on your system
+- **Setup wizard** - walks first-time users through pointing at Ollama (local or remote) and verifying GPU stats
+- **Light and dark themes**
 - Configurable system prompts, temperature, max tokens
 
 ## Requirements
@@ -104,6 +108,8 @@ Or use the start script which checks Ollama and port availability:
 
 Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000).
 
+On first launch a setup wizard appears. It asks where Ollama is running (local or a remote URL like your GPU workstation), tests the connection, and confirms GPU stats are reachable. You can rerun it any time by clearing the `setup_completed` setting in the database, or just adjust everything from the Settings tab afterwards.
+
 ### Windows Troubleshooting
 
 **Node.js version requirement:** Node.js v20 LTS is required. Node v21+ will fail to compile `better-sqlite3` due to missing prebuilt binaries and node-gyp compatibility issues.
@@ -149,6 +155,27 @@ Most settings can be changed in the Settings tab:
 - **System Prompt** - gets sent at the start of every conversation
 - **Temperature** - lower = more focused, higher = more creative
 - **Max Tokens** - limit on response length
+- **Theme** - light or dark
+- **Tools** - enable or disable individual tools the model can call
+
+Click the gear icon next to a conversation's title to override any of these for that conversation only — useful for trying a different model or system prompt without changing your defaults.
+
+### Tools
+
+When tool calling is enabled and the model supports it (most recent Llama, Qwen, Mistral, and similar tool-capable models), the assistant can invoke:
+
+- **Web Search** - DuckDuckGo search (on by default)
+- **Current Time** - returns the local date and time (on by default)
+- **Fetch URL** - downloads page content; blocks private/internal IPs to prevent SSRF
+- **Calculator** - safe arithmetic expression evaluator
+- **File Read** - reads files from a sandboxed `~/.llmui/tool_sandbox/` directory only
+- **Blender Execute** - sends Python to a running Blender instance via the bundled `blender_addon/llmui_bridge.py` (install it from Blender's add-on preferences first)
+
+Tool calls and their results render inline in the conversation as expandable cards.
+
+### Model browser
+
+The Models tab lists everything you have installed and lets you delete or pull new ones. The pull dialog includes a curated catalog (Llama, Qwen, Gemma, DeepSeek, Mistral, Phi, embedding models, vision models, etc.) with rough VRAM estimates per quantization so you can see what will fit on your GPU before downloading. You can also type any `model:tag` directly to pull arbitrary models from the Ollama registry.
 
 ### Compare Mode
 
