@@ -11,6 +11,7 @@ import KeyboardShortcutsPanel, {
   useKeyboardShortcuts,
 } from "./components/shared/KeyboardShortcuts.jsx";
 import SetupWizard from "./components/setup/SetupWizard.jsx";
+import ServerSwitcher from "./components/shared/ServerSwitcher.jsx";
 import "./App.css";
 
 export default function App() {
@@ -104,6 +105,9 @@ export default function App() {
             ?
           </button>
         </nav>
+        <div className="app-header-right">
+          <ServerSwitcher />
+        </div>
       </header>
 
       <main className="app-main">

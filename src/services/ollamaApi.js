@@ -207,6 +207,14 @@ class OllamaAPI {
     return data.ollamaUrl;
   }
 
+  async getConfig() {
+    const response = await fetch(`${AUTH_SERVER}/ollama/config`, {
+      headers: await authHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to fetch Ollama config");
+    return response.json(); // { ollamaUrl, remoteOllamaUrl, activeTarget }
+  }
+
   async setOllamaUrl(url) {
     const response = await fetch(`${AUTH_SERVER}/ollama/config`, {
       method: "PUT",
@@ -218,6 +226,44 @@ class OllamaAPI {
       throw new Error(data.error || "Failed to update Ollama URL");
     }
     return response.json();
+  }
+
+  async setRemoteOllamaUrl(url) {
+    const response = await fetch(`${AUTH_SERVER}/ollama/config`, {
+      method: "PUT",
+      headers: await authHeaders(),
+      body: JSON.stringify({ remoteOllamaUrl: url }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Failed to update remote Ollama URL");
+    }
+    return response.json();
+  }
+
+  async switchServer(target) {
+    const response = await fetch(`${AUTH_SERVER}/ollama/switch`, {
+      method: "PUT",
+      headers: await authHeaders(),
+      body: JSON.stringify({ target }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Failed to switch server");
+    }
+    return response.json(); // { ollamaUrl, activeTarget }
+  }
+
+  async getLocalCapability() {
+    const response = await fetch(`${AUTH_SERVER}/ollama/local-capability`, {
+      headers: await authHeaders(),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Failed to check local capability");
+    }
+    return response.json(); // { models: [{ ...model, cpuFeasibility }] }
   }
 }
 

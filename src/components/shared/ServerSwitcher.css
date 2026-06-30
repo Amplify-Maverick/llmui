@@ -1,0 +1,192 @@
+.server-switcher {
+  display: flex;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  height: 28px;
+}
+
+.server-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  height: 100%;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.server-switcher-btn:hover:not(:disabled):not(.disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.server-switcher-btn.active {
+  background: var(--color-primary-bg, rgba(110, 231, 183, 0.12));
+  color: var(--color-primary);
+}
+
+.server-switcher-btn.disabled,
+.server-switcher-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.server-switcher-btn + .server-switcher-btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.server-switcher-spinner {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Capability modal ── */
+
+.server-capability-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.server-capability-modal {
+  background: var(--color-surface-elevated, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 420px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.server-capability-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.server-capability-close {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.server-capability-close:hover {
+  color: var(--color-text);
+}
+
+.server-capability-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding: 10px 16px 4px;
+  margin: 0;
+}
+
+.server-capability-empty {
+  font-size: 12px;
+  color: var(--color-text-muted, var(--color-text-secondary));
+  padding: 16px;
+  text-align: center;
+  margin: 0;
+}
+
+.server-capability-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 12px;
+  overflow-y: auto;
+}
+
+.server-capability-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  font-size: 12px;
+}
+
+.server-capability-item:hover {
+  background: var(--color-surface-hover, rgba(255,255,255,0.04));
+}
+
+.server-capability-icon {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.server-capability-name {
+  color: var(--color-text);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-capability-size {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.server-capability-label {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.feasibility-good .server-capability-icon { color: var(--color-primary); }
+.feasibility-good .server-capability-label {
+  background: var(--color-primary-bg, rgba(110, 231, 183, 0.15));
+  color: var(--color-primary);
+}
+
+.feasibility-slow .server-capability-icon { color: var(--color-warning, #fcd34d); }
+.feasibility-slow .server-capability-label {
+  background: rgba(252, 211, 77, 0.15);
+  color: var(--color-warning, #fcd34d);
+}
+
+.feasibility-poor .server-capability-icon { color: var(--color-danger, #f87171); }
+.feasibility-poor .server-capability-label {
+  background: var(--color-danger-bg, rgba(248, 113, 113, 0.15));
+  color: var(--color-danger, #f87171);
+}

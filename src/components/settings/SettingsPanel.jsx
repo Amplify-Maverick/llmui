@@ -12,6 +12,8 @@ export default function SettingsPanel() {
     temperature,
     maxTokens,
     ollamaUrl,
+    remoteOllamaUrl,
+    activeTarget,
     ollamaUrlLoading,
     ollamaUrlError,
     defaultModel,
@@ -21,20 +23,27 @@ export default function SettingsPanel() {
     theme,
     updateSetting,
     updateOllamaUrl,
+    updateRemoteOllamaUrl,
   } = useSettingsStore();
 
   const { localModels, fetchModels } = useModelsStore();
   const { loadConversations } = useChatStore();
 
-  // Local state for the URL input so we can edit without saving on every keystroke
+  // Local state for the URL inputs so we can edit without saving on every keystroke
   const [urlInput, setUrlInput] = useState(ollamaUrl);
   const [urlSaved, setUrlSaved] = useState(false);
+  const [remoteUrlInput, setRemoteUrlInput] = useState(remoteOllamaUrl || "");
+  const [remoteUrlSaved, setRemoteUrlSaved] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     setUrlInput(ollamaUrl);
   }, [ollamaUrl]);
+
+  useEffect(() => {
+    setRemoteUrlInput(remoteOllamaUrl || "");
+  }, [remoteOllamaUrl]);
 
   useEffect(() => {
     fetchModels();
@@ -46,9 +55,20 @@ export default function SettingsPanel() {
     try {
       await updateOllamaUrl(urlInput);
       setUrlSaved(true);
-      // Refresh models from the new URL
       fetchModels();
       setTimeout(() => setUrlSaved(false), 2000);
+    } catch {
+      // Error is set in the store
+    }
+  };
+
+  const handleRemoteUrlSave = async () => {
+    if (remoteUrlInput === (remoteOllamaUrl || "")) return;
+    setRemoteUrlSaved(false);
+    try {
+      await updateRemoteOllamaUrl(remoteUrlInput || null);
+      setRemoteUrlSaved(true);
+      setTimeout(() => setRemoteUrlSaved(false), 2000);
     } catch {
       // Error is set in the store
     }
@@ -160,7 +180,14 @@ export default function SettingsPanel() {
       <div className="settings-divider" />
 
       <div className="settings-section">
-        <label className="settings-label">Ollama Server URL</label>
+        <label className="settings-label">
+          Ollama Server URL
+          {activeTarget && (
+            <span style={{ marginLeft: "0.5rem", fontSize: "11px", fontWeight: 400, color: activeTarget === "local" ? "var(--color-primary)" : "#60a5fa" }}>
+              ({activeTarget === "local" ? "local" : "GPU server"} active)
+            </span>
+          )}
+        </label>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
           <input
             className="input"
@@ -191,8 +218,38 @@ export default function SettingsPanel() {
           </p>
         )}
         <p className="settings-description">
-          The URL where your Ollama server is running. This is configured on the
-          server and all API calls are proxied through the authenticated backend.
+          Active Ollama server. Use the Local / GPU Server toggle in the header to switch presets.
+        </p>
+      </div>
+
+      <div className="settings-section">
+        <label className="settings-label">GPU Server Ollama URL</label>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            value={remoteUrlInput}
+            onChange={(e) => setRemoteUrlInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleRemoteUrlSave()}
+            placeholder="http://gpu-box:11434"
+            disabled={ollamaUrlLoading}
+          />
+          <button
+            className="btn btn-sm"
+            onClick={handleRemoteUrlSave}
+            disabled={ollamaUrlLoading || remoteUrlInput === (remoteOllamaUrl || "")}
+            style={{ whiteSpace: "nowrap" }}
+          >
+            {ollamaUrlLoading ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {remoteUrlSaved && (
+          <p className="settings-description" style={{ color: "#6ee7b7" }}>
+            GPU server URL saved. You can now switch to it from the header.
+          </p>
+        )}
+        <p className="settings-description">
+          URL of the remote GPU machine&apos;s Ollama server. Once set, the header toggle enables one-click switching.
         </p>
       </div>
 

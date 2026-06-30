@@ -7,8 +7,12 @@ export const useSettingsStore = create((set, get) => ({
   ...DEFAULT_SETTINGS,
   // Ollama URL is managed server-side; this is just for display/editing in the UI
   ollamaUrl: "http://localhost:11434",
+  remoteOllamaUrl: null,
+  activeTarget: null, // 'local' | 'remote' | null (manual)
   ollamaUrlLoading: false,
   ollamaUrlError: null,
+  serverSwitching: false,
+  serverSwitchError: null,
   isLoading: true,
 
   loadSettings: async () => {
@@ -21,12 +25,12 @@ export const useSettingsStore = create((set, get) => ({
       set({ isLoading: false });
     }
 
-    // Load Ollama URL from server
+    // Load Ollama config from server
     try {
-      const url = await ollamaApi.getOllamaUrl();
-      set({ ollamaUrl: url });
+      const config = await ollamaApi.getConfig();
+      set({ ollamaUrl: config.ollamaUrl, remoteOllamaUrl: config.remoteOllamaUrl || null, activeTarget: config.activeTarget || null });
     } catch (error) {
-      console.error("Failed to load Ollama URL from server:", error);
+      console.error("Failed to load Ollama config from server:", error);
     }
   },
 
@@ -49,10 +53,34 @@ export const useSettingsStore = create((set, get) => ({
   updateOllamaUrl: async (url) => {
     set({ ollamaUrlLoading: true, ollamaUrlError: null });
     try {
-      await ollamaApi.setOllamaUrl(url);
-      set({ ollamaUrl: url, ollamaUrlLoading: false });
+      const result = await ollamaApi.setOllamaUrl(url);
+      set({ ollamaUrl: url, activeTarget: result.activeTarget || null, ollamaUrlLoading: false });
     } catch (error) {
       set({ ollamaUrlError: error.message, ollamaUrlLoading: false });
+      throw error;
+    }
+  },
+
+  updateRemoteOllamaUrl: async (url) => {
+    set({ ollamaUrlLoading: true, ollamaUrlError: null });
+    try {
+      const result = await ollamaApi.setRemoteOllamaUrl(url || null);
+      set({ remoteOllamaUrl: url || null, ollamaUrlLoading: false });
+      return result;
+    } catch (error) {
+      set({ ollamaUrlError: error.message, ollamaUrlLoading: false });
+      throw error;
+    }
+  },
+
+  switchServer: async (target) => {
+    set({ serverSwitching: true, serverSwitchError: null });
+    try {
+      const result = await ollamaApi.switchServer(target);
+      set({ ollamaUrl: result.ollamaUrl, activeTarget: result.activeTarget, serverSwitching: false });
+      return result;
+    } catch (error) {
+      set({ serverSwitchError: error.message, serverSwitching: false });
       throw error;
     }
   },

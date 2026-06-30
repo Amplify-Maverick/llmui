@@ -41,12 +41,19 @@ let ollamaUrl = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
 // When set, /api/gpu and /api/hardware proxy to this server instead of running nvidia-smi locally.
 let remoteGpuUrl = process.env.REMOTE_GPU_URL || null;
 
+// Remote Ollama server (GPU box). When set, the UI can toggle between local and remote.
+let remoteOllamaUrl = process.env.REMOTE_OLLAMA_URL || null;
+// 'local' | 'remote' — tracks which preset is active; null means manually set URL
+let activeTarget = null;
+
 async function loadOllamaConfig() {
   try {
     const data = await fs.readFile(OLLAMA_CONFIG_FILE, "utf-8");
     const config = JSON.parse(data);
     if (config.ollamaUrl) ollamaUrl = config.ollamaUrl;
     if (config.remoteGpuUrl) remoteGpuUrl = config.remoteGpuUrl;
+    if (config.remoteOllamaUrl) remoteOllamaUrl = config.remoteOllamaUrl;
+    if (config.activeTarget) activeTarget = config.activeTarget;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("Error loading Ollama config:", err);
@@ -58,7 +65,16 @@ async function saveOllamaConfig() {
   await ensureStorageDir();
   const config = { ollamaUrl };
   if (remoteGpuUrl) config.remoteGpuUrl = remoteGpuUrl;
+  if (remoteOllamaUrl) config.remoteOllamaUrl = remoteOllamaUrl;
+  if (activeTarget) config.activeTarget = activeTarget;
   await fs.writeFile(OLLAMA_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+function getCpuFeasibility(sizeBytes) {
+  const GB = 1024 ** 3;
+  if (sizeBytes < 4 * GB) return "good";
+  if (sizeBytes < 8 * GB) return "slow";
+  return "poor";
 }
 
 function validateOllamaUrl(url) {
@@ -251,30 +267,85 @@ app.get("/health", (req, res) => {
 // unauthenticated LAN users from accessing Ollama resources.
 // ============================================================
 
-// GET /ollama/config - Get current Ollama URL
+// GET /ollama/config - Get current Ollama URL and server target config
 app.get("/ollama/config", requireAuth, (req, res) => {
-  res.json({ ollamaUrl });
+  res.json({ ollamaUrl, remoteOllamaUrl, activeTarget });
 });
 
-// PUT /ollama/config - Update Ollama URL
+// PUT /ollama/config - Update Ollama URL and/or remote URL
 app.put("/ollama/config", requireAuth, async (req, res) => {
-  const { ollamaUrl: newUrl } = req.body;
-  if (!newUrl) {
-    return res.status(400).json({ error: "ollamaUrl is required" });
+  const { ollamaUrl: newUrl, remoteOllamaUrl: newRemoteUrl } = req.body;
+
+  if (newUrl) {
+    const { valid, error } = validateOllamaUrl(newUrl);
+    if (!valid) return res.status(400).json({ error });
+    ollamaUrl = newUrl;
+    // If the URL is changed manually, clear the active target preset
+    activeTarget = null;
   }
 
-  const { valid, error } = validateOllamaUrl(newUrl);
-  if (!valid) {
-    return res.status(400).json({ error });
+  if (newRemoteUrl !== undefined) {
+    if (newRemoteUrl) {
+      const { valid, error } = validateOllamaUrl(newRemoteUrl);
+      if (!valid) return res.status(400).json({ error });
+      remoteOllamaUrl = newRemoteUrl;
+    } else {
+      remoteOllamaUrl = null;
+    }
   }
 
-  ollamaUrl = newUrl;
+  if (!newUrl && newRemoteUrl === undefined) {
+    return res.status(400).json({ error: "ollamaUrl or remoteOllamaUrl is required" });
+  }
+
   try {
     await saveOllamaConfig();
-    res.json({ success: true, ollamaUrl });
+    res.json({ success: true, ollamaUrl, remoteOllamaUrl, activeTarget });
   } catch (err) {
     console.error("Error saving Ollama config:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /ollama/switch - Toggle between local and remote GPU server
+app.put("/ollama/switch", requireAuth, async (req, res) => {
+  const { target } = req.body;
+  if (!["local", "remote"].includes(target)) {
+    return res.status(400).json({ error: "target must be 'local' or 'remote'" });
+  }
+  if (target === "remote" && !remoteOllamaUrl) {
+    return res.status(400).json({ error: "No remote Ollama URL configured. Set remoteOllamaUrl in Settings first." });
+  }
+
+  activeTarget = target;
+  ollamaUrl = target === "local" ? DEFAULT_OLLAMA_URL : remoteOllamaUrl;
+
+  try {
+    await saveOllamaConfig();
+    res.json({ success: true, ollamaUrl, activeTarget });
+  } catch (err) {
+    console.error("Error saving switch config:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /ollama/local-capability - Check which models on local Ollama can run on CPU
+app.get("/ollama/local-capability", requireAuth, async (req, res) => {
+  try {
+    const response = await fetch(`${DEFAULT_OLLAMA_URL}/api/tags`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      return res.status(502).json({ error: "Local Ollama not reachable" });
+    }
+    const data = await response.json();
+    const models = (data.models || []).map((model) => ({
+      ...model,
+      cpuFeasibility: getCpuFeasibility(model.size || 0),
+    }));
+    res.json({ models });
+  } catch {
+    res.status(502).json({ error: "Failed to connect to local Ollama" });
   }
 });
 
