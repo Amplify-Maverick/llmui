@@ -105,7 +105,7 @@
 
   .app-header {
     margin-bottom: 10px;
-    padding-top: calc(env(safe-area-inset-top) + 10px);
+    padding-top: env(safe-area-inset-top);
     gap: 8px;
     flex-wrap: wrap;
     row-gap: 8px;
