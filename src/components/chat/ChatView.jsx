@@ -19,7 +19,7 @@ import { Select } from "../shared/Input.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
 import "./ChatView.css";
 
-export default function ChatView() {
+export default function ChatView({ onBack }) {
   const messagesEndRef = useRef(null);
   const [inputValue, setInputValue] = useState("");
   const [showGpu, setShowGpu] = useState(false);
@@ -214,6 +214,11 @@ export default function ChatView() {
     <div className="chat-container">
       <div className="chat-header">
         <div className="chat-header-left">
+          <button className="chat-back-btn" onClick={onBack} title="Back to conversations">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
           <span className="chat-header-title">Chat</span>
           <ConnectionStatus />
           <div className="conv-settings-wrapper">

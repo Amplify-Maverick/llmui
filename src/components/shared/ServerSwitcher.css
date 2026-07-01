@@ -190,3 +190,18 @@
   background: var(--color-danger-bg, rgba(248, 113, 113, 0.15));
   color: var(--color-danger, #f87171);
 }
+
+@media (max-width: 768px) {
+  .server-capability-modal {
+    width: auto;
+    max-width: 90vw;
+  }
+
+  .server-switcher-label {
+    display: none;
+  }
+
+  .server-switcher-btn {
+    padding: 0 8px;
+  }
+}

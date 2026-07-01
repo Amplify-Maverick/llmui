@@ -263,3 +263,19 @@
 .bubble-branch-indicator svg {
   flex-shrink: 0;
 }
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .bubble {
+    max-width: 88%;
+  }
+
+  .bubble-action-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .bubble-edit-textarea {
+    font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
+  }
+}

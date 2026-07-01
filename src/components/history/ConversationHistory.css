@@ -291,6 +291,16 @@
   padding: 8px 0;
 }
 
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Flush against the bottom of the screen now that .app has no
+     bottom padding — rounded corners there would look like clipped notches. */
+  .history-container {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: none;
+  }
+}
+
 .export-modal-content p {
   margin: 0 0 16px 0;
   color: var(--color-text-secondary);

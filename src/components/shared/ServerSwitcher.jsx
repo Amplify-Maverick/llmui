@@ -108,7 +108,7 @@ export default function ServerSwitcher() {
               <path d="M8 21h8M12 17v4" />
             </svg>
           )}
-          Local
+          <span className="server-switcher-label">Local</span>
         </button>
         <button
           className={`server-switcher-btn ${isRemote ? "active" : ""} ${!remoteConfigured ? "disabled" : ""}`}
@@ -126,7 +126,7 @@ export default function ServerSwitcher() {
               <line x1="6" y1="18" x2="6.01" y2="18" />
             </svg>
           )}
-          GPU Server
+          <span className="server-switcher-label">GPU Server</span>
         </button>
       </div>
 

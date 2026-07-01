@@ -237,6 +237,14 @@
   flex-shrink: 0;
 }
 
+/* ── Mobile: hover-gated controls need to be always reachable ── */
+@media (max-width: 768px) {
+  .conv-item-menu-btn,
+  .conv-item-delete {
+    opacity: 1;
+  }
+}
+
 /* Compare indicator */
 .conv-item-compare-indicator {
   display: inline-flex;

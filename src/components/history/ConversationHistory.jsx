@@ -13,7 +13,7 @@ const TAG_COLORS = [
   "#f87171", "#a78bfa", "#34d399", "#fbbf24", "#f472b6",
 ];
 
-export default function ConversationHistory() {
+export default function ConversationHistory({ onOpenChat }) {
   const {
     conversations,
     activeConversationId,
@@ -97,6 +97,7 @@ export default function ConversationHistory() {
 
   const handleNewChat = async () => {
     await createConversation(defaultModel);
+    onOpenChat?.();
   };
 
   const handleDelete = () => {
@@ -350,7 +351,14 @@ export default function ConversationHistory() {
               <ConversationItem
                 conversation={conversation}
                 isActive={conversation.id === activeConversationId}
-                onClick={() => selectMode ? toggleSelect(conversation.id) : setActiveConversation(conversation.id)}
+                onClick={() => {
+                  if (selectMode) {
+                    toggleSelect(conversation.id);
+                  } else {
+                    setActiveConversation(conversation.id);
+                    onOpenChat?.();
+                  }
+                }}
                 onDelete={setDeleteConfirm}
                 onRename={(id) => openRenameModal(id, conversation.title)}
                 onTags={setTagsModal}

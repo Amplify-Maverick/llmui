@@ -147,3 +147,9 @@
   background: var(--color-primary-bg-hover);
   border-color: var(--color-primary-border-hover);
 }
+
+@media (max-width: 768px) {
+  .settings {
+    padding: 12px;
+  }
+}

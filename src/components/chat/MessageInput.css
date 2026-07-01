@@ -143,3 +143,25 @@
   font-weight: 500;
   color: var(--color-primary);
 }
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* :hover never fires reliably on touch, so keep the remove button visible */
+  .image-remove {
+    opacity: 1;
+  }
+
+  .message-input-textarea {
+    font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
+  }
+
+  .input-action-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .message-input-wrapper {
+    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: 0;
+  }
+}

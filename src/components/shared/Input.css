@@ -45,3 +45,11 @@
   background: #08080c;
   color: var(--color-text-primary);
 }
+
+@media (max-width: 768px) {
+  .input,
+  .textarea,
+  .select {
+    font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
+  }
+}

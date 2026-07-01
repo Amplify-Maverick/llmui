@@ -313,3 +313,18 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+@media (max-width: 768px) {
+  .setup-wizard {
+    padding: 12px;
+  }
+
+  .setup-card {
+    padding: 24px;
+    gap: 24px;
+  }
+
+  .setup-url-input {
+    font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
+  }
+}

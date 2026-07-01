@@ -22,6 +22,20 @@
   gap: 12px;
 }
 
+.chat-back-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-separator);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
 .chat-header-title {
   font-size: 16px;
   font-weight: 600;
@@ -217,4 +231,41 @@
   background: var(--color-primary-bg);
   color: var(--color-primary);
   border-color: var(--color-primary-border);
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .chat-back-btn {
+    display: flex;
+  }
+
+  .chat-header {
+    padding: 10px 12px;
+  }
+
+  .chat-header-title {
+    display: none;
+  }
+
+  .chat-header-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 60vw;
+  }
+
+  .chat-header-actions .select {
+    width: 130px !important;
+  }
+
+  .chat-messages {
+    padding: 12px;
+  }
+
+  /* Flush against the bottom of the screen now that .app has no
+     bottom padding — rounded corners there would look like clipped notches. */
+  .chat-container {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: none;
+  }
 }

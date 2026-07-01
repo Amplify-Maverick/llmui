@@ -95,3 +95,51 @@
   min-width: 0;
   overflow: auto;
 }
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .app {
+    padding: 0 10px;
+    height: 100dvh;
+  }
+
+  .app-header {
+    margin-bottom: 10px;
+    padding-top: calc(env(safe-area-inset-top) + 10px);
+    gap: 8px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .app-logo-text {
+    display: none;
+  }
+
+  .app-tabs {
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .app-tab {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .app-main {
+    gap: 0;
+  }
+
+  .app-sidebar {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .app-content {
+    width: 100%;
+  }
+
+  .app-sidebar.is-hidden-mobile,
+  .app-content.is-hidden-mobile {
+    display: none;
+  }
+}

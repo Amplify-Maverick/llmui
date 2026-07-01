@@ -18,6 +18,10 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState(null); // null = checking
   const [activeTab, setActiveTab] = useState("chat");
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // Mobile-only: false shows the conversation list (like Signal/iMessage's
+  // home screen), true pushes into the full-screen chat. Ignored on desktop
+  // where the sidebar and chat are always shown side by side.
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const { loadConversations, createConversation } = useChatStore();
   const { loadSettings, defaultModel, theme } = useSettingsStore();
 
@@ -59,7 +63,7 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case "chat":
-        return <ChatView />;
+        return <ChatView onBack={() => setMobileChatOpen(false)} />;
       case "models":
         return <ModelManager />;
       case "stats":
@@ -84,7 +88,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-logo">
           <div className="app-logo-icon"></div>
-          LLMUI
+          <span className="app-logo-text">LLMUI</span>
         </div>
         <nav className="app-tabs">
           {Object.values(TABS).map((tab) => (
@@ -112,11 +116,17 @@ export default function App() {
 
       <main className="app-main">
         {activeTab === "chat" && (
-          <aside className="app-sidebar">
-            <ConversationHistory />
+          <aside className={`app-sidebar ${mobileChatOpen ? "is-hidden-mobile" : ""}`}>
+            <ConversationHistory onOpenChat={() => setMobileChatOpen(true)} />
           </aside>
         )}
-        <section className="app-content">{renderContent()}</section>
+        <section
+          className={`app-content ${
+            activeTab === "chat" && !mobileChatOpen ? "is-hidden-mobile" : ""
+          }`}
+        >
+          {renderContent()}
+        </section>
       </main>
 
       <KeyboardShortcutsPanel

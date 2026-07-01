@@ -62,3 +62,14 @@
   cursor: pointer;
   font-size: 18px;
 }
+
+@media (max-width: 768px) {
+  .model-manager {
+    padding: 12px;
+  }
+
+  .model-manager-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
