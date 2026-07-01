@@ -24,8 +24,8 @@ function formatSize(bytes) {
 
 function CapabilityModal({ models, hardware, onClose }) {
   const hasGpu = hardware?.gpus?.length > 0;
-  const capacityGb = hasGpu ? hardware.totalVramGb : hardware?.ram?.totalGb;
-  const capacityLabel = hasGpu ? "VRAM" : "RAM";
+  const capacityGb = hardware?.effectiveCapacityGb;
+  const capacityLabel = hasGpu ? "VRAM" : "usable RAM";
 
   return (
     <div className="server-capability-backdrop" onClick={onClose}>

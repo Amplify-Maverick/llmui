@@ -72,18 +72,18 @@ async function saveOllamaConfig() {
 
 /**
  * Rate how well a model (by its on-disk size) fits this machine's detected
- * capacity (GPU VRAM if present, else system RAM). A model's disk size is a
- * close proxy for the RAM/VRAM it needs to load, plus headroom for context
- * and runtime overhead — so this scales with real hardware instead of fixed
- * absolute thresholds that are wrong on both very small and very large boxes.
+ * capacity (hardware.effectiveCapacityGb — GPU VRAM if present, else real
+ * available RAM capped for CPU inference speed; see getLocalHardwareInfo).
+ * A model's disk size is a close proxy for the RAM/VRAM it needs to load,
+ * plus headroom for context and runtime overhead — so this scales with real
+ * hardware instead of fixed absolute thresholds that are wrong on both very
+ * small and very large boxes.
  */
 function getModelFeasibility(sizeBytes, hardware) {
   const GB = 1024 ** 3;
   const requiredGb = (sizeBytes / GB) * 1.2;
 
-  const capacityGb = hardware?.totalVramGb ?? (
-    hardware?.ram?.totalGb ? hardware.ram.totalGb * 0.75 : null
-  );
+  const capacityGb = hardware?.effectiveCapacityGb;
 
   if (!capacityGb) {
     // Hardware unknown — fall back to the old conservative absolute bands.
@@ -961,6 +961,27 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
 });
 
 /**
+ * Real "available" RAM — how much a new process can allocate without
+ * swapping. os.freemem() (used for ram.freeGb below) reports raw MemFree,
+ * which excludes the disk cache Linux is using but can reclaim on demand,
+ * so on a box that's been up a while it badly understates headroom. Read
+ * /proc/meminfo's MemAvailable instead, which accounts for reclaimable
+ * cache the same way `free -h`'s "available" column does.
+ */
+async function getAvailableRamGb() {
+  if (os.platform() === "linux") {
+    try {
+      const meminfo = await fs.readFile("/proc/meminfo", "utf-8");
+      const match = meminfo.match(/^MemAvailable:\s+(\d+)\s+kB/m);
+      if (match) return +(Number(match[1]) / (1024 ** 2)).toFixed(1);
+    } catch {
+      // fall through to the freemem-based estimate below
+    }
+  }
+  return +(os.freemem() / (1024 ** 3)).toFixed(1);
+}
+
+/**
  * Detect this machine's CPU/RAM/GPU. Shared by /api/hardware (local case)
  * and /ollama/local-capability, so both use the same real numbers instead
  * of local-capability's previous size-only heuristic.
@@ -968,6 +989,7 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
 async function getLocalHardwareInfo() {
   const totalRamGb = +(os.totalmem() / (1024 ** 3)).toFixed(1);
   const freeRamGb = +(os.freemem() / (1024 ** 3)).toFixed(1);
+  const availableRamGb = await getAvailableRamGb();
   const cpuModel = os.cpus()[0]?.model || "Unknown";
   const cpuCores = os.cpus().length;
 
@@ -994,14 +1016,37 @@ async function getLocalHardwareInfo() {
     ? +gpus.reduce((sum, g) => sum + g.vramTotalGb, 0).toFixed(1)
     : null;
 
+  // On CPU-only machines, a model can fit in RAM yet still be too slow to
+  // use interactively — CPU token throughput drops off with parameter count
+  // and scales up with core count. Cap the size of models recommended as
+  // "good" to one that stays reasonably responsive on this many cores,
+  // anchored on an 8-core/6GB baseline (roughly an 8B Q4 model, which is
+  // about the largest that feels usable in CPU chat on a modern 8-core box).
+  const CPU_BASELINE_CORES = 8;
+  const CPU_BASELINE_MODEL_GB = 6;
+  const cpuSpeedCapGb = gpus.length === 0
+    ? +Math.min(32, Math.max(2, CPU_BASELINE_MODEL_GB * (cpuCores / CPU_BASELINE_CORES))).toFixed(1)
+    : null;
+
+  // Single number model recommendations are rated against: GPU VRAM if
+  // present, otherwise real currently-available RAM (so other services
+  // already running on this machine reduce it) capped by cpuSpeedCapGb
+  // (so recommendations skew toward models that actually run well on CPU,
+  // not just models that fit without OOMing).
+  const effectiveCapacityGb = totalVramGb ?? (
+    availableRamGb != null ? +Math.min(availableRamGb, cpuSpeedCapGb).toFixed(1) : null
+  );
+
   return {
     ok: true,
     platform: os.platform(),
     arch: os.arch(),
     cpu: { model: cpuModel, cores: cpuCores },
-    ram: { totalGb: totalRamGb, freeGb: freeRamGb },
+    ram: { totalGb: totalRamGb, freeGb: freeRamGb, availableGb: availableRamGb },
     gpus,
     totalVramGb,
+    cpuSpeedCapGb,
+    effectiveCapacityGb,
   };
 }
 

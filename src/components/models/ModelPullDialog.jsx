@@ -149,7 +149,7 @@ export default function ModelPullDialog({
                     <span className="pull-hw-icon">▤</span>
                     <span className="pull-hw-label">System RAM</span>
                     <span className="pull-hw-value">{hardware.ram?.totalGb} GB</span>
-                    <span className="pull-hw-free">({hardware.ram?.freeGb} GB free)</span>
+                    <span className="pull-hw-free">({hardware.ram?.availableGb} GB available)</span>
                   </div>
                 </>
               ) : (

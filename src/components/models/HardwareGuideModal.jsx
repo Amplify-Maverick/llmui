@@ -85,6 +85,13 @@ export default function HardwareGuideModal({ isOpen, onClose }) {
                 ? "Dedicated GPU detected on this server — models load into VRAM."
                 : `No dedicated GPU detected on this server (${hardware.platform}/${hardware.arch}) — models run on CPU using system RAM.`}
             </div>
+            {!hasGpu && hardware.ram?.availableGb != null && (
+              <div className="hw-tier-description">
+                {hardware.ram.availableGb} GB currently available (other processes on this
+                machine are using the rest) — recommendations below are sized to fit that and
+                stay responsive on {hardware.cpu?.cores} CPU cores.
+              </div>
+            )}
           </div>
         ) : (
           <div className="hw-not-detected">

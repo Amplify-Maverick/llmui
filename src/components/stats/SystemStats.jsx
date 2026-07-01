@@ -76,6 +76,11 @@ export default function SystemStats() {
               color="#c4b5fd"
             />
             <StatCard
+              label="Available RAM"
+              value={`${hardware.ram.availableGb} GB`}
+              color="#a78bfa"
+            />
+            <StatCard
               label="CPU"
               value={`${hardware.cpu.cores} cores`}
               color="#ff8fab"

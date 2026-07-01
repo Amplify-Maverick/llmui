@@ -22,14 +22,13 @@ export async function fetchHardwareInfo() {
 }
 
 /**
- * Derives how much memory is available for loading a model on this machine:
- * GPU VRAM if a dedicated GPU was detected, otherwise an estimate of usable
- * system RAM (models can run on CPU, but the OS and other processes need
- * headroom too).
+ * How much capacity model recommendations should be rated against: GPU VRAM
+ * if a dedicated GPU was detected, otherwise this machine's real currently
+ * available RAM (accounting for other processes already running on it),
+ * capped for realistic CPU inference speed. Computed server-side, where the
+ * real hardware and load actually live — see effectiveCapacityGb in
+ * server/index.js's getLocalHardwareInfo.
  */
 export function getAvailableCapacity(hardware) {
-  if (!hardware) return null;
-  if (hardware.totalVramGb) return hardware.totalVramGb;
-  if (hardware.ram?.totalGb) return +(hardware.ram.totalGb * 0.75).toFixed(1);
-  return null;
+  return hardware?.effectiveCapacityGb ?? null;
 }
