@@ -52,8 +52,8 @@ export const api = {
   listConversations: ({ archived = false, limit = 200 } = {}) =>
     request("GET", `/api/conversations?archived=${archived}&limit=${limit}`),
   getMessages: (id) => request("GET", `/api/conversations/${encodeURIComponent(id)}/messages`),
-  createConversation: (model) =>
-    request("POST", `/api/conversations`, { model: model || null, source: "tui" }),
+  createConversation: (model, tags) =>
+    request("POST", `/api/conversations`, { model: model || null, source: "tui", tags: tags || [] }),
   appendMessage: (id, message) =>
     request("POST", `/api/conversations/${encodeURIComponent(id)}/messages`, message),
   patchConversation: (id, fields) =>
@@ -67,6 +67,9 @@ export const api = {
     const res = await request("GET", `/api/settings/llmui_settings`);
     return res.data || null;
   },
+  getOllamaConfig: () => request("GET", `/ollama/config`),
+  getRemoteStatus: () => request("GET", `/ollama/remote-status`),
+  switchServer: (target) => request("PUT", `/ollama/switch`, { target }),
 };
 
 function buildOptions(temperature, maxTokens) {

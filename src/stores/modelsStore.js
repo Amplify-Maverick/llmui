@@ -8,6 +8,7 @@ export const useModelsStore = create((set, get) => ({
   isLoading: false,
   error: null,
   pullProgress: null,
+  localCapability: { models: [], hardware: null },
 
   fetchModels: async () => {
     set({ isLoading: true, error: null });
@@ -16,6 +17,17 @@ export const useModelsStore = create((set, get) => ({
       set({ localModels: data.models || [], isLoading: false });
     } catch (error) {
       set({ error: error.message, isLoading: false });
+    }
+  },
+
+  fetchLocalCapability: async () => {
+    try {
+      const result = await ollamaApi.getLocalCapability();
+      set({ localCapability: result });
+      return result;
+    } catch (error) {
+      set({ error: error.message });
+      return null;
     }
   },
 

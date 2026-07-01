@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../constants/config.js";
+import { MODE_TAGS } from "../constants/modeTags.js";
 import { loadFromStorage, saveToStorage } from "../utils/storage.js";
 import { ollamaApi } from "../services/ollamaApi.js";
 
@@ -9,6 +10,7 @@ export const useSettingsStore = create((set, get) => ({
   ollamaUrl: "http://localhost:11434",
   remoteOllamaUrl: null,
   activeTarget: null, // 'local' | 'remote' | null (manual)
+  remoteStatus: { configured: false, online: null, checkedAt: null, latencyMs: null, error: null },
   ollamaUrlLoading: false,
   ollamaUrlError: null,
   serverSwitching: false,
@@ -28,9 +30,35 @@ export const useSettingsStore = create((set, get) => ({
     // Load Ollama config from server
     try {
       const config = await ollamaApi.getConfig();
-      set({ ollamaUrl: config.ollamaUrl, remoteOllamaUrl: config.remoteOllamaUrl || null, activeTarget: config.activeTarget || null });
+      set({
+        ollamaUrl: config.ollamaUrl,
+        remoteOllamaUrl: config.remoteOllamaUrl || null,
+        activeTarget: config.activeTarget || null,
+        remoteStatus: config.remoteStatus || get().remoteStatus,
+      });
     } catch (error) {
       console.error("Failed to load Ollama config from server:", error);
+    }
+
+    get().ensureModeTags();
+  },
+
+  // Seed the Mini Mode / GPU Mode conversation tags if they aren't already
+  // in the user's tag list (e.g. first run, or an install predating this feature).
+  ensureModeTags: () => {
+    const { customTags = [] } = get();
+    const missing = MODE_TAGS.filter((mt) => !customTags.some((t) => t.id === mt.id));
+    if (missing.length > 0) {
+      get().updateSetting("customTags", [...customTags, ...missing]);
+    }
+  },
+
+  fetchRemoteStatus: async () => {
+    try {
+      const status = await ollamaApi.getRemoteStatus();
+      set({ remoteStatus: status });
+    } catch {
+      // keep last known status on a transient client-side fetch failure
     }
   },
 

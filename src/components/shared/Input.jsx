@@ -73,8 +73,18 @@ export function Select({
         </option>
       )}
       {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
+        <option
+          key={opt.value}
+          value={opt.value}
+          style={
+            opt.feasibility === "poor"
+              ? { color: "var(--color-danger, #f87171)" }
+              : opt.feasibility === "slow"
+                ? { color: "var(--color-warning, #fcd34d)" }
+                : undefined
+          }
+        >
+          {opt.feasibility === "poor" ? `⚠ ${opt.label}` : opt.label}
         </option>
       ))}
     </select>

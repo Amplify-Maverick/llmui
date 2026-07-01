@@ -70,6 +70,45 @@ async function saveOllamaConfig() {
   await fs.writeFile(OLLAMA_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
+// Background liveness check for the GPU box's Ollama, independent of which
+// target is currently active — lets the UI show online/offline status before
+// the user switches, without pinging the GPU box on every client request.
+const REMOTE_HEALTH_POLL_MS = 15000;
+const REMOTE_HEALTH_TIMEOUT_MS = 5000;
+
+let remoteHealthCache = { online: null, checkedAt: null, latencyMs: null, error: null };
+let remoteHealthTimer = null;
+
+async function checkRemoteHealth() {
+  if (!remoteOllamaUrl) return;
+  const start = Date.now();
+  try {
+    const response = await fetch(`${remoteOllamaUrl}/api/tags`, {
+      signal: AbortSignal.timeout(REMOTE_HEALTH_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    remoteHealthCache = { online: true, checkedAt: Date.now(), latencyMs: Date.now() - start, error: null };
+  } catch (err) {
+    remoteHealthCache = { online: false, checkedAt: Date.now(), latencyMs: null, error: err.message };
+  }
+}
+
+function startRemoteHealthPoll() {
+  if (remoteHealthTimer) clearInterval(remoteHealthTimer);
+  remoteHealthTimer = null;
+  if (!remoteOllamaUrl) {
+    remoteHealthCache = { online: null, checkedAt: null, latencyMs: null, error: null };
+    return;
+  }
+  checkRemoteHealth();
+  remoteHealthTimer = setInterval(checkRemoteHealth, REMOTE_HEALTH_POLL_MS);
+}
+
+function stopRemoteHealthPoll() {
+  if (remoteHealthTimer) clearInterval(remoteHealthTimer);
+  remoteHealthTimer = null;
+}
+
 /**
  * Rate how well a model (by its on-disk size) fits this machine's detected
  * capacity (hardware.effectiveCapacityGb — GPU VRAM if present, else real
@@ -290,7 +329,17 @@ app.get("/health", (req, res) => {
 
 // GET /ollama/config - Get current Ollama URL and server target config
 app.get("/ollama/config", requireAuth, (req, res) => {
-  res.json({ ollamaUrl, remoteOllamaUrl, activeTarget });
+  res.json({
+    ollamaUrl,
+    remoteOllamaUrl,
+    activeTarget,
+    remoteStatus: { configured: !!remoteOllamaUrl, ...remoteHealthCache },
+  });
+});
+
+// GET /ollama/remote-status - cached GPU-server liveness (no per-request network call)
+app.get("/ollama/remote-status", requireAuth, (req, res) => {
+  res.json({ configured: !!remoteOllamaUrl, ...remoteHealthCache });
 });
 
 // PUT /ollama/config - Update Ollama URL and/or remote URL
@@ -313,6 +362,7 @@ app.put("/ollama/config", requireAuth, async (req, res) => {
     } else {
       remoteOllamaUrl = null;
     }
+    startRemoteHealthPoll();
   }
 
   if (!newUrl && newRemoteUrl === undefined) {
@@ -1110,6 +1160,7 @@ const dryRun = args.includes("--dry-run");
 await ensureStorageDir();
 await getOrCreateToken();
 await loadOllamaConfig();
+startRemoteHealthPoll();
 
 // Initialize database and run migration if needed
 console.log("Initializing database...");
@@ -1130,6 +1181,7 @@ if (dryRun && migrationResult.dryRun) {
 process.on("SIGTERM", () => {
   console.log("Shutting down...");
   stopNvidiaSmiLoop();
+  stopRemoteHealthPoll();
   closeDb();
   process.exit(0);
 });
@@ -1137,6 +1189,7 @@ process.on("SIGTERM", () => {
 process.on("SIGINT", () => {
   console.log("Shutting down...");
   stopNvidiaSmiLoop();
+  stopRemoteHealthPoll();
   closeDb();
   process.exit(0);
 });

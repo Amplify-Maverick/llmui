@@ -265,6 +265,14 @@ class OllamaAPI {
     }
     return response.json(); // { models: [{ ...model, cpuFeasibility }], hardware }
   }
+
+  async getRemoteStatus() {
+    const response = await fetch(`${AUTH_SERVER}/ollama/remote-status`, {
+      headers: await authHeaders(),
+    });
+    if (!response.ok) throw new Error("Failed to fetch remote status");
+    return response.json(); // { configured, online, checkedAt, latencyMs, error }
+  }
 }
 
 export const ollamaApi = new OllamaAPI();

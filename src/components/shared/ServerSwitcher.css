@@ -45,6 +45,14 @@
   border-left: 1px solid var(--color-border);
 }
 
+.server-switcher-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
 .server-switcher-spinner {
   width: 9px;
   height: 9px;

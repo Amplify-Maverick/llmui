@@ -28,6 +28,7 @@ export default function ChatView({ onBack }) {
   const [compareMode, setCompareMode] = useState(false);
   const [compareModels, setCompareModels] = useState([]);
   const [showConvSettings, setShowConvSettings] = useState(false);
+  const [poorFitPending, setPoorFitPending] = useState(null);
 
   const {
     messages,
@@ -46,8 +47,8 @@ export default function ChatView({ onBack }) {
     getBranchCountForMessage,
   } = useChatStore();
 
-  const { defaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
-  const { localModels, fetchModels, modelInfoCache, fetchModelInfo, runningModels, fetchRunningModels, unloadModel } = useModelsStore();
+  const { defaultModel, enableThinking, enableTools, updateSetting, activeTarget } = useSettingsStore();
+  const { localModels, fetchModels, modelInfoCache, fetchModelInfo, runningModels, fetchRunningModels, unloadModel, localCapability, fetchLocalCapability } = useModelsStore();
   const { sendMessage, stopStreaming, regenerateLastMessage } = useOllamaStream();
   const [isUnloading, setIsUnloading] = useState(false);
 
@@ -57,6 +58,20 @@ export default function ChatView({ onBack }) {
     const id = setInterval(fetchRunningModels, 5000);
     return () => clearInterval(id);
   }, [fetchModels, fetchRunningModels]);
+
+  const isMiniMode = activeTarget === "local";
+
+  // Feasibility is only meaningful in Mini Mode: /ollama/local-capability always
+  // reflects this machine's hardware, but in GPU Mode `localModels` lists the
+  // remote box's own models, so names wouldn't line up.
+  useEffect(() => {
+    if (isMiniMode) fetchLocalCapability();
+  }, [isMiniMode, localModels, fetchLocalCapability]);
+
+  const feasibilityByName = useMemo(() => {
+    if (!isMiniMode) return {};
+    return Object.fromEntries(localCapability.models.map((m) => [m.name, m.cpuFeasibility]));
+  }, [isMiniMode, localCapability]);
 
   const hasRunningModels = runningModels.length > 0;
 
@@ -87,6 +102,7 @@ export default function ChatView({ onBack }) {
   const modelOptions = localModels.map((m) => ({
     value: m.name,
     label: m.name,
+    feasibility: feasibilityByName[m.name],
   }));
 
   const currentModelInfo = modelInfoCache[defaultModel];
@@ -99,12 +115,28 @@ export default function ChatView({ onBack }) {
     setInputValue(value);
   }, []);
 
-  const handleModelChange = (newModel) => {
+  const commitModelChange = (newModel) => {
     // If there are messages, show warning modal
     if (messages.length > 0) {
       setModelSwitchPending(newModel);
     } else {
       updateSetting("defaultModel", newModel);
+    }
+  };
+
+  const handleModelChange = (newModel) => {
+    if (feasibilityByName[newModel] === "poor") {
+      setPoorFitPending(newModel);
+      return;
+    }
+    commitModelChange(newModel);
+  };
+
+  const confirmPoorFitModel = () => {
+    if (poorFitPending) {
+      const newModel = poorFitPending;
+      setPoorFitPending(null);
+      commitModelChange(newModel);
     }
   };
 
@@ -405,6 +437,17 @@ export default function ChatView({ onBack }) {
         onConfirm={confirmModelSwitch}
         newModel={modelSwitchPending}
         currentModel={defaultModel}
+      />
+
+      {/* Poor Hardware Fit Warning Modal */}
+      <ConfirmModal
+        isOpen={poorFitPending !== null}
+        onClose={() => setPoorFitPending(null)}
+        onConfirm={confirmPoorFitModel}
+        title="Model not recommended for this machine"
+        message={`"${poorFitPending}" is rated a poor fit for this machine's detected hardware — it will likely run very slowly or fail to load. Continue anyway?`}
+        confirmText="Use anyway"
+        variant="danger"
       />
     </div>
   );

@@ -6,6 +6,13 @@ import ChatPane from "./components/ChatPane.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import InputBar from "./components/InputBar.jsx";
 import ModelPicker from "./components/ModelPicker.jsx";
+import ServerPicker from "./components/ServerPicker.jsx";
+
+const REMOTE_STATUS_POLL_MS = 15000;
+
+// Must match src/constants/modeTags.js — TUI doesn't import from src/, so the
+// tag IDs are duplicated here rather than shared.
+const MODE_TAG_IDS = { local: "mode-mini", remote: "mode-gpu" };
 
 const DEFAULTS = {
   defaultModel: "",
@@ -55,21 +62,30 @@ export default function App({ cliModel, cliTools }) {
 
   const [draft, setDraft] = useState("");
   const [focus, setFocus] = useState("list"); // 'list' | 'input'
-  const [mode, setMode] = useState("normal"); // 'normal' | 'rename' | 'confirmDelete' | 'model'
+  const [mode, setMode] = useState("normal"); // 'normal' | 'rename' | 'confirmDelete' | 'model' | 'server' | 'confirmRemoteSwitch'
   const [prompt, setPrompt] = useState(""); // rename buffer
   const [pickerIndex, setPickerIndex] = useState(0);
   const [streaming, setStreaming] = useState(null); // { content, label, tools } | null
   const [toolStatus, setToolStatus] = useState(null);
 
+  const [ollamaConfig, setOllamaConfig] = useState({
+    activeTarget: null,
+    remoteOllamaUrl: null,
+    remoteStatus: { configured: false, online: null },
+  });
+  const [serverPickerIndex, setServerPickerIndex] = useState(0);
+
   // ─── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
-        const [savedSettings, modelsData, convData] = await Promise.all([
+        const [savedSettings, modelsData, convData, config] = await Promise.all([
           api.getSettings().catch(() => null),
           api.getModels(),
           api.listConversations(),
+          api.getOllamaConfig().catch(() => null),
         ]);
+        if (config) setOllamaConfig(config);
 
         const s = { ...DEFAULTS, ...(savedSettings || {}) };
         setSettings(s);
@@ -96,6 +112,21 @@ export default function App({ cliModel, cliTools }) {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Poll GPU-server reachability in the background, matching the server's own
+  // poll cadence — no value in checking faster than the source refreshes.
+  useEffect(() => {
+    if (!ready) return;
+    const id = setInterval(async () => {
+      try {
+        const remoteStatus = await api.getRemoteStatus();
+        setOllamaConfig((c) => ({ ...c, remoteStatus }));
+      } catch {
+        // keep last known status on a transient failure
+      }
+    }, REMOTE_STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [ready]);
 
   // Keep the sidebar selection in range as the list changes.
   useEffect(() => {
@@ -161,7 +192,8 @@ export default function App({ cliModel, cliTools }) {
     let convId = activeConvId;
     try {
       if (!convId) {
-        const conv = await api.createConversation(model);
+        const modeTag = MODE_TAG_IDS[ollamaConfig.activeTarget] || MODE_TAG_IDS.local;
+        const conv = await api.createConversation(model, [modeTag]);
         convId = conv.id;
         setActiveConvId(convId);
         setConversations((prev) => [conv, ...prev]);
@@ -241,7 +273,7 @@ export default function App({ cliModel, cliTools }) {
       setToolStatus(null);
       setError(err.message);
     }
-  }, [draft, streaming, activeConvId, model, messages, settings, toolsOn, loadConversations]);
+  }, [draft, streaming, activeConvId, model, messages, settings, toolsOn, loadConversations, ollamaConfig.activeTarget]);
 
   // ─── Conversation management ───────────────────────────────────────────────
   const startRename = useCallback(() => {
@@ -317,6 +349,54 @@ export default function App({ cliModel, cliTools }) {
     }
   }, [models, pickerIndex, activeConvId]);
 
+  // ─── Server mode switching ──────────────────────────────────────────────
+  const openServerSwitch = useCallback(() => {
+    setServerPickerIndex(ollamaConfig.activeTarget === "remote" ? 1 : 0);
+    setMode("server");
+  }, [ollamaConfig.activeTarget]);
+
+  const applyServerSwitch = useCallback(
+    async (target) => {
+      try {
+        const result = await api.switchServer(target);
+        setOllamaConfig((c) => ({ ...c, activeTarget: result.activeTarget }));
+        const modelsData = await api.getModels();
+        const list = modelsData.models || [];
+        setModels(list);
+        if (!list.find((m) => m.name === model)) {
+          setModel(list[0]?.name || "");
+        }
+      } catch (err) {
+        setError(err.message);
+      }
+    },
+    [model]
+  );
+
+  const chooseServerTarget = useCallback(() => {
+    const target = serverPickerIndex === 0 ? "local" : "remote";
+    if (target === ollamaConfig.activeTarget) {
+      setMode("normal");
+      return;
+    }
+    if (target === "remote" && !ollamaConfig.remoteOllamaUrl) {
+      setError("No GPU server configured. Set it up in the web UI Settings first.");
+      setMode("normal");
+      return;
+    }
+    if (target === "remote" && ollamaConfig.remoteStatus?.online === false) {
+      setMode("confirmRemoteSwitch");
+      return;
+    }
+    setMode("normal");
+    applyServerSwitch(target);
+  }, [serverPickerIndex, ollamaConfig, applyServerSwitch]);
+
+  const confirmRemoteSwitch = useCallback(() => {
+    setMode("normal");
+    applyServerSwitch("remote");
+  }, [applyServerSwitch]);
+
   // ─── Keyboard ────────────────────────────────────────────────────────────
   useInput((input, key) => {
     // Modal: rename
@@ -346,6 +426,21 @@ export default function App({ cliModel, cliTools }) {
       return;
     }
 
+    // Modal: server (mode) picker
+    if (mode === "server") {
+      if (key.escape) return setMode("normal");
+      if (key.return) return chooseServerTarget();
+      if (key.upArrow || key.downArrow) return setServerPickerIndex((i) => (i === 0 ? 1 : 0));
+      return;
+    }
+
+    // Modal: confirm switching to an offline-looking GPU server
+    if (mode === "confirmRemoteSwitch") {
+      if (input === "y" || input === "Y" || key.return) return confirmRemoteSwitch();
+      if (input === "n" || input === "N" || key.escape) return setMode("server");
+      return;
+    }
+
     // Normal mode
     if (key.tab) {
       setFocus((f) => (f === "input" ? "list" : "input"));
@@ -359,6 +454,7 @@ export default function App({ cliModel, cliTools }) {
       else if (input === "n") newChat();
       else if (input === "t") setToolsOn((t) => !t);
       else if (input === "m") openModelPicker();
+      else if (input === "s") openServerSwitch();
       else if (input === "r") startRename();
       else if (input === "a") toggleArchiveSelected();
       else if (input === "A") toggleArchivedView();
@@ -416,6 +512,15 @@ export default function App({ cliModel, cliTools }) {
         />
         {mode === "model" ? (
           <ModelPicker models={models} index={pickerIndex} current={model} width={chatWidth} height={mainHeight} />
+        ) : mode === "server" || mode === "confirmRemoteSwitch" ? (
+          <ServerPicker
+            index={serverPickerIndex}
+            activeTarget={ollamaConfig.activeTarget}
+            remoteConfigured={Boolean(ollamaConfig.remoteOllamaUrl)}
+            remoteStatus={ollamaConfig.remoteStatus}
+            width={chatWidth}
+            height={mainHeight}
+          />
         ) : (
           <ChatPane
             messages={messages}
@@ -435,6 +540,8 @@ export default function App({ cliModel, cliTools }) {
         focus={focus}
         error={error}
         columns={columns}
+        activeTarget={ollamaConfig.activeTarget}
+        remoteStatus={ollamaConfig.remoteStatus}
       />
 
       {mode === "rename" ? (
@@ -453,6 +560,15 @@ export default function App({ cliModel, cliTools }) {
       ) : mode === "model" ? (
         <Box width={columns} borderStyle="round" borderColor="cyan" paddingX={1}>
           <Text dimColor>choosing model — ↑↓ ⏎ esc</Text>
+        </Box>
+      ) : mode === "server" ? (
+        <Box width={columns} borderStyle="round" borderColor="cyan" paddingX={1}>
+          <Text dimColor>choosing mode — ↑↓ ⏎ esc</Text>
+        </Box>
+      ) : mode === "confirmRemoteSwitch" ? (
+        <Box width={columns} borderStyle="round" borderColor="red" paddingX={1}>
+          <Text color="red">GPU server appears offline. Switch anyway? </Text>
+          <Text dimColor>y / n</Text>
         </Box>
       ) : (
         <InputBar value={draft} focus={focus === "input"} streaming={Boolean(streaming)} columns={columns} />

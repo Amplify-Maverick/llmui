@@ -1,20 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
-import { ollamaApi } from "../../services/ollamaApi.js";
+import { ConfirmModal } from "./Modal.jsx";
+import { FEASIBILITY_LABEL, FEASIBILITY_ICON } from "../../constants/feasibility.js";
 import "./ServerSwitcher.css";
 
-const FEASIBILITY_LABEL = {
-  good: "Runs well",
-  slow: "Slow",
-  poor: "Not recommended",
-};
-
-const FEASIBILITY_ICON = {
-  good: "✓",
-  slow: "~",
-  poor: "✗",
-};
+const REMOTE_STATUS_POLL_MS = 10000;
 
 function formatSize(bytes) {
   if (!bytes) return "?";
@@ -61,10 +52,19 @@ function CapabilityModal({ models, hardware, onClose }) {
 }
 
 export default function ServerSwitcher() {
-  const { activeTarget, remoteOllamaUrl, serverSwitching, switchServer } = useSettingsStore();
-  const { fetchModels } = useModelsStore();
-  const [capability, setCapability] = useState(null);
+  const { activeTarget, remoteOllamaUrl, remoteStatus, serverSwitching, switchServer, fetchRemoteStatus } = useSettingsStore();
+  const { fetchModels, localCapability, fetchLocalCapability } = useModelsStore();
+  const [showCapability, setShowCapability] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [confirmOfflineSwitch, setConfirmOfflineSwitch] = useState(false);
+
+  // Poll GPU-server reachability continuously, regardless of which mode is
+  // currently active, so the badge is accurate before the user opens the switcher.
+  useEffect(() => {
+    fetchRemoteStatus();
+    const id = setInterval(fetchRemoteStatus, REMOTE_STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [fetchRemoteStatus]);
 
   const handleLocal = async () => {
     if (activeTarget === "local") return;
@@ -72,22 +72,15 @@ export default function ServerSwitcher() {
       await switchServer("local");
       fetchModels();
       setChecking(true);
-      try {
-        const result = await ollamaApi.getLocalCapability();
-        setCapability(result);
-      } catch {
-        // capability check failed (local Ollama not running), still switched
-      } finally {
-        setChecking(false);
-      }
+      const result = await fetchLocalCapability();
+      if (result) setShowCapability(true);
+      setChecking(false);
     } catch {
       // switch failed, error in store
     }
   };
 
-  const handleRemote = async () => {
-    if (activeTarget === "remote") return;
-    if (!remoteOllamaUrl) return;
+  const doSwitchRemote = async () => {
     try {
       await switchServer("remote");
       fetchModels();
@@ -96,9 +89,20 @@ export default function ServerSwitcher() {
     }
   };
 
+  const handleRemote = async () => {
+    if (activeTarget === "remote") return;
+    if (!remoteOllamaUrl) return;
+    if (remoteStatus.online === false) {
+      setConfirmOfflineSwitch(true);
+      return;
+    }
+    await doSwitchRemote();
+  };
+
   const isLocal = activeTarget === "local";
   const isRemote = activeTarget === "remote";
   const remoteConfigured = !!remoteOllamaUrl;
+  const remoteDotColor = !remoteConfigured ? null : remoteStatus.online === true ? "#4ade80" : remoteStatus.online === false ? "#f87171" : "#9ca3af";
 
   return (
     <>
@@ -116,7 +120,7 @@ export default function ServerSwitcher() {
               <path d="M8 21h8M12 17v4" />
             </svg>
           )}
-          <span className="server-switcher-label">Local</span>
+          <span className="server-switcher-label">Mini Mode</span>
         </button>
         <button
           className={`server-switcher-btn ${isRemote ? "active" : ""} ${!remoteConfigured ? "disabled" : ""}`}
@@ -134,17 +138,37 @@ export default function ServerSwitcher() {
               <line x1="6" y1="18" x2="6.01" y2="18" />
             </svg>
           )}
-          <span className="server-switcher-label">GPU Server</span>
+          <span className="server-switcher-label">GPU Mode</span>
+          {remoteDotColor && (
+            <span
+              className="server-switcher-dot"
+              style={{ backgroundColor: remoteDotColor }}
+              title={remoteStatus.online === false ? "GPU server unreachable" : remoteStatus.online === true ? "GPU server online" : "GPU server status unknown"}
+            />
+          )}
         </button>
       </div>
 
-      {capability !== null && (
+      {showCapability && (
         <CapabilityModal
-          models={capability.models}
-          hardware={capability.hardware}
-          onClose={() => setCapability(null)}
+          models={localCapability.models}
+          hardware={localCapability.hardware}
+          onClose={() => setShowCapability(false)}
         />
       )}
+
+      <ConfirmModal
+        isOpen={confirmOfflineSwitch}
+        onClose={() => setConfirmOfflineSwitch(false)}
+        onConfirm={() => {
+          setConfirmOfflineSwitch(false);
+          doSwitchRemote();
+        }}
+        title="GPU server appears offline"
+        message="LLMUI couldn't reach the GPU server on its last check. Switch to GPU Mode anyway?"
+        confirmText="Switch anyway"
+        variant="danger"
+      />
     </>
   );
 }

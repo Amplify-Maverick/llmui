@@ -184,7 +184,7 @@ export default function SettingsPanel() {
           Ollama Server URL
           {activeTarget && (
             <span style={{ marginLeft: "0.5rem", fontSize: "11px", fontWeight: 400, color: activeTarget === "local" ? "var(--color-primary)" : "#60a5fa" }}>
-              ({activeTarget === "local" ? "local" : "GPU server"} active)
+              ({activeTarget === "local" ? "Mini Mode" : "GPU Mode"} active)
             </span>
           )}
         </label>
@@ -218,7 +218,7 @@ export default function SettingsPanel() {
           </p>
         )}
         <p className="settings-description">
-          Active Ollama server. Use the Local / GPU Server toggle in the header to switch presets.
+          Active Ollama server. Use the Mini Mode / GPU Mode toggle in the header to switch presets.
         </p>
       </div>
 
