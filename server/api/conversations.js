@@ -53,14 +53,14 @@ router.get('/', (req, res) => {
 // POST /api/conversations - Create new conversation
 router.post('/', (req, res) => {
   const db = getDb();
-  const { model, title = 'New Chat', tags = [], isCompare = false, compareModels = null } = req.body;
+  const { model, title = 'New Chat', tags = [], isCompare = false, compareModels = null, source = 'local' } = req.body;
   const id = nanoid();
   const now = Date.now();
 
   db.prepare(`
-    INSERT INTO conversations (id, title, model, tags, created_at, updated_at, is_compare, compare_models)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, title, model || null, JSON.stringify(tags), now, now, isCompare ? 1 : 0, compareModels ? JSON.stringify(compareModels) : null);
+    INSERT INTO conversations (id, title, model, tags, created_at, updated_at, is_compare, compare_models, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, model || null, JSON.stringify(tags), now, now, isCompare ? 1 : 0, compareModels ? JSON.stringify(compareModels) : null, source);
 
   res.json({
     id,
@@ -72,7 +72,8 @@ router.post('/', (req, res) => {
     messageCount: 0,
     archived: 0,
     isCompare,
-    compareModels
+    compareModels,
+    source
   });
 });
 

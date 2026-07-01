@@ -18,6 +18,7 @@ A web interface for chatting with local LLMs through Ollama.
 - **Conversation branching** - edit any message to create alternate branches, navigate between them
 - **Hardware guide** - helps figure out what models will run on your system
 - **Setup wizard** - walks first-time users through pointing at Ollama (local or remote) and verifying GPU stats
+- **Terminal UI** - a full-screen TUI (`npm run tui`) to browse, resume, and continue your chats from the terminal, sharing the same history as the web UI
 - **Light and dark themes**
 - Configurable system prompts, temperature, max tokens
 
@@ -211,6 +212,30 @@ This is useful for:
 - A/B testing different approaches to a problem
 
 Branches are stored as part of the conversation history and persist across sessions.
+
+## Terminal UI (TUI)
+
+Prefer the terminal? Run a full-screen TUI against the same server and history:
+
+```bash
+npm run tui
+```
+
+It reads the auth token from `~/.llmui/token` and talks to the LLMUI server on port 3001, so conversations you start here show up in the web UI and vice versa.
+
+- The left pane lists your conversations (newest first) — `↑`/`↓` to move, `Enter` to open and resume one
+- Manage chats from the list: `n` new, `r` rename, `a` archive, `A` toggle the archived view, `d` delete, `m` pick a model
+- `Tab` switches focus between the list and the message input, `t` toggles tool calling, `q` quits
+- Responses stream live with markdown rendering (headings, lists, **bold**, code blocks) and inline tool-call cards
+- Both sides of every exchange are saved to the shared SQLite database
+
+Flags: `--model <name>` preselects a model, `--tools` starts with tool calling on, and `--server <url>` (or the `LLMUI_SERVER` env var) points at a non-default server.
+
+```bash
+npm run tui -- --model qwen2.5-coder:7b --tools
+```
+
+The server must be running first (`npm run server`, or `npm run dev`). The TUI is built with [Ink](https://github.com/vadimdemedes/ink) and run via `tsx`.
 
 ## Data storage
 
