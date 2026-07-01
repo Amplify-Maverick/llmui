@@ -39,9 +39,15 @@ export default function App() {
     loadConversations();
   }, [setupComplete, loadSettings, loadConversations]);
 
-  // Apply theme to document
+  // Apply theme to document, including the browser chrome color (Safari's
+  // address bar / toolbar default to white and ignore page CSS entirely
+  // unless this meta tag tells them otherwise).
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme || 'dark');
+    const resolvedTheme = theme || 'dark';
+    document.documentElement.setAttribute('data-theme', resolvedTheme);
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', resolvedTheme === 'light' ? '#f1f5f9' : '#08080c');
   }, [theme]);
 
   // Keyboard shortcuts handlers
