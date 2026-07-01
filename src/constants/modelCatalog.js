@@ -407,3 +407,20 @@ export const COMPAT_LABELS = {
   insufficient: { label: "Insufficient", color: "#ff6b6b", icon: "✕" },
   unknown: { label: "Unknown", color: "#8a8a9a", icon: "?" },
 };
+
+// Sort order for surfacing the best-fitting models first (lower = better fit).
+export const COMPAT_RANK = { excellent: 0, good: 1, tight: 2, insufficient: 3, unknown: 4 };
+
+/**
+ * Pick the largest variant of a model that comfortably fits the available
+ * VRAM/RAM, falling back to the smallest variant if none fit (or if
+ * available capacity is unknown).
+ */
+export function pickBestVariant(model, vramAvailable) {
+  if (!vramAvailable) return model.variants[0];
+  const fitting = model.variants.filter((v) => {
+    const compat = getCompatibility(v.vramGb, vramAvailable);
+    return compat === "excellent" || compat === "good";
+  });
+  return fitting.length > 0 ? fitting[fitting.length - 1] : model.variants[0];
+}

@@ -263,7 +263,7 @@ class OllamaAPI {
       const data = await response.json();
       throw new Error(data.error || "Failed to check local capability");
     }
-    return response.json(); // { models: [{ ...model, cpuFeasibility }] }
+    return response.json(); // { models: [{ ...model, cpuFeasibility }], hardware }
   }
 }
 

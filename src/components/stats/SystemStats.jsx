@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ollamaApi } from "../../services/ollamaApi.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { formatBytes } from "../../utils/formatters.js";
+import { fetchHardwareInfo } from "../../services/hardwareApi.js";
 import StatCard from "./StatCard.jsx";
 import GpuStats from "./GpuStats.jsx";
 import "./SystemStats.css";
@@ -10,6 +11,7 @@ export default function SystemStats() {
   const { localModels, unloadModel } = useModelsStore();
   const [runningModels, setRunningModels] = useState([]);
   const [unloadingModel, setUnloadingModel] = useState(null);
+  const [hardware, setHardware] = useState(null);
 
   const fetchRunning = async () => {
     try {
@@ -24,6 +26,12 @@ export default function SystemStats() {
     fetchRunning();
     const id = setInterval(fetchRunning, 5000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    fetchHardwareInfo().then((data) => {
+      if (data.ok) setHardware(data);
+    });
   }, []);
 
   const handleUnload = async (modelName) => {
@@ -60,6 +68,20 @@ export default function SystemStats() {
           value={runningModels.length}
           color="#fcd34d"
         />
+        {hardware && (
+          <>
+            <StatCard
+              label="System RAM"
+              value={`${hardware.ram.totalGb} GB`}
+              color="#c4b5fd"
+            />
+            <StatCard
+              label="CPU"
+              value={`${hardware.cpu.cores} cores`}
+              color="#ff8fab"
+            />
+          </>
+        )}
       </div>
 
       <GpuStats />

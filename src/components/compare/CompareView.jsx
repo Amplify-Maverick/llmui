@@ -3,7 +3,7 @@ import { useCompareStreams } from "../../hooks/useCompareStreams.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useChatStore } from "../../stores/chatStore.js";
 import { fetchGpuStats } from "../../services/gpuApi.js";
-import { detectGPU } from "../../utils/hardwareDetection.js";
+import { fetchHardwareInfo, getAvailableCapacity } from "../../services/hardwareApi.js";
 import { formatBytes } from "../../utils/formatters.js";
 import CompareColumn from "./CompareColumn.jsx";
 import MessageInput from "../chat/MessageInput.jsx";
@@ -12,6 +12,7 @@ import "./CompareView.css";
 export default function CompareView({ models, onPickResponse, onSaveComplete }) {
   const [userPrompt, setUserPrompt] = useState(null);
   const [gpuVram, setGpuVram] = useState(null);
+  const [hasGpu, setHasGpu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { streams, startCompare, stopAll, stopOne, reset, anyStreaming, allComplete } =
     useCompareStreams();
@@ -19,24 +20,27 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
   const { localModels, runningModels } = useModelsStore();
   const { saveCompareConversation } = useChatStore();
 
-  // Fetch GPU VRAM on mount
+  // Fetch available capacity on mount — the server actually running Ollama,
+  // not the browser viewing this dashboard.
   useEffect(() => {
-    const getGpuVram = async () => {
+    const getCapacity = async () => {
       // Try live GPU stats first
       const stats = await fetchGpuStats();
       if (stats.ok && stats.gpus?.length > 0) {
         // Sum all GPU VRAM (MiB to bytes)
         const totalVram = stats.gpus.reduce((sum, gpu) => sum + gpu.memoryTotal, 0);
         setGpuVram(totalVram * 1024 * 1024);
+        setHasGpu(true);
         return;
       }
-      // Fall back to WebGL detection (GB to bytes)
-      const detected = detectGPU();
-      if (detected.vram) {
-        setGpuVram(detected.vram * 1024 * 1024 * 1024);
+      // No GPU on the server — fall back to its usable system RAM.
+      const hardware = await fetchHardwareInfo();
+      const capacityGb = getAvailableCapacity(hardware);
+      if (capacityGb) {
+        setGpuVram(capacityGb * 1024 ** 3);
       }
     };
-    getGpuVram();
+    getCapacity();
   }, []);
 
   // Estimate VRAM for a model
@@ -115,10 +119,12 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
         <div className="compare-vram-warning">
           <span className="compare-vram-warning-icon">!</span>
           <div className="compare-vram-warning-content">
-            <strong>VRAM Warning:</strong> Selected models may require{" "}
-            {formatBytes(totalEstimatedVram)} of VRAM, exceeding your GPU's{" "}
-            {formatBytes(gpuVram)}. Ollama will swap models between GPU and RAM,
-            reducing parallelism and speed.
+            <strong>{hasGpu ? "VRAM" : "Memory"} Warning:</strong> Selected models may require{" "}
+            {formatBytes(totalEstimatedVram)}, exceeding this server's{" "}
+            {hasGpu ? "GPU VRAM" : "usable RAM"} of {formatBytes(gpuVram)}.{" "}
+            {hasGpu
+              ? "Ollama will swap models between GPU and RAM, reducing parallelism and speed."
+              : "Running these together may be very slow or cause Ollama to swap models in and out."}
           </div>
         </div>
       )}

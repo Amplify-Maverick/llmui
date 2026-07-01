@@ -76,6 +76,16 @@
   gap: 6px;
 }
 
+.hw-model-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid;
+  background: rgba(0, 0, 0, 0.2);
+}
+
 /* ── Not Detected ────────────────────────────────────────── */
 .hw-not-detected {
   background: var(--color-danger-bg);

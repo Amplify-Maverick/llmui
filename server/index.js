@@ -70,10 +70,31 @@ async function saveOllamaConfig() {
   await fs.writeFile(OLLAMA_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
-function getCpuFeasibility(sizeBytes) {
+/**
+ * Rate how well a model (by its on-disk size) fits this machine's detected
+ * capacity (GPU VRAM if present, else system RAM). A model's disk size is a
+ * close proxy for the RAM/VRAM it needs to load, plus headroom for context
+ * and runtime overhead — so this scales with real hardware instead of fixed
+ * absolute thresholds that are wrong on both very small and very large boxes.
+ */
+function getModelFeasibility(sizeBytes, hardware) {
   const GB = 1024 ** 3;
-  if (sizeBytes < 4 * GB) return "good";
-  if (sizeBytes < 8 * GB) return "slow";
+  const requiredGb = (sizeBytes / GB) * 1.2;
+
+  const capacityGb = hardware?.totalVramGb ?? (
+    hardware?.ram?.totalGb ? hardware.ram.totalGb * 0.75 : null
+  );
+
+  if (!capacityGb) {
+    // Hardware unknown — fall back to the old conservative absolute bands.
+    if (sizeBytes < 4 * GB) return "good";
+    if (sizeBytes < 8 * GB) return "slow";
+    return "poor";
+  }
+
+  const ratio = capacityGb / requiredGb;
+  if (ratio >= 1.3) return "good";
+  if (ratio >= 0.9) return "slow";
   return "poor";
 }
 
@@ -329,21 +350,23 @@ app.put("/ollama/switch", requireAuth, async (req, res) => {
   }
 });
 
-// GET /ollama/local-capability - Check which models on local Ollama can run on CPU
+// GET /ollama/local-capability - Check which models on local Ollama can run,
+// rated against this machine's actually detected RAM/VRAM (not just model size).
 app.get("/ollama/local-capability", requireAuth, async (req, res) => {
   try {
-    const response = await fetch(`${DEFAULT_OLLAMA_URL}/api/tags`, {
-      signal: AbortSignal.timeout(5000),
-    });
+    const [response, hardware] = await Promise.all([
+      fetch(`${DEFAULT_OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) }),
+      getLocalHardwareInfo(),
+    ]);
     if (!response.ok) {
       return res.status(502).json({ error: "Local Ollama not reachable" });
     }
     const data = await response.json();
     const models = (data.models || []).map((model) => ({
       ...model,
-      cpuFeasibility: getCpuFeasibility(model.size || 0),
+      cpuFeasibility: getModelFeasibility(model.size || 0, hardware),
     }));
-    res.json({ models });
+    res.json({ models, hardware });
   } catch {
     res.status(502).json({ error: "Failed to connect to local Ollama" });
   }
@@ -795,6 +818,9 @@ const NVIDIA_SMI_ARGS = [
 let gpuCache = { data: null, timestamp: 0 };
 let nvidiaSmiProcess = null;
 let nvidiaSmiBuffer = "";
+// Set once nvidia-smi is confirmed missing (ENOENT), so we stop respawning it
+// on every poll (GpuMini/GpuStats poll /api/gpu every 2s) on GPU-less machines.
+let nvidiaSmiUnavailable = false;
 
 /**
  * Parse a single CSV line from nvidia-smi output into a GPU object.
@@ -823,6 +849,7 @@ function parseGpuLine(line) {
  */
 function startNvidiaSmiLoop() {
   if (nvidiaSmiProcess) return; // Already running
+  if (nvidiaSmiUnavailable) return; // Confirmed missing, don't keep retrying
 
   try {
     nvidiaSmiProcess = spawn("nvidia-smi", NVIDIA_SMI_ARGS, {
@@ -860,7 +887,12 @@ function startNvidiaSmiLoop() {
     });
 
     nvidiaSmiProcess.on("error", (err) => {
-      console.error("nvidia-smi process error:", err);
+      if (err.code === "ENOENT") {
+        nvidiaSmiUnavailable = true;
+        console.log("nvidia-smi not found; disabling GPU monitoring for this session");
+      } else {
+        console.error("nvidia-smi process error:", err);
+      }
       nvidiaSmiProcess = null;
     });
 
@@ -890,8 +922,10 @@ function stopNvidiaSmiLoop() {
 }
 
 app.get("/api/gpu", requireAuth, async (req, res) => {
-  // Proxy to remote GPU stats server if configured
-  if (remoteGpuUrl) {
+  // Proxy to remote GPU stats server if configured — but not when the
+  // Local/Remote switcher has explicitly selected "local", so switching to
+  // Local actually reports on this machine instead of a stale remote box.
+  if (remoteGpuUrl && activeTarget !== "local") {
     try {
       const response = await fetch(`${remoteGpuUrl}/api/gpu`, {
         signal: AbortSignal.timeout(5000),
@@ -908,7 +942,7 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
   }
 
   // Start the persistent process on first request (lazy initialization)
-  if (!nvidiaSmiProcess) {
+  if (!nvidiaSmiProcess && !nvidiaSmiUnavailable) {
     startNvidiaSmiLoop();
     // Give it a moment to produce first output
     await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -922,41 +956,24 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
   // No data yet (nvidia-smi might not be available)
   res.status(500).json({
     ok: false,
-    error: "nvidia-smi not available or no data yet",
+    error: nvidiaSmiUnavailable ? "No NVIDIA GPU detected on this machine" : "nvidia-smi not available or no data yet",
   });
 });
 
-// ============================================================
-// Hardware info endpoint (authenticated)
-// Returns system RAM + GPU VRAM. When remoteGpuUrl is set, fetches from
-// the remote GPU stats server (the machine actually doing compute).
-// ============================================================
-app.get("/api/hardware", requireAuth, async (req, res) => {
-  if (remoteGpuUrl) {
-    try {
-      const response = await fetch(`${remoteGpuUrl}/api/hardware`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await response.json();
-      return res.json(data);
-    } catch (err) {
-      return res.status(502).json({
-        ok: false,
-        error: `Cannot reach remote GPU stats server: ${err.message}`,
-      });
-    }
-  }
-
-  const totalRamBytes = os.totalmem();
-  const freeRamBytes = os.freemem();
-  const totalRamGb = +(totalRamBytes / (1024 ** 3)).toFixed(1);
-  const freeRamGb = +(freeRamBytes / (1024 ** 3)).toFixed(1);
+/**
+ * Detect this machine's CPU/RAM/GPU. Shared by /api/hardware (local case)
+ * and /ollama/local-capability, so both use the same real numbers instead
+ * of local-capability's previous size-only heuristic.
+ */
+async function getLocalHardwareInfo() {
+  const totalRamGb = +(os.totalmem() / (1024 ** 3)).toFixed(1);
+  const freeRamGb = +(os.freemem() / (1024 ** 3)).toFixed(1);
   const cpuModel = os.cpus()[0]?.model || "Unknown";
   const cpuCores = os.cpus().length;
 
   // GPU info from nvidia-smi cache (if available)
   let gpus = [];
-  if (!nvidiaSmiProcess) {
+  if (!nvidiaSmiProcess && !nvidiaSmiUnavailable) {
     startNvidiaSmiLoop();
     await new Promise((resolve) => setTimeout(resolve, 1100));
   }
@@ -977,13 +994,40 @@ app.get("/api/hardware", requireAuth, async (req, res) => {
     ? +gpus.reduce((sum, g) => sum + g.vramTotalGb, 0).toFixed(1)
     : null;
 
-  res.json({
+  return {
     ok: true,
+    platform: os.platform(),
+    arch: os.arch(),
     cpu: { model: cpuModel, cores: cpuCores },
     ram: { totalGb: totalRamGb, freeGb: freeRamGb },
     gpus,
     totalVramGb,
-  });
+  };
+}
+
+// ============================================================
+// Hardware info endpoint (authenticated)
+// Returns system RAM + GPU VRAM. When remoteGpuUrl is set AND the switcher
+// isn't pinned to "local", fetches from the remote GPU stats server (the
+// machine actually doing compute) instead of this one.
+// ============================================================
+app.get("/api/hardware", requireAuth, async (req, res) => {
+  if (remoteGpuUrl && activeTarget !== "local") {
+    try {
+      const response = await fetch(`${remoteGpuUrl}/api/hardware`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await response.json();
+      return res.json(data);
+    } catch (err) {
+      return res.status(502).json({
+        ok: false,
+        error: `Cannot reach remote GPU stats server: ${err.message}`,
+      });
+    }
+  }
+
+  res.json(await getLocalHardwareInfo());
 });
 
 // ============================================================

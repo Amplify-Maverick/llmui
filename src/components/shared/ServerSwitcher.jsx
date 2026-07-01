@@ -22,16 +22,24 @@ function formatSize(bytes) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
 }
 
-function CapabilityModal({ models, onClose }) {
+function CapabilityModal({ models, hardware, onClose }) {
+  const hasGpu = hardware?.gpus?.length > 0;
+  const capacityGb = hasGpu ? hardware.totalVramGb : hardware?.ram?.totalGb;
+  const capacityLabel = hasGpu ? "VRAM" : "RAM";
+
   return (
     <div className="server-capability-backdrop" onClick={onClose}>
       <div className="server-capability-modal" onClick={(e) => e.stopPropagation()}>
         <div className="server-capability-header">
-          <span>Local CPU model check</span>
+          <span>Local model check</span>
           <button className="server-capability-close" onClick={onClose}>✕</button>
         </div>
         <p className="server-capability-desc">
-          Running on local without a GPU. Feasibility is based on model size.
+          {hasGpu
+            ? `Feasibility is based on this machine's detected ${capacityGb} GB ${capacityLabel}.`
+            : capacityGb
+              ? `No GPU detected — running on CPU. Feasibility is based on this machine's ${capacityGb} GB ${capacityLabel}.`
+              : "Feasibility is based on model size (hardware detection unavailable)."}
         </p>
         {models.length === 0 ? (
           <p className="server-capability-empty">No models found in local Ollama.</p>
@@ -66,7 +74,7 @@ export default function ServerSwitcher() {
       setChecking(true);
       try {
         const result = await ollamaApi.getLocalCapability();
-        setCapability(result.models);
+        setCapability(result);
       } catch {
         // capability check failed (local Ollama not running), still switched
       } finally {
@@ -131,7 +139,11 @@ export default function ServerSwitcher() {
       </div>
 
       {capability !== null && (
-        <CapabilityModal models={capability} onClose={() => setCapability(null)} />
+        <CapabilityModal
+          models={capability.models}
+          hardware={capability.hardware}
+          onClose={() => setCapability(null)}
+        />
       )}
     </>
   );

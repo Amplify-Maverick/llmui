@@ -2,12 +2,14 @@ import { useState, useEffect, useMemo } from "react";
 import Modal from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
 import Input from "../shared/Input.jsx";
-import { fetchHardwareInfo } from "../../services/hardwareApi.js";
+import { fetchHardwareInfo, getAvailableCapacity } from "../../services/hardwareApi.js";
 import {
   MODEL_CATALOG,
   MODEL_CATEGORIES,
   getCompatibility,
   COMPAT_LABELS,
+  COMPAT_RANK,
+  pickBestVariant,
 } from "../../constants/modelCatalog.js";
 import "./ModelPullDialog.css";
 
@@ -52,14 +54,7 @@ export default function ModelPullDialog({
   }, [localModels]);
 
   // Determine available VRAM (use server-reported GPU, fallback to RAM-based estimate)
-  const availableVram = useMemo(() => {
-    if (!hardware) return null;
-    if (hardware.totalVramGb) return hardware.totalVramGb;
-    // Fallback: if no GPU detected, use ~75% of system RAM as an estimate
-    // (models can run on CPU with system RAM)
-    if (hardware.ram?.totalGb) return +(hardware.ram.totalGb * 0.75).toFixed(1);
-    return null;
-  }, [hardware]);
+  const availableVram = useMemo(() => getAvailableCapacity(hardware), [hardware]);
 
   // Filter catalog
   const filteredModels = useMemo(() => {
@@ -79,8 +74,17 @@ export default function ModelPullDialog({
       );
     }
 
+    // Surface the best-fitting models for this machine first.
+    if (availableVram) {
+      models = [...models].sort((a, b) => {
+        const rankA = COMPAT_RANK[getCompatibility(pickBestVariant(a, availableVram).vramGb, availableVram)];
+        const rankB = COMPAT_RANK[getCompatibility(pickBestVariant(b, availableVram).vramGb, availableVram)];
+        return rankA - rankB;
+      });
+    }
+
     return models;
-  }, [category, search]);
+  }, [category, search, availableVram]);
 
   const handlePullVariant = (modelName, tag) => {
     const fullName = tag === "latest" ? modelName : `${modelName}:${tag}`;
@@ -243,16 +247,11 @@ function CatalogModelCard({ model, availableVram, hasGpu, installedSet, onPull }
   const [expanded, setExpanded] = useState(false);
   const showVariants = model.variants.length > 1;
 
-  // Pick the "default" variant (first one that fits, or the smallest)
-  const bestVariant = useMemo(() => {
-    if (!availableVram) return model.variants[0];
-    const fitting = model.variants.filter((v) => {
-      const compat = getCompatibility(v.vramGb, availableVram);
-      return compat === "excellent" || compat === "good";
-    });
-    // Return the largest fitting variant, or the smallest if none fit
-    return fitting.length > 0 ? fitting[fitting.length - 1] : model.variants[0];
-  }, [model.variants, availableVram]);
+  // Pick the "default" variant (largest one that fits, or the smallest)
+  const bestVariant = useMemo(
+    () => pickBestVariant(model, availableVram),
+    [model, availableVram]
+  );
 
   return (
     <div className="catalog-card">

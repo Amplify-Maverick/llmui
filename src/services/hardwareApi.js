@@ -20,3 +20,16 @@ export async function fetchHardwareInfo() {
     return { ok: false, error: err.message };
   }
 }
+
+/**
+ * Derives how much memory is available for loading a model on this machine:
+ * GPU VRAM if a dedicated GPU was detected, otherwise an estimate of usable
+ * system RAM (models can run on CPU, but the OS and other processes need
+ * headroom too).
+ */
+export function getAvailableCapacity(hardware) {
+  if (!hardware) return null;
+  if (hardware.totalVramGb) return hardware.totalVramGb;
+  if (hardware.ram?.totalGb) return +(hardware.ram.totalGb * 0.75).toFixed(1);
+  return null;
+}
