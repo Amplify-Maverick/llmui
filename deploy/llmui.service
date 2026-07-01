@@ -1,0 +1,24 @@
+# /etc/systemd/system/llmui.service
+# Install:
+#   sudo cp deploy/llmui.service /etc/systemd/system/llmui.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now llmui.service
+#
+# Note: ExecStart path is pinned to the nvm Node version active at install time.
+# If you upgrade Node via nvm, update the path here and run daemon-reload.
+[Unit]
+Description=LLMUI — Local LLM Web Interface
+After=network.target
+
+[Service]
+User=shogun
+Group=shogun
+WorkingDirectory=/home/shogun/Projects/llmui
+Environment=PATH=/home/shogun/.nvm/versions/node/v24.16.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LLMUI_ALLOWED_ORIGINS=https://box.tailde6c83.ts.net:8446
+ExecStart=/home/shogun/.nvm/versions/node/v24.16.0/bin/npm run dev
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

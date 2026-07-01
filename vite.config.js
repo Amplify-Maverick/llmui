@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true, // bind to 0.0.0.0 so Tailscale clients can reach the dev server
+    allowedHosts: ["box.tailde6c83.ts.net"],
     proxy: {
       // Forward all backend routes to the Express server on 3001.
       // This lets remote clients (Tailscale, LAN) use relative URLs without
