@@ -40,14 +40,18 @@ export default function App() {
   }, [setupComplete, loadSettings, loadConversations]);
 
   // Apply theme to document, including the browser chrome color (Safari's
-  // address bar / toolbar default to white and ignore page CSS entirely
-  // unless this meta tag tells them otherwise).
+  // status bar / toolbar default to white and ignore page CSS entirely
+  // unless a theme-color meta tag tells them otherwise). Both the dark- and
+  // light-scoped tags are kept pointed at the app's actual active theme
+  // color, since which one Safari trusts depends on the device's own
+  // system appearance setting, not the app's in-app theme choice.
   useEffect(() => {
     const resolvedTheme = theme || 'dark';
     document.documentElement.setAttribute('data-theme', resolvedTheme);
+    const color = resolvedTheme === 'light' ? '#f1f5f9' : '#08080c';
     document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute('content', resolvedTheme === 'light' ? '#f1f5f9' : '#08080c');
+      .querySelectorAll('meta[name="theme-color"]')
+      .forEach((meta) => meta.setAttribute('content', color));
   }, [theme]);
 
   // Keyboard shortcuts handlers
