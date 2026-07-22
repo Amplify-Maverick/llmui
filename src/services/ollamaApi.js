@@ -5,7 +5,7 @@
 
 import { authHeaders } from "./auth.js";
 
-const AUTH_SERVER = "http://localhost:3001";
+const AUTH_SERVER = "";
 
 class OllamaAPI {
   async listModels() {

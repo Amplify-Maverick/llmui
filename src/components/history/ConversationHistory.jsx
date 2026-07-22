@@ -164,7 +164,7 @@ export default function ConversationHistory() {
     if (!exportModal) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/export/conversations/${exportModal}?format=${format}`, {
+      const response = await fetch(`/api/export/conversations/${exportModal}?format=${format}`, {
         headers: await authHeaders()
       });
 
@@ -205,7 +205,7 @@ export default function ConversationHistory() {
     if (selectedIds.size === 0) return;
 
     try {
-      const response = await fetch('http://localhost:3001/api/export/bulk', {
+      const response = await fetch('/api/export/bulk', {
         method: 'POST',
         headers: await authHeaders(),
         body: JSON.stringify({ ids: [...selectedIds], format })
