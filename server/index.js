@@ -159,11 +159,11 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g., curl, mobile apps, same-origin)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      // Disallowed origins get no CORS headers rather than an error: throwing
+      // here turns every request into an opaque HTML 500, which is impossible
+      // to debug from the client. Omitting the headers lets the browser
+      // enforce the policy, and auth still gates every endpoint.
+      callback(null, !origin || allowedOrigins.includes(origin));
     },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
