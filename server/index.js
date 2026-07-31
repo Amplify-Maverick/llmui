@@ -38,6 +38,14 @@ let authToken = null;
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 let ollamaUrl = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
 
+// When set, GPU/hardware stats are fetched from a remote gpu-stats-server
+// instead of running nvidia-smi locally (this machine may have no NVIDIA GPU).
+let remoteGpuUrl = process.env.REMOTE_GPU_URL || null;
+
+// Other keys present in the config file that this server doesn't own
+// (e.g. remoteOllamaUrl, activeTarget). Preserved verbatim on save.
+let ollamaConfigExtras = {};
+
 async function loadOllamaConfig() {
   try {
     const data = await fs.readFile(OLLAMA_CONFIG_FILE, "utf-8");
@@ -45,6 +53,11 @@ async function loadOllamaConfig() {
     if (config.ollamaUrl) {
       ollamaUrl = config.ollamaUrl;
     }
+    if (config.remoteGpuUrl && !process.env.REMOTE_GPU_URL) {
+      remoteGpuUrl = config.remoteGpuUrl;
+    }
+    const { ollamaUrl: _u, remoteGpuUrl: _g, ...extras } = config;
+    ollamaConfigExtras = extras;
   } catch (err) {
     if (err.code !== "ENOENT") {
       console.error("Error loading Ollama config:", err);
@@ -57,7 +70,7 @@ async function saveOllamaConfig() {
   await ensureStorageDir();
   await fs.writeFile(
     OLLAMA_CONFIG_FILE,
-    JSON.stringify({ ollamaUrl }, null, 2)
+    JSON.stringify({ ...ollamaConfigExtras, ollamaUrl, remoteGpuUrl }, null, 2)
   );
 }
 
@@ -819,6 +832,24 @@ function stopNvidiaSmiLoop() {
 }
 
 app.get("/api/gpu", requireAuth, async (req, res) => {
+  // Proxy to the remote GPU stats server when configured — the compute box
+  // is a different machine, so nvidia-smi doesn't exist here.
+  if (remoteGpuUrl) {
+    try {
+      const response = await fetch(`${remoteGpuUrl}/api/gpu`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await response.json();
+      res.set("Cache-Control", "max-age=1");
+      return res.json(data);
+    } catch (err) {
+      return res.status(502).json({
+        ok: false,
+        error: `Cannot reach remote GPU stats server: ${err.message}`,
+      });
+    }
+  }
+
   // Start the persistent process on first request (lazy initialization)
   if (!nvidiaSmiProcess) {
     startNvidiaSmiLoop();
