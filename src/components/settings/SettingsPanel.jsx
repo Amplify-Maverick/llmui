@@ -16,6 +16,12 @@ export default function SettingsPanel() {
     activeTarget,
     ollamaUrlLoading,
     ollamaUrlError,
+    comfyuiUrl,
+    comfyuiUrlLoading,
+    comfyuiUrlError,
+    comfyModelsPath,
+    comfyModelsPathLoading,
+    comfyModelsPathError,
     defaultModel,
     enableThinking,
     enableTools,
@@ -24,6 +30,8 @@ export default function SettingsPanel() {
     updateSetting,
     updateOllamaUrl,
     updateRemoteOllamaUrl,
+    updateComfyuiUrl,
+    updateComfyModelsPath,
   } = useSettingsStore();
 
   const { localModels, fetchModels } = useModelsStore();
@@ -34,6 +42,10 @@ export default function SettingsPanel() {
   const [urlSaved, setUrlSaved] = useState(false);
   const [remoteUrlInput, setRemoteUrlInput] = useState(remoteOllamaUrl || "");
   const [remoteUrlSaved, setRemoteUrlSaved] = useState(false);
+  const [comfyUrlInput, setComfyUrlInput] = useState(comfyuiUrl);
+  const [comfyUrlSaved, setComfyUrlSaved] = useState(false);
+  const [modelsPathInput, setModelsPathInput] = useState(comfyModelsPath);
+  const [modelsPathSaved, setModelsPathSaved] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -44,6 +56,14 @@ export default function SettingsPanel() {
   useEffect(() => {
     setRemoteUrlInput(remoteOllamaUrl || "");
   }, [remoteOllamaUrl]);
+
+  useEffect(() => {
+    setComfyUrlInput(comfyuiUrl);
+  }, [comfyuiUrl]);
+
+  useEffect(() => {
+    setModelsPathInput(comfyModelsPath);
+  }, [comfyModelsPath]);
 
   useEffect(() => {
     fetchModels();
@@ -252,6 +272,122 @@ export default function SettingsPanel() {
           URL of the remote GPU machine&apos;s Ollama server. Once set, the header toggle enables one-click switching.
         </p>
       </div>
+
+      <div className="settings-section">
+        <label className="settings-label">ComfyUI Server URL</label>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            value={comfyUrlInput}
+            onChange={(e) => setComfyUrlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && comfyUrlInput !== comfyuiUrl) {
+                setComfyUrlSaved(false);
+                updateComfyuiUrl(comfyUrlInput)
+                  .then(() => {
+                    setComfyUrlSaved(true);
+                    setTimeout(() => setComfyUrlSaved(false), 2000);
+                  })
+                  .catch(() => {});
+              }
+            }}
+            placeholder="http://localhost:8188"
+            disabled={comfyuiUrlLoading}
+          />
+          <button
+            className="btn btn-sm"
+            onClick={async () => {
+              if (comfyUrlInput === comfyuiUrl) return;
+              setComfyUrlSaved(false);
+              try {
+                await updateComfyuiUrl(comfyUrlInput);
+                setComfyUrlSaved(true);
+                setTimeout(() => setComfyUrlSaved(false), 2000);
+              } catch {
+                // Error is set in the store
+              }
+            }}
+            disabled={comfyuiUrlLoading || comfyUrlInput === comfyuiUrl}
+            style={{ whiteSpace: "nowrap" }}
+          >
+            {comfyuiUrlLoading ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {comfyuiUrlError && (
+          <p className="settings-description" style={{ color: "#f87171" }}>
+            Error: {comfyuiUrlError}
+          </p>
+        )}
+        {comfyUrlSaved && (
+          <p className="settings-description" style={{ color: "#6ee7b7" }}>
+            ComfyUI URL updated successfully.
+          </p>
+        )}
+        <p className="settings-description">
+          The URL where your ComfyUI server is running for image generation.
+          ComfyUI must be installed and running separately.
+        </p>
+      </div>
+
+      <div className="settings-section">
+        <label className="settings-label">ComfyUI Models Path</label>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            value={modelsPathInput}
+            onChange={(e) => setModelsPathInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && modelsPathInput !== comfyModelsPath) {
+                setModelsPathSaved(false);
+                updateComfyModelsPath(modelsPathInput)
+                  .then(() => {
+                    setModelsPathSaved(true);
+                    setTimeout(() => setModelsPathSaved(false), 2000);
+                  })
+                  .catch(() => {});
+              }
+            }}
+            placeholder="/path/to/ComfyUI/models"
+            disabled={comfyModelsPathLoading}
+          />
+          <button
+            className="btn btn-sm"
+            onClick={async () => {
+              if (modelsPathInput === comfyModelsPath) return;
+              setModelsPathSaved(false);
+              try {
+                await updateComfyModelsPath(modelsPathInput);
+                setModelsPathSaved(true);
+                setTimeout(() => setModelsPathSaved(false), 2000);
+              } catch {
+                // Error is set in the store
+              }
+            }}
+            disabled={comfyModelsPathLoading || modelsPathInput === comfyModelsPath}
+            style={{ whiteSpace: "nowrap" }}
+          >
+            {comfyModelsPathLoading ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {comfyModelsPathError && (
+          <p className="settings-description" style={{ color: "#f87171" }}>
+            Error: {comfyModelsPathError}
+          </p>
+        )}
+        {modelsPathSaved && (
+          <p className="settings-description" style={{ color: "#6ee7b7" }}>
+            Models path updated successfully.
+          </p>
+        )}
+        <p className="settings-description">
+          The absolute path to your ComfyUI models directory (e.g., /home/user/ComfyUI/models).
+          Required for downloading models from Civitai. The server must have write access to this directory.
+        </p>
+      </div>
+
+      <div className="settings-divider" />
 
       <div className="settings-section">
         <label className="settings-label">Default Model</label>

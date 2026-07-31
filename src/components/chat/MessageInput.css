@@ -125,6 +125,59 @@
   opacity: 1;
 }
 
+/* ── Text / Code Attachments ────────────────────────────── */
+.message-input-files {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 0;
+  flex-wrap: wrap;
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: 12px;
+}
+
+.file-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.file-chip-size {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.file-chip-remove {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.file-chip-remove:hover {
+  background: var(--color-danger);
+  color: white;
+}
+
 /* ── Drag Overlay ───────────────────────────────────────── */
 .drag-overlay {
   position: absolute;

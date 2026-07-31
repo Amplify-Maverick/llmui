@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../constants/config.js";
 import { MODE_TAGS } from "../constants/modeTags.js";
 import { loadFromStorage, saveToStorage } from "../utils/storage.js";
 import { ollamaApi } from "../services/ollamaApi.js";
+import { comfyApi } from "../services/comfyApi.js";
 
 export const useSettingsStore = create((set, get) => ({
   ...DEFAULT_SETTINGS,
@@ -15,6 +16,14 @@ export const useSettingsStore = create((set, get) => ({
   ollamaUrlError: null,
   serverSwitching: false,
   serverSwitchError: null,
+  // ComfyUI URL is also managed server-side
+  comfyuiUrl: "http://localhost:8188",
+  comfyuiUrlLoading: false,
+  comfyuiUrlError: null,
+  // ComfyUI models path for downloading models
+  comfyModelsPath: "",
+  comfyModelsPathLoading: false,
+  comfyModelsPathError: null,
   isLoading: true,
 
   loadSettings: async () => {
@@ -60,6 +69,22 @@ export const useSettingsStore = create((set, get) => ({
     } catch {
       // keep last known status on a transient client-side fetch failure
     }
+
+    // Load ComfyUI URL from server
+    try {
+      const url = await comfyApi.getConfig();
+      set({ comfyuiUrl: url });
+    } catch (error) {
+      console.error("Failed to load ComfyUI URL from server:", error);
+    }
+
+    // Load ComfyUI models path from server
+    try {
+      const modelsPath = await comfyApi.getModelsPath();
+      set({ comfyModelsPath: modelsPath });
+    } catch (error) {
+      console.error("Failed to load ComfyUI models path from server:", error);
+    }
   },
 
   updateSetting: (key, value) => {
@@ -101,6 +126,17 @@ export const useSettingsStore = create((set, get) => ({
     }
   },
 
+  updateComfyuiUrl: async (url) => {
+    set({ comfyuiUrlLoading: true, comfyuiUrlError: null });
+    try {
+      await comfyApi.setConfig(url);
+      set({ comfyuiUrl: url, comfyuiUrlLoading: false });
+    } catch (error) {
+      set({ comfyuiUrlError: error.message, comfyuiUrlLoading: false });
+      throw error;
+    }
+  },
+
   switchServer: async (target) => {
     set({ serverSwitching: true, serverSwitchError: null });
     try {
@@ -109,6 +145,17 @@ export const useSettingsStore = create((set, get) => ({
       return result;
     } catch (error) {
       set({ serverSwitchError: error.message, serverSwitching: false });
+      throw error;
+    }
+  },
+
+  updateComfyModelsPath: async (path) => {
+    set({ comfyModelsPathLoading: true, comfyModelsPathError: null });
+    try {
+      await comfyApi.setModelsPath(path);
+      set({ comfyModelsPath: path, comfyModelsPathLoading: false });
+    } catch (error) {
+      set({ comfyModelsPathError: error.message, comfyModelsPathLoading: false });
       throw error;
     }
   },

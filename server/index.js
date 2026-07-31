@@ -20,6 +20,7 @@ import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
 import setupRouter from "./api/setup.js";
+import comfyuiRouter from "./api/comfyui.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +31,7 @@ const PORT = 3001;
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
 const TOKEN_FILE = path.join(STORAGE_DIR, "token");
 const OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
+const COMFYUI_CONFIG_FILE = path.join(STORAGE_DIR, "comfyui_config.json");
 
 let authToken = null;
 
@@ -137,6 +139,38 @@ function getModelFeasibility(sizeBytes, hardware) {
   return "poor";
 }
 
+// Default ComfyUI URL, overridable by env var or persisted config
+const DEFAULT_COMFYUI_URL = "http://localhost:8188";
+let comfyuiUrl = process.env.COMFYUI_URL || DEFAULT_COMFYUI_URL;
+let comfyModelsPath = "";
+
+async function loadComfyuiConfig() {
+  try {
+    const data = await fs.readFile(COMFYUI_CONFIG_FILE, "utf-8");
+    const config = JSON.parse(data);
+    if (config.comfyuiUrl) {
+      comfyuiUrl = config.comfyuiUrl;
+    }
+    if (config.comfyModelsPath) {
+      comfyModelsPath = config.comfyModelsPath;
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("Error loading ComfyUI config:", err);
+    }
+  }
+}
+
+async function saveComfyuiConfig(url, modelsPathOverride) {
+  await ensureStorageDir();
+  if (typeof url === "string") comfyuiUrl = url;
+  if (typeof modelsPathOverride === "string") comfyModelsPath = modelsPathOverride;
+  await fs.writeFile(
+    COMFYUI_CONFIG_FILE,
+    JSON.stringify({ comfyuiUrl, comfyModelsPath }, null, 2)
+  );
+}
+
 function validateOllamaUrl(url) {
   try {
     const parsed = new URL(url);
@@ -203,11 +237,11 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g., curl, mobile apps, same-origin)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      // Disallowed origins get no CORS headers rather than an error: throwing
+      // here turns every request into an opaque HTML 500, which is impossible
+      // to debug from the client. Omitting the headers lets the browser
+      // enforce the policy, and auth still gates every endpoint.
+      callback(null, !origin || allowedOrigins.includes(origin));
     },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -1150,6 +1184,7 @@ app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
 app.use("/api/export", requireAuth, exportRouter);
+app.use("/comfyui", requireAuth, comfyuiRouter);
 
 // ============================================================
 // Startup
@@ -1161,6 +1196,13 @@ await ensureStorageDir();
 await getOrCreateToken();
 await loadOllamaConfig();
 startRemoteHealthPoll();
+
+await loadComfyuiConfig();
+
+// Make ComfyUI URL and models path available to the router via app.set
+app.set("comfyuiUrl", comfyuiUrl);
+app.set("comfyModelsPath", comfyModelsPath);
+app.set("saveComfyuiConfig", saveComfyuiConfig);
 
 // Initialize database and run migration if needed
 console.log("Initializing database...");

@@ -1,5 +1,6 @@
 export const TABS = {
   chat: { key: "chat", label: "Chat", color: "#6ee7b7" },
+  image: { key: "image", label: "Image", color: "#f472b6" },
   models: { key: "models", label: "Models", color: "#60a5fa" },
   stats: { key: "stats", label: "System", color: "#fcd34d" },
   settings: { key: "settings", label: "Settings", color: "#c4b5fd" },

@@ -1,10 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Button from "../shared/Button.jsx";
 import MessageTemplates from "./MessageTemplates.jsx";
+import {
+  ACCEPTED_TEXT_EXTENSIONS,
+  MAX_TEXT_FILE_SIZE,
+  composePrompt,
+  isTextFile,
+  languageForFile,
+} from "../../utils/textFiles.js";
+import { formatBytes } from "../../utils/formatters.js";
 import "./MessageInput.css";
 
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_TEXT_EXTENSIONS];
 
 export default function MessageInput({
   onSend,
@@ -15,6 +24,7 @@ export default function MessageInput({
 }) {
   const [value, setValue] = useState("");
   const [images, setImages] = useState([]);
+  const [textFiles, setTextFiles] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef(null);
@@ -27,12 +37,20 @@ export default function MessageInput({
     }
   }, [value]);
 
+  // Keep the token counter honest: attachments are part of the prompt even
+  // though they live outside the textarea.
+  useEffect(() => {
+    onInputChange?.(composePrompt(value, textFiles));
+  }, [value, textFiles, onInputChange]);
+
+  const hasContent = value.trim() || images.length > 0 || textFiles.length > 0;
+
   const handleSubmit = () => {
-    if ((value.trim() || images.length > 0) && !disabled && !isStreaming) {
-      onSend(value.trim(), images);
+    if (hasContent && !disabled && !isStreaming) {
+      onSend(composePrompt(value.trim(), textFiles), images);
       setValue("");
       setImages([]);
-      onInputChange?.("");
+      setTextFiles([]);
     }
   };
 
@@ -43,14 +61,9 @@ export default function MessageInput({
     }
   };
 
-  const processFile = async (file) => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      alert("Only images (JPEG, PNG, GIF, WebP) are supported");
-      return null;
-    }
-
+  const processImage = async (file) => {
     if (file.size > MAX_FILE_SIZE) {
-      alert("File size must be less than 10MB");
+      alert(`${file.name} is larger than 10MB`);
       return null;
     }
 
@@ -71,10 +84,49 @@ export default function MessageInput({
     });
   };
 
+  const processTextFile = async (file) => {
+    if (file.size > MAX_TEXT_FILE_SIZE) {
+      alert(`${file.name} is larger than 1MB — too large to fit in a prompt`);
+      return null;
+    }
+
+    return {
+      name: file.name,
+      size: file.size,
+      language: languageForFile(file.name),
+      text: await file.text(),
+    };
+  };
+
+  /** Route each file to the image or text pipeline, rejecting anything else. */
+  const addFiles = async (files) => {
+    const imageFiles = files.filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
+    const codeFiles = files.filter((f) => !imageFiles.includes(f) && isTextFile(f));
+    const rejected = files.filter((f) => !imageFiles.includes(f) && !codeFiles.includes(f));
+
+    if (rejected.length > 0) {
+      alert(
+        `Unsupported file${rejected.length > 1 ? "s" : ""}: ${rejected
+          .map((f) => f.name)
+          .join(", ")}\n\nAttach images (JPEG, PNG, GIF, WebP) or text/code files.`
+      );
+    }
+
+    const [processedImages, processedText] = await Promise.all([
+      Promise.all(imageFiles.map(processImage)),
+      Promise.all(codeFiles.map(processTextFile)),
+    ]);
+
+    if (processedImages.some(Boolean)) {
+      setImages((prev) => [...prev, ...processedImages.filter(Boolean)]);
+    }
+    if (processedText.some(Boolean)) {
+      setTextFiles((prev) => [...prev, ...processedText.filter(Boolean)]);
+    }
+  };
+
   const handleFileSelect = async (e) => {
-    const files = Array.from(e.target.files);
-    const processedImages = await Promise.all(files.map(processFile));
-    setImages((prev) => [...prev, ...processedImages.filter(Boolean)]);
+    await addFiles(Array.from(e.target.files));
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -93,7 +145,7 @@ export default function MessageInput({
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(async (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -101,38 +153,26 @@ export default function MessageInput({
     const files = Array.from(e.dataTransfer.files);
     const textData = e.dataTransfer.getData("text/plain");
 
-    // Handle dropped text
+    // Dropped selection text goes straight into the textarea; dropped files
+    // become attachments.
     if (textData && files.length === 0) {
       setValue((prev) => prev + textData);
-      onInputChange?.((prev) => prev + textData);
       return;
     }
 
-    // Handle dropped files
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
-    const textFiles = files.filter((f) => f.type === "text/plain" || f.name.endsWith(".txt"));
-
-    // Process images
-    if (imageFiles.length > 0) {
-      const processedImages = await Promise.all(imageFiles.map(processFile));
-      setImages((prev) => [...prev, ...processedImages.filter(Boolean)]);
-    }
-
-    // Process text files
-    for (const file of textFiles) {
-      const text = await file.text();
-      setValue((prev) => prev + `\n${text}`);
-      onInputChange?.((prev) => prev + `\n${text}`);
-    }
-  }, [onInputChange]);
+    await addFiles(files);
+  };
 
   const removeImage = (index) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const removeTextFile = (index) => {
+    setTextFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleTemplateSelect = (prompt) => {
     setValue(prompt);
-    onInputChange?.(prompt);
     textareaRef.current?.focus();
   };
 
@@ -167,6 +207,25 @@ export default function MessageInput({
         </div>
       )}
 
+      {/* Attached code / text files */}
+      {textFiles.length > 0 && (
+        <div className="message-input-files">
+          {textFiles.map((file, idx) => (
+            <div key={idx} className="file-chip" title={`${file.name} (${formatBytes(file.size)})`}>
+              <span className="file-chip-name">{file.name}</span>
+              <span className="file-chip-size">{formatBytes(file.size)}</span>
+              <button
+                className="file-chip-remove"
+                onClick={() => removeTextFile(idx)}
+                title="Remove file"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="message-input">
         <div className="message-input-actions">
           <button
@@ -180,7 +239,7 @@ export default function MessageInput({
           <button
             className="input-action-btn"
             onClick={() => fileInputRef.current?.click()}
-            title="Attach image"
+            title="Attach image or code file"
             disabled={disabled || isStreaming}
           >
             +
@@ -188,7 +247,7 @@ export default function MessageInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPTED_IMAGE_TYPES.join(",")}
+            accept={ACCEPTED_FILE_TYPES.join(",")}
             multiple
             onChange={handleFileSelect}
             style={{ display: "none" }}
@@ -199,10 +258,7 @@ export default function MessageInput({
           ref={textareaRef}
           className="message-input-textarea"
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            onInputChange?.(e.target.value);
-          }}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isDragging ? "Drop files here..." : "Type a message... (Enter to send, Shift+Enter for new line)"}
           disabled={disabled || isStreaming}
@@ -215,7 +271,7 @@ export default function MessageInput({
         ) : (
           <Button
             onClick={handleSubmit}
-            disabled={(!value.trim() && images.length === 0) || disabled}
+            disabled={!hasContent || disabled}
             style={{ alignSelf: "flex-end" }}
           >
             Send

@@ -3,6 +3,7 @@ import { useChatStore } from "./stores/chatStore.js";
 import { useSettingsStore } from "./stores/settingsStore.js";
 import { TABS } from "./constants/config.js";
 import ChatView from "./components/chat/ChatView.jsx";
+import ImageGenerationView from "./components/image/ImageGenerationView.jsx";
 import ConversationHistory from "./components/history/ConversationHistory.jsx";
 import ModelManager from "./components/models/ModelManager.jsx";
 import SystemStats from "./components/stats/SystemStats.jsx";
@@ -74,6 +75,8 @@ export default function App() {
     switch (activeTab) {
       case "chat":
         return <ChatView onBack={() => setMobileChatOpen(false)} />;
+      case "image":
+        return <ImageGenerationView />;
       case "models":
         return <ModelManager />;
       case "stats":

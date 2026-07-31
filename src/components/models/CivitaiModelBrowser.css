@@ -1,0 +1,474 @@
+/* ── Civitai Model Browser ─────────────────────────────────── */
+
+.civitai-browser {
+  width: 80vw;
+  max-width: 1100px;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Search Bar */
+.civitai-search-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.civitai-search-input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.civitai-filter-select {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.civitai-filter-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Warning & Error */
+.civitai-warning {
+  padding: 10px 14px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: var(--radius-md);
+  color: #fbbf24;
+  font-size: 13px;
+}
+
+.civitai-error {
+  padding: 10px 14px;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+/* Content area */
+.civitai-content {
+  display: flex;
+  gap: 16px;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.civitai-results {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.civitai-loading,
+.civitai-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+/* Grid */
+.civitai-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+/* Card */
+.civitai-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--color-bg);
+}
+
+.civitai-card:hover {
+  border-color: var(--color-text-tertiary);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.civitai-card.selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.civitai-card-thumb {
+  width: 100%;
+  height: 140px;
+  overflow: hidden;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.civitai-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.civitai-card-no-thumb {
+  font-size: 36px;
+  opacity: 0.3;
+}
+
+/* VRAM Badge on card thumbnail */
+.civitai-vram-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+
+.civitai-card-thumb {
+  position: relative;
+}
+
+.civitai-card-info {
+  padding: 10px 12px;
+}
+
+.civitai-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.civitai-card-meta {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.civitai-card-type,
+.civitai-card-version {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.civitai-card-type {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.civitai-card-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+/* Detail Panel */
+.civitai-detail {
+  width: 380px;
+  min-width: 380px;
+  overflow-y: auto;
+  border-left: 1px solid var(--color-border);
+  padding-left: 16px;
+}
+
+.civitai-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.civitai-detail-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  word-break: break-word;
+}
+
+.civitai-detail-close {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.civitai-detail-close:hover {
+  color: var(--color-text-primary);
+}
+
+.civitai-detail-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
+.civitai-detail-meta {
+  margin-bottom: 16px;
+}
+
+.civitai-detail-link {
+  font-size: 13px;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.civitai-detail-link:hover {
+  text-decoration: underline;
+}
+
+/* Versions */
+.civitai-versions-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 10px 0;
+}
+
+.civitai-version {
+  margin-bottom: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.civitai-version-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-surface);
+}
+
+.civitai-version-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.civitai-version-base {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(110, 231, 183, 0.15);
+  color: #6ee7b7;
+}
+
+/* Files */
+.civitai-files {
+  display: flex;
+  flex-direction: column;
+}
+
+.civitai-file {
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.civitai-file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.civitai-file-name {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+.civitai-file-size {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.civitai-file-fp,
+.civitai-file-format {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+}
+
+.civitai-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.civitai-download-btn {
+  font-size: 12px !important;
+  padding: 4px 12px !important;
+}
+
+.civitai-file-done {
+  font-size: 12px;
+  color: #6ee7b7;
+  font-weight: 500;
+  text-align: right;
+}
+
+.civitai-file-error {
+  font-size: 11px;
+  color: var(--color-danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+/* Download Progress */
+.civitai-file-download-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.civitai-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--color-surface);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.civitai-progress-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.civitai-progress-text {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  min-width: 40px;
+}
+
+.civitai-cancel-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-danger);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.civitai-cancel-btn:hover {
+  background: var(--color-danger-bg);
+}
+
+/* Pagination */
+.civitai-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.civitai-page-info {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* VRAM tier colors — shared between card badge and file-level badge */
+.vram-low {
+  background: rgba(110, 231, 183, 0.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(110, 231, 183, 0.35);
+}
+
+.vram-medium {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.vram-high {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+}
+
+.vram-very-high {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+/* File-level VRAM badge */
+.civitai-file-vram {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Responsive */
+@media (max-width: 800px) {
+  .civitai-browser {
+    width: 95vw;
+  }
+
+  .civitai-content {
+    flex-direction: column;
+  }
+
+  .civitai-detail {
+    width: 100%;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding-left: 0;
+    padding-top: 16px;
+  }
+
+  .civitai-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
