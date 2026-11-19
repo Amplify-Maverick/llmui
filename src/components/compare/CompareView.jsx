@@ -1,65 +1,32 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useCompareStreams } from "../../hooks/useCompareStreams.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useChatStore } from "../../stores/chatStore.js";
-import { fetchGpuStats } from "../../services/gpuApi.js";
-import { fetchHardwareInfo, getAvailableCapacity } from "../../services/hardwareApi.js";
-import { formatBytes } from "../../utils/formatters.js";
+import { planCompare, shortModelName } from "../../utils/comparePlan.js";
 import CompareColumn from "./CompareColumn.jsx";
 import MessageInput from "../chat/MessageInput.jsx";
 import "./CompareView.css";
 
 export default function CompareView({ models, onPickResponse, onSaveComplete }) {
   const [userPrompt, setUserPrompt] = useState(null);
-  const [gpuVram, setGpuVram] = useState(null);
-  const [hasGpu, setHasGpu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const { streams, startCompare, stopAll, stopOne, reset, anyStreaming, allComplete } =
+  const { streams, plan: runPlan, phase, startCompare, stopAll, stopOne, reset, anyStreaming, allComplete } =
     useCompareStreams();
 
-  const { models: servedModels } = useModelsStore();
+  const { models: servedModels, gpu } = useModelsStore();
   const { saveCompareConversation } = useChatStore();
 
-  // Fetch available capacity on mount — the server actually running the
-  // models, not the browser viewing this dashboard.
-  useEffect(() => {
-    const getCapacity = async () => {
-      // Try live GPU stats first
-      const stats = await fetchGpuStats();
-      if (stats.ok && stats.gpus?.length > 0) {
-        // Sum all GPU VRAM (MiB to bytes)
-        const totalVram = stats.gpus.reduce((sum, gpu) => sum + gpu.memoryTotal, 0);
-        setGpuVram(totalVram * 1024 * 1024);
-        setHasGpu(true);
-        return;
-      }
-      // No GPU on the server — fall back to its usable system RAM.
-      const hardware = await fetchHardwareInfo();
-      const capacityGb = getAvailableCapacity(hardware);
-      if (capacityGb) {
-        setGpuVram(capacityGb * 1024 ** 3);
-      }
-    };
-    getCapacity();
-  }, []);
-
-  // Estimate VRAM for a model from its file size (when the server reports it)
-  const estimateModelVram = useCallback(
-    (modelName) => servedModels.find((m) => m.name === modelName)?.size || 0,
-    [servedModels]
-  );
-
-  // Calculate total estimated VRAM
-  const totalEstimatedVram = models.reduce(
-    (sum, model) => sum + estimateModelVram(model),
-    0
-  );
-
-  const showVramWarning = gpuVram && totalEstimatedVram > gpuVram;
+  // Preview of what will happen, from the store's latest router snapshot.
+  // The run re-plans from a fresh snapshot when it starts.
+  const previewPlan = useMemo(() => {
+    if (models.length !== 2) return null;
+    return planCompare(models.map((id) => servedModels.find((m) => m.name === id) || { name: id }), gpu);
+  }, [models, servedModels, gpu]);
+  const plan = runPlan || previewPlan;
 
   const handleSend = useCallback(
     (content) => {
-      if (!content.trim() || models.length < 2) return;
+      if (!content.trim() || models.length !== 2) return;
       setUserPrompt(content.trim());
       startCompare(content.trim(), models);
     },
@@ -103,35 +70,22 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
 
   return (
     <div className="compare-view">
-      {showVramWarning && (
-        <div className="compare-vram-warning">
-          <span className="compare-vram-warning-icon">!</span>
-          <div className="compare-vram-warning-content">
-            <strong>{hasGpu ? "VRAM" : "Memory"} Warning:</strong> Selected models may require{" "}
-            {formatBytes(totalEstimatedVram)}, exceeding this server's{" "}
-            {hasGpu ? "GPU VRAM" : "usable RAM"} of {formatBytes(gpuVram)}.{" "}
-            {hasGpu
-              ? "The model server may need to swap models in and out, reducing parallelism and speed."
-              : "Running these together may be very slow or cause the model server to swap models in and out."}
-          </div>
-        </div>
-      )}
+      {plan && <ComparePlanBanner plan={plan} models={models} phase={phase} />}
 
       {!hasStarted && models.length < 2 && (
         <div className="compare-empty">
           <div className="compare-empty-icon">⚖</div>
           <h3>Compare Models</h3>
-          <p>Select at least 2 models from the dropdown above to compare their responses side by side.</p>
+          <p>Select 2 models from the dropdown above to compare their responses side by side.</p>
         </div>
       )}
 
-      {!hasStarted && models.length >= 2 && (
+      {!hasStarted && models.length === 2 && (
         <div className="compare-ready">
           <div className="compare-ready-icon">⚖</div>
           <h3>Ready to Compare</h3>
           <p>
-            Comparing <strong>{models.length}</strong> models:{" "}
-            {models.map((m) => m.split(":")[0]).join(", ")}
+            Comparing <strong>{shortModelName(models[0])}</strong> and <strong>{shortModelName(models[1])}</strong>
           </p>
           <p className="compare-ready-hint">Type a prompt below to start the comparison</p>
         </div>
@@ -180,7 +134,7 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
         <MessageInput
           onSend={handleSend}
           onStop={handleStop}
-          disabled={models.length < 2}
+          disabled={models.length !== 2}
           isStreaming={anyStreaming}
         />
       )}
@@ -192,6 +146,36 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+const GiB = 1024 ** 3;
+const gib = (b) => (b == null ? "?" : `${(b / GiB).toFixed(1)} GiB`);
+
+function ComparePlanBanner({ plan, models, phase }) {
+  const [a, b] = models.map(shortModelName);
+  const parallel = plan.mode === "parallel";
+  return (
+    <div className={`compare-plan ${parallel ? "parallel" : "sequential"}`}>
+      <div className="compare-plan-head">
+        <span className="compare-plan-mode">{parallel ? "Parallel" : "One at a time"}</span>
+        <span className="compare-plan-reason">
+          {plan.reason}
+          {plan.total != null && (
+            <>
+              {": "}
+              {gib(plan.needs[0])} + {gib(plan.needs[1])} = {gib(plan.total)} of {gib(plan.budget)} usable
+            </>
+          )}
+        </span>
+      </div>
+      <div className="compare-plan-steps">
+        {parallel
+          ? `Load ${a} and ${b}, then run both at the same time. Each model's speed drops because they share the GPU.`
+          : `Load ${a} and run it, unload it, then load ${b} and run it. Load time is shown separately and doesn't count toward each model's time.`}
+      </div>
+      {phase && <div className="compare-plan-phase">{phase}</div>}
     </div>
   );
 }

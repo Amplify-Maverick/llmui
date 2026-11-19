@@ -5,34 +5,50 @@
   overflow: hidden;
 }
 
-/* VRAM Warning */
-.compare-vram-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--color-warning-bg);
-  border-bottom: 1px solid var(--color-warning-border);
-  color: var(--color-warning);
-}
-
-.compare-vram-warning-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--color-warning);
-  color: var(--color-surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.compare-vram-warning-content {
-  font-size: 14px;
+/* Run plan: parallel vs one-at-a-time */
+.compare-plan {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
   line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.compare-plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--color-text-primary);
+}
+.compare-plan-mode {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.compare-plan.parallel .compare-plan-mode {
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-bg);
+}
+.compare-plan.sequential .compare-plan-mode {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+.compare-plan-reason {
+  color: var(--color-text-secondary);
+}
+.compare-plan-steps {
+  color: var(--color-text-muted);
+}
+.compare-plan-phase {
+  color: var(--color-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 /* Empty / Ready states */

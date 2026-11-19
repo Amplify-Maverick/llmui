@@ -218,3 +218,13 @@
 .compare-column-pick-btn:active {
   transform: scale(0.98);
 }
+
+/* Queued / loading before this model's run starts */
+.compare-column-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  padding: 8px 0;
+}

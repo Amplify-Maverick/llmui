@@ -173,21 +173,19 @@ export const useChatStore = create((set, get) => ({
       for (const [model, streamState] of responses) {
         if (streamState?.content) {
           // Calculate duration and tokensPerSec from stream state
-          let duration = null;
-          let tokensPerSec = null;
-          if (streamState.startTime && streamState.endTime) {
-            duration = (streamState.endTime - streamState.startTime) / 1000;
-            if (streamState.tokenCount > 0 && duration > 0) {
-              tokensPerSec = streamState.tokenCount / duration;
-            }
-          }
+          const duration = streamState.startTime && streamState.endTime
+            ? (streamState.endTime - streamState.startTime) / 1000
+            : null;
+          // Measured by llama.cpp (or from the first token), set by useCompareStreams
+          const tokensPerSec = streamState.tokensPerSec || null;
           messages.push({
             role: 'assistant',
             content: streamState.content,
             model,
             timestamp: Date.now(),
             duration,
-            tokensPerSec
+            tokensPerSec,
+            ...(streamState.promptPerSec ? { promptPerSec: streamState.promptPerSec } : {})
           });
         }
       }

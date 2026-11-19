@@ -181,6 +181,7 @@ export default function ChatView({ onBack }) {
       model,
       duration: stats?.duration ? parseFloat(stats.duration) : undefined,
       tokensPerSec: stats?.avgTokPerSec ? parseFloat(stats.avgTokPerSec) : undefined,
+      promptPerSec: stats?.readTokPerSec ? parseFloat(stats.readTokPerSec) : undefined,
     });
 
     // Exit compare mode
@@ -292,7 +293,7 @@ export default function ChatView({ onBack }) {
           <button
             className={`compare-toggle ${compareMode ? "active" : ""}`}
             onClick={() => setCompareMode((v) => !v)}
-            title={compareMode ? "Switch to single model" : "Compare multiple models side by side"}
+            title={compareMode ? "Switch to single model" : "Compare two models side by side"}
           >
             Compare
           </button>
@@ -300,7 +301,7 @@ export default function ChatView({ onBack }) {
             <ModelMultiSelect
               value={compareModels}
               onChange={setCompareModels}
-              maxSelections={4}
+              maxSelections={2}
               minSelections={2}
             />
           ) : (

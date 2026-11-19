@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
 import { formatBytes } from "../../utils/formatters.js";
+import { shortModelName } from "../../utils/comparePlan.js";
 import "./ModelMultiSelect.css";
 
 export default function ModelMultiSelect({
@@ -51,13 +52,13 @@ export default function ModelMultiSelect({
       >
         {value.length === 0 ? (
           <span className="model-multi-select-placeholder">
-            Select {minSelections}-{maxSelections} models
+            {minSelections === maxSelections ? `Select ${maxSelections} models` : `Select ${minSelections}-${maxSelections} models`}
           </span>
         ) : (
           <div className="model-multi-select-tags">
             {value.map((modelName) => (
               <span key={modelName} className="model-multi-select-tag">
-                {modelName.split(":")[0]}
+                {shortModelName(modelName)}
                 <button
                   className="model-multi-select-tag-remove"
                   onClick={(e) => handleRemove(modelName, e)}
