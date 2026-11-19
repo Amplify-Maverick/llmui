@@ -19,9 +19,24 @@ function nameSuggestsToolSupport(modelName) {
   return TOOL_FAMILIES.some((f) => lowerName.includes(f));
 }
 
+export const MODEL_STATUS_LABEL = {
+  loaded: "loaded",
+  loading: "loading…",
+  unloaded: "not loaded",
+  sleeping: "sleeping",
+  downloading: "downloading…",
+  incomplete: "incomplete download",
+  unknown: "status unknown",
+};
+
+export function modelStatusLabel(m) {
+  if (m?.failed) return "failed to load";
+  return MODEL_STATUS_LABEL[m?.status] || m?.status || "";
+}
+
 export const useModelsStore = create((set, get) => ({
-  // Models served by the OpenAI-compatible /v1 server (the only model source):
-  // [{ name, model, provider: "openai", size, contextLength, ownedBy }]
+  // Models known to the llama.cpp router (the only model source):
+  // [{ name, model, provider: "openai", status, failed, memory, size, contextLength }]
   models: [],
   // True once a model list has been fetched successfully at least once, so the
   // UI can tell "model isn't served" apart from "list not loaded yet / server down".
@@ -37,6 +52,16 @@ export const useModelsStore = create((set, get) => ({
       set({ models, modelsLoaded: true, isLoading: false });
     } catch (error) {
       set({ error: error.message, isLoading: false });
+    }
+  },
+
+  // Background refresh (status polling): no loading flag, keeps the last list on failure.
+  refreshModels: async () => {
+    try {
+      const models = await openaiApi.listModels();
+      set({ models, modelsLoaded: true, error: null });
+    } catch (error) {
+      set({ error: error.message });
     }
   },
 

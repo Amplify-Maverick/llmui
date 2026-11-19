@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useModelsStore } from "../../stores/modelsStore.js";
+import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
 import { formatBytes } from "../../utils/formatters.js";
 import "./ModelMultiSelect.css";
 
@@ -92,7 +92,7 @@ export default function ModelMultiSelect({
                     {model.name}
                   </span>
                   <span className="model-multi-select-option-size">
-                    {model.size ? formatBytes(model.size) : ""}
+                    {[model.size ? formatBytes(model.size) : "", modelStatusLabel(model)].filter(Boolean).join(" · ")}
                   </span>
                 </div>
               </div>

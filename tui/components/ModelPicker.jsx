@@ -23,6 +23,7 @@ export default function ModelPicker({ models, index, current, width, height }) {
           <Text key={m.name} wrap="truncate" inverse={selected} color={selected ? "white" : isCurrent ? "green" : undefined}>
             {selected ? "›" : isCurrent ? "●" : " "} {m.name}
             {m.size ? <Text dimColor> ({sizeLabel(m.size)})</Text> : null}
+            {m.status ? <Text color={m.status === "loaded" ? "green" : undefined} dimColor={m.status !== "loaded"}> [{m.status}]</Text> : null}
           </Text>
         );
       })}

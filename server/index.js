@@ -22,6 +22,7 @@ import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
 import setupRouter from "./api/setup.js";
 import comfyuiRouter from "./api/comfyui.js";
+import llamaRouter from "./api/llama.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -767,6 +768,7 @@ app.use("/comfyui", requireAuth, comfyuiRouter);
 // OpenAI-compatible model server (llama.cpp etc.) — the only model source.
 // Authenticated streaming passthrough; the browser never talks to it directly.
 app.use("/openai/v1", requireAuth, openaiRouter);
+app.use("/api/llama", requireAuth, llamaRouter);
 
 // ============================================================
 // Startup

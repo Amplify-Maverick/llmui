@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
-import { useModelsStore } from "../../stores/modelsStore.js";
+import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
 import { useChatStream } from "../../hooks/useChatStream.js";
 import MessageBubble from "./MessageBubble.jsx";
 import StreamingBubble from "./StreamingBubble.jsx";
@@ -48,12 +48,25 @@ export default function ChatView({ onBack }) {
   } = useChatStore();
 
   const { defaultModel: savedDefaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
-  const { models, modelsLoaded, fetchModels, modelInfoCache, fetchModelInfo } = useModelsStore();
+  const { models, modelsLoaded, fetchModels, refreshModels, modelInfoCache, fetchModelInfo } = useModelsStore();
   const { sendMessage, stopStreaming, regenerateLastMessage } = useChatStream();
 
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Keep load status fresh (a model loads on first request, others get
+  // evicted under --models-max). Paused while the tab is hidden.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") refreshModels();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [refreshModels]);
+
+  useEffect(() => {
+    if (!isStreaming) refreshModels();
+  }, [isStreaming, refreshModels]);
 
   const isServed = useCallback((name) => models.some((m) => m.name === name), [models]);
 
@@ -87,7 +100,11 @@ export default function ChatView({ onBack }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  const modelOptions = models.map((m) => ({ value: m.name, label: m.name }));
+  const modelOptions = models.map((m) => ({
+    value: m.name,
+    label: `${m.name} — ${modelStatusLabel(m)}`,
+  }));
+  const selectedModelEntry = models.find((m) => m.name === defaultModel);
 
   const currentModelInfo = modelInfoCache[defaultModel];
 
@@ -286,14 +303,28 @@ export default function ChatView({ onBack }) {
               minSelections={2}
             />
           ) : (
-            <Select
-              value={defaultModel}
-              onChange={(e) => handleModelChange(e.target.value)}
-              options={modelOptions}
-              placeholder="Select a model"
-              disabled={isReadOnly}
-              style={{ width: "200px" }}
-            />
+            <>
+              {selectedModelEntry && (
+                <span
+                  className={`model-status-pill status-${selectedModelEntry.failed ? "failed" : selectedModelEntry.status}`}
+                  title={
+                    selectedModelEntry.status === "unloaded"
+                      ? "Loads automatically on the first message (can take a while)"
+                      : `Model is ${modelStatusLabel(selectedModelEntry)}`
+                  }
+                >
+                  {modelStatusLabel(selectedModelEntry)}
+                </span>
+              )}
+              <Select
+                value={defaultModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                options={modelOptions}
+                placeholder={modelsLoaded && models.length === 0 ? "No models on server" : "Select a model"}
+                disabled={isReadOnly}
+                style={{ width: "240px" }}
+              />
+            </>
           )}
         </div>
       </div>

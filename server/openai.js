@@ -9,13 +9,13 @@
  *   SSE and accumulating streamed tool-call deltas.
  *
  * Upstream base URL comes from OPENAI_BASE_URL (must include the /v1 suffix).
+ * Every upstream request carries the LLAMA_API_KEY bearer (see llama.js).
  */
 
 import express from "express";
+import { OPENAI_BASE_URL, llamaHeaders, upstreamError } from "./llama.js";
 
-export const OPENAI_BASE_URL = (
-  process.env.OPENAI_BASE_URL || "http://100.118.190.15:8081/v1"
-).replace(/\/+$/, "");
+export { OPENAI_BASE_URL };
 
 // ------------------------------------------------------------
 // SSE parsing
@@ -49,15 +49,6 @@ export async function* readSSE(body) {
     } catch {
       // already released
     }
-  }
-}
-
-async function upstreamError(response) {
-  const text = await response.text();
-  try {
-    return JSON.parse(text).error?.message || text;
-  } catch {
-    return text || `Upstream error (${response.status})`;
   }
 }
 
@@ -102,6 +93,7 @@ async function forward(req, res, upstreamPath, init = {}) {
   try {
     const response = await fetch(`${OPENAI_BASE_URL}${upstreamPath}`, {
       ...init,
+      headers: llamaHeaders(init.headers),
       signal: controller.signal,
     });
 
@@ -181,7 +173,7 @@ export async function streamOpenAITurn({
 
   const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers: llamaHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
     body: JSON.stringify(body),
     signal,
   });

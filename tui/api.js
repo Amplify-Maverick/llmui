@@ -62,10 +62,10 @@ export const api = {
     request("PATCH", `/api/conversations/${encodeURIComponent(id)}`, { title }),
   deleteConversation: (id) =>
     request("DELETE", `/api/conversations/${encodeURIComponent(id)}`),
-  // Models served by the OpenAI-compatible /v1 server, via the authenticated proxy
+  // Models known to the llama.cpp router, via the authenticated proxy
   getModels: async () => {
-    const data = await request("GET", `/openai/v1/models`);
-    return (data.data || []).map((m) => ({ name: m.id, size: m.meta?.size || 0 }));
+    const data = await request("GET", `/api/llama/models`);
+    return (data.models || []).map((m) => ({ name: m.id, size: m.size || 0, status: m.status }));
   },
   getSettings: async () => {
     const res = await request("GET", `/api/settings/llmui_settings`);
