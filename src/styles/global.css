@@ -16,9 +16,22 @@
   --color-surface-input: rgba(255, 255, 255, 0.03);
   --color-surface-input-hover: rgba(255, 255, 255, 0.05);
 
-  --color-border: rgba(255, 255, 255, 0.05);
-  --color-border-light: rgba(255, 255, 255, 0.08);
-  --color-border-separator: rgba(255, 255, 255, 0.06);
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-light: rgba(255, 255, 255, 0.1);
+  --color-border-separator: rgba(255, 255, 255, 0.07);
+
+  /* Referenced by several components but previously undefined */
+  --color-bg: rgba(0, 0, 0, 0.25);
+  --color-bg-secondary: rgba(0, 0, 0, 0.2);
+  --color-accent: #c4b5fd;
+  --color-accent-bg: rgba(196, 181, 253, 0.12);
+  --color-accent-border: rgba(196, 181, 253, 0.3);
+
+  --color-surface-raised: rgba(255, 255, 255, 0.035);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --focus-ring: 0 0 0 3px rgba(110, 231, 183, 0.18);
 
   --color-primary-bg: rgba(110, 231, 183, 0.15);
   --color-primary-bg-hover: rgba(110, 231, 183, 0.25);
@@ -84,6 +97,18 @@
   --color-border-light: rgba(0, 0, 0, 0.12);
   --color-border-separator: rgba(0, 0, 0, 0.06);
 
+  --color-bg: rgba(0, 0, 0, 0.03);
+  --color-bg-secondary: rgba(0, 0, 0, 0.02);
+  --color-accent: #7c3aed;
+  --color-accent-bg: rgba(124, 58, 237, 0.08);
+  --color-accent-border: rgba(124, 58, 237, 0.25);
+
+  --color-surface-raised: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.08);
+  --focus-ring: 0 0 0 3px rgba(5, 150, 105, 0.18);
+
   --color-primary-bg: rgba(5, 150, 105, 0.1);
   --color-primary-bg-hover: rgba(5, 150, 105, 0.18);
   --color-primary-border: rgba(5, 150, 105, 0.3);
@@ -111,6 +136,40 @@
   --color-body-bg: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 50%, #e2e8f0 100%);
   --color-scrollbar-thumb: rgba(0, 0, 0, 0.12);
   --color-scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(110, 231, 183, 0.25);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Numbers that update live shouldn't jitter */
+.tabular,
+[class*="value"],
+[class*="metric"],
+[class*="-count"],
+[class*="tokens"] {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Shared Keyframe Animations ──────────────────────────── */

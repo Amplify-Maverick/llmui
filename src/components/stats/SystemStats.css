@@ -3,21 +3,22 @@
 }
 
 .system-stats-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--color-text-primary);
   margin: 0 0 24px 0;
 }
 
 .system-stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 32px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
 }
 
 .system-stats-section-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0 0 16px 0;
@@ -26,9 +27,9 @@
 .running-model-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  padding: 16px;
-  margin-bottom: 12px;
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 10px;
 }
 
 .running-model-header {
@@ -39,8 +40,9 @@
 }
 
 .running-model-name {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 500;
   color: var(--color-text-primary);
 }
 

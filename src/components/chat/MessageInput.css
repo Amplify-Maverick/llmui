@@ -1,6 +1,6 @@
 .message-input-wrapper {
   position: relative;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
@@ -11,8 +11,8 @@
 
 .message-input {
   display: flex;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 14px 16px;
   align-items: flex-end;
 }
 
@@ -56,19 +56,21 @@
   background: var(--color-surface-input);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-lg);
-  padding: 12px;
+  padding: 12px 14px;
   color: var(--color-text-primary);
   font-size: 14px;
+  line-height: 1.5;
   font-family: var(--font-sans);
   outline: none;
   resize: none;
   min-height: 48px;
   max-height: 200px;
-  transition: border-color var(--transition-normal);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .message-input-textarea:focus {
   border-color: var(--color-primary-border-hover);
+  box-shadow: var(--focus-ring);
 }
 
 .message-input-textarea:disabled {

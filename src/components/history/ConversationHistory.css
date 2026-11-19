@@ -9,7 +9,7 @@
 }
 
 .history-header {
-  padding: 16px;
+  padding: 14px 14px 12px;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -21,7 +21,8 @@
 }
 
 .history-title {
-  font-size: 16px;
+  font-size: 14px;
+  letter-spacing: -0.01em;
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
@@ -106,17 +107,18 @@
 .history-tags-filter {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
+  gap: 5px;
+  margin-top: 10px;
 }
 
 .tag-filter-btn {
-  padding: 4px 10px;
+  padding: 2px 9px;
+  line-height: 18px;
   font-size: 11px;
   font-weight: 500;
   background: transparent;
   border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-2xl);
+  border-radius: 999px;
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -186,7 +188,7 @@
 .history-list {
   flex: 1;
   overflow: auto;
-  padding: 12px;
+  padding: 8px;
 }
 
 .history-empty {
