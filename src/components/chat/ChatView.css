@@ -186,9 +186,9 @@
 }
 
 .compare-toggle.active {
-  background: var(--color-warning-bg, rgba(252, 211, 77, 0.1));
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
   color: var(--color-warning);
-  border-color: rgba(252, 211, 77, 0.3);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
 
 .tools-warning {
