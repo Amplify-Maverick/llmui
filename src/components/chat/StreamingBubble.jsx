@@ -3,6 +3,7 @@ import { useChatStore } from "../../stores/chatStore.js";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import ToolCallCard from "./ToolCallCard.jsx";
 import { formatDuration, formatTokensPerSec } from "./MessageBubble.jsx";
+import { liveTokensPerSec } from "../../utils/streamSpeed.js";
 import "./MessageBubble.css";
 
 /**
@@ -17,6 +18,7 @@ export default function StreamingBubble({ model }) {
   const streamingToolCalls = useChatStore((s) => s.streamingToolCalls);
   const streamingStartTime = useChatStore((s) => s.streamingStartTime);
   const streamingTokenCount = useChatStore((s) => s.streamingTokenCount);
+  const streamingFirstTokenTime = useChatStore((s) => s.streamingFirstTokenTime);
   const [elapsed, setElapsed] = useState(0);
 
   // Update elapsed time every 100ms during streaming
@@ -31,7 +33,9 @@ export default function StreamingBubble({ model }) {
     return () => clearInterval(interval);
   }, [streamingStartTime]);
 
-  const tokensPerSec = elapsed > 0 ? streamingTokenCount / elapsed : null;
+  // From the first generated token, so model load / prompt time don't drag it down.
+  // Recomputed on each 100ms `elapsed` tick.
+  const tokensPerSec = elapsed > 0 ? liveTokensPerSec(streamingTokenCount, streamingFirstTokenTime) : null;
 
   return (
     <div className="message-row">

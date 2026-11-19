@@ -9,7 +9,7 @@ import path from "path";
 import os from "os";
 import { nanoid } from "nanoid";
 import { getToolsSchema, executeTool } from "./tools/index.js";
-import { openaiRouter, streamOpenAITurn, toOpenAIMessage, OPENAI_BASE_URL } from "./openai.js";
+import { openaiRouter, streamOpenAITurn, toOpenAIMessage, combineTimings, OPENAI_BASE_URL } from "./openai.js";
 
 // Database and API imports
 import { getDb, closeDb } from "./db/index.js";
@@ -349,6 +349,7 @@ app.post("/api/chat-with-tools", requireAuth, async (req, res) => {
 
   const currentMessages = messages.map(toOpenAIMessage);
   let iterations = 0;
+  const turnTimings = []; // llama.cpp timings per model turn
   const onContent = (text) => {
     res.write(JSON.stringify({ type: "content", content: text }) + "\n");
   };
@@ -362,7 +363,7 @@ app.post("/api/chat-with-tools", requireAuth, async (req, res) => {
 
       iterations++;
 
-      const { content: assistantContent, toolCalls } = await streamOpenAITurn({
+      const { content: assistantContent, toolCalls, timings } = await streamOpenAITurn({
         model,
         messages: currentMessages,
         tools,
@@ -372,9 +373,11 @@ app.post("/api/chat-with-tools", requireAuth, async (req, res) => {
         onContent,
       });
 
+      turnTimings.push(timings);
+
       // If no tool calls, we're done
       if (toolCalls.length === 0) {
-        res.write(JSON.stringify({ type: "done", iterations }) + "\n");
+        res.write(JSON.stringify({ type: "done", iterations, timings: combineTimings(turnTimings) }) + "\n");
         res.end();
         return;
       }

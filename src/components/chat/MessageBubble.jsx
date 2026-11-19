@@ -140,7 +140,14 @@ const MessageBubble = memo(function MessageBubble({
             <span className="bubble-duration">{formatDuration(message.duration)}</span>
           )}
           {!isUser && message.tokensPerSec && (
-            <span className="bubble-tokens-per-sec">{formatTokensPerSec(message.tokensPerSec)}</span>
+            <span className="bubble-tokens-per-sec" title="Generation (writing) speed">
+              {formatTokensPerSec(message.tokensPerSec)}
+            </span>
+          )}
+          {!isUser && message.promptPerSec && (
+            <span className="bubble-prompt-per-sec" title="Prompt processing (reading) speed">
+              read {formatTokensPerSec(message.promptPerSec)}
+            </span>
           )}
         </div>
 

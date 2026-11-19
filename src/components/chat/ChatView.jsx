@@ -16,6 +16,7 @@ import CompareView from "../compare/CompareView.jsx";
 import ModelMultiSelect from "../compare/ModelMultiSelect.jsx";
 import { Select } from "../shared/Input.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
+import { liveTokensPerSec } from "../../utils/streamSpeed.js";
 import "./ChatView.css";
 
 export default function ChatView({ onBack }) {
@@ -33,7 +34,7 @@ export default function ChatView({ onBack }) {
     isStreaming,
     streamingContent,
     streamingTokenCount,
-    streamingStartTime,
+    streamingFirstTokenTime,
     streamingToolCalls,
     deleteMessage,
     editMessageAndTruncate,
@@ -187,12 +188,12 @@ export default function ChatView({ onBack }) {
     setCompareModels([]);
   }, [createConversation, addMessage]);
 
-  // Calculate real-time tokens/sec during streaming
+  // Live tokens/sec while streaming, measured from the first generated token
+  // (the final figure comes from llama.cpp's own timings).
   const currentTokensPerSec = (() => {
-    if (!isStreaming || !streamingStartTime || streamingTokenCount === 0) return null;
-    const elapsed = (Date.now() - streamingStartTime) / 1000;
-    if (elapsed <= 0) return null;
-    return (streamingTokenCount / elapsed).toFixed(1);
+    if (!isStreaming) return null;
+    const tps = liveTokensPerSec(streamingTokenCount, streamingFirstTokenTime);
+    return tps ? tps.toFixed(1) : null;
   })();
 
   // When streaming, exclude the placeholder assistant message (last

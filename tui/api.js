@@ -87,7 +87,7 @@ function* normalize(chunk) {
   else if (chunk.type === "tool_result")
     yield { type: "tool_result", id: chunk.id, name: chunk.name, result: chunk.result, error: chunk.error };
   else if (chunk.type === "error") yield { type: "error", error: chunk.error };
-  else if (chunk.type === "done") yield { type: "done", tokensPerSec: null };
+  else if (chunk.type === "done") yield { type: "done", tokensPerSec: chunk.timings?.predicted_per_second || null };
 }
 
 /**

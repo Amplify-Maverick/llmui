@@ -32,8 +32,12 @@ function getStatusLevel(percentage) {
 export default function TokenCounter({ inputValue = "" }) {
   const { messages, streamingContent, isStreaming, getActiveConversationSettings } = useChatStore();
   const { defaultModel, systemPrompt: globalSystemPrompt } = useSettingsStore();
-  const { fetchModelInfo, modelInfoCache } = useModelsStore();
-  const [contextLength, setContextLength] = useState(null);
+  const { fetchModelInfo, modelInfoCache, models } = useModelsStore();
+  const [fetchedContextLength, setContextLength] = useState(null);
+  // Runtime n_ctx straight from the router's model list (refreshed every few
+  // seconds) wins; the fetched/cached value covers the rest.
+  const liveContextLength = models.find((m) => m.name === defaultModel)?.contextLength || null;
+  const contextLength = liveContextLength || fetchedContextLength;
 
   // Use per-conversation system prompt if set, otherwise fall back to global
   const convSettings = getActiveConversationSettings();

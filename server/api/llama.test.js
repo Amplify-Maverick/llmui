@@ -48,3 +48,16 @@ test("gpuBytes sums model+context+compute on the GPU device only", () => {
   assert.equal(gpuBytes(snap), 123);
   assert.equal(gpuBytes(null), null);
 });
+
+import { combineTimings } from "../openai.js";
+
+test("combineTimings sums tool-loop turns and recomputes rates", () => {
+  const t = combineTimings([
+    { predicted_n: 30, predicted_ms: 1000, prompt_n: 400, prompt_ms: 1000 },
+    null,
+    { predicted_n: 34, predicted_ms: 1000, prompt_n: 100, prompt_ms: 250 },
+  ]);
+  assert.equal(t.predicted_per_second, 32);
+  assert.equal(t.prompt_per_second, 400);
+  assert.equal(combineTimings([null, undefined]), null);
+});

@@ -10,6 +10,7 @@ import {
   flushDebouncedSave,
 } from "../utils/storage.js";
 import { authHeaders } from "../services/auth.js";
+import { streamSpeeds } from "../utils/streamSpeed.js";
 
 const API_BASE = "/api";
 
@@ -27,6 +28,9 @@ export const useChatStore = create((set, get) => ({
   streamingContent: "",
   streamingTokenCount: 0,
   streamingStartTime: null,
+  // When the first generated token (content or thinking) arrived: the
+  // fallback tok/s is measured from here, excluding load + prompt time.
+  streamingFirstTokenTime: null,
   streamingToolCalls: [], // {id, name, arguments, status: 'calling'|'completed', result?, error?}
   isLoading: true,
 
@@ -548,6 +552,7 @@ export const useChatStore = create((set, get) => ({
       streamingContent: content,
       streamingTokenCount: 0,
       streamingStartTime: isStreaming ? Date.now() : null,
+      streamingFirstTokenTime: null,
     });
   },
 
@@ -555,6 +560,16 @@ export const useChatStore = create((set, get) => ({
     set((state) => ({
       streamingContent: state.streamingContent + chunk,
       streamingTokenCount: state.streamingTokenCount + 1,
+      streamingFirstTokenTime: state.streamingFirstTokenTime ?? Date.now(),
+    }));
+  },
+
+  // A generated token that isn't shown as content (e.g. thinking): counts
+  // toward the fallback tok/s.
+  noteStreamToken: () => {
+    set((state) => ({
+      streamingTokenCount: state.streamingTokenCount + 1,
+      streamingFirstTokenTime: state.streamingFirstTokenTime ?? Date.now(),
     }));
   },
 
@@ -579,26 +594,20 @@ export const useChatStore = create((set, get) => ({
     set({ streamingToolCalls: [] });
   },
 
-  finalizeStream: (extras = {}) => {
+  finalizeStream: ({ timings, ...extras } = {}) => {
     const {
       streamingContent,
       messages,
       streamingTokenCount,
-      streamingStartTime,
+      streamingFirstTokenTime,
       streamingToolCalls,
     } = get();
 
-    // Calculate tokens per second
-    let tokensPerSec = null;
-    if (streamingStartTime && streamingTokenCount > 0) {
-      const elapsedSeconds = (Date.now() - streamingStartTime) / 1000;
-      if (elapsedSeconds > 0) {
-        tokensPerSec = streamingTokenCount / elapsedSeconds;
-      }
-    }
+    const { tokensPerSec, promptPerSec } = streamSpeeds(timings, streamingTokenCount, streamingFirstTokenTime);
 
     // Include tool calls if any were made
     const finalExtras = { ...extras, tokensPerSec };
+    if (promptPerSec) finalExtras.promptPerSec = promptPerSec;
     if (streamingToolCalls.length > 0) {
       finalExtras.toolCalls = streamingToolCalls;
     }
@@ -614,6 +623,7 @@ export const useChatStore = create((set, get) => ({
       streamingContent: "",
       streamingTokenCount: 0,
       streamingStartTime: null,
+      streamingFirstTokenTime: null,
       streamingToolCalls: [],
     });
     get()._saveCurrentConversation();

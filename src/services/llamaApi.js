@@ -27,6 +27,7 @@ export const llamaApi = {
   remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`),
   load: (model) => call("POST", "/models/load", { model }),
   unload: (model) => call("POST", "/models/unload", { model }),
+  props: (model) => call("GET", `/props?model=${encodeURIComponent(model)}`),
   searchHF: (q) => call("GET", `/hf/search?q=${encodeURIComponent(q)}`),
   repoFiles: (repo) => call("GET", `/hf/files?repo=${encodeURIComponent(repo)}`),
 

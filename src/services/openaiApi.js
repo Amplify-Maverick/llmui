@@ -6,7 +6,9 @@
  * forwards them to OPENAI_BASE_URL (see server/openai.js). The tool loop runs
  * server-side at /api/chat-with-tools.
  *
- * chatStream() yields normalised chunks — { message: { content, thinking }, done }.
+ * chatStream() yields normalised chunks — { message: { content, thinking }, done, timings }.
+ * `timings` is llama.cpp's server-side measurement (predicted_per_second,
+ * prompt_per_second, ...), sent with the final chunk.
  */
 
 import { authHeaders } from "./auth.js";
@@ -100,6 +102,7 @@ class OpenAIAPI {
         },
         done: false,
         finishReason: choice?.finish_reason || null,
+        timings: event.timings || null,
       };
     }
     // Stream ended without [DONE]

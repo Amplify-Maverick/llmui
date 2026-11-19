@@ -148,8 +148,9 @@ openaiRouter.post("/chat/completions", (req, res) =>
 /**
  * Run one streamed chat turn against the OpenAI-compatible server.
  * Calls onContent(text) for each content delta as it arrives.
- * Returns { content, toolCalls } with tool calls in OpenAI format
- * ({ id, type, function: { name, arguments: string } }).
+ * Returns { content, toolCalls, timings } with tool calls in OpenAI format
+ * ({ id, type, function: { name, arguments: string } }) and llama.cpp's
+ * server-measured `timings` (null if the server doesn't send them).
  * Throws an Error with the upstream message on a non-2xx response.
  */
 export async function streamOpenAITurn({
@@ -182,6 +183,7 @@ export async function streamOpenAITurn({
   }
 
   let content = "";
+  let timings = null;
   const calls = []; // accumulated by delta index
 
   for await (const data of readSSE(response.body)) {
@@ -195,6 +197,8 @@ export async function streamOpenAITurn({
     if (event.error) {
       throw new Error(event.error.message || String(event.error));
     }
+    // llama.cpp attaches timings to the final chunk
+    if (event.timings) timings = event.timings;
     const delta = event.choices?.[0]?.delta || {};
     if (delta.content) {
       content += delta.content;
@@ -213,5 +217,27 @@ export async function streamOpenAITurn({
     }
   }
 
-  return { content, toolCalls: calls.filter(Boolean) };
+  return { content, toolCalls: calls.filter(Boolean), timings };
+}
+
+/**
+ * Combine llama.cpp `timings` from several turns (tool loop) into one, with
+ * rates recomputed from summed token counts and milliseconds.
+ */
+export function combineTimings(list) {
+  const valid = list.filter(Boolean);
+  if (valid.length === 0) return null;
+  const sum = (k) => valid.reduce((acc, t) => acc + (Number(t[k]) || 0), 0);
+  const predicted_n = sum("predicted_n");
+  const predicted_ms = sum("predicted_ms");
+  const prompt_n = sum("prompt_n");
+  const prompt_ms = sum("prompt_ms");
+  return {
+    predicted_n,
+    predicted_ms,
+    predicted_per_second: predicted_ms > 0 ? (predicted_n / predicted_ms) * 1000 : null,
+    prompt_n,
+    prompt_ms,
+    prompt_per_second: prompt_ms > 0 ? (prompt_n / prompt_ms) * 1000 : null,
+  };
 }

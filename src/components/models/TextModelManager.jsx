@@ -39,6 +39,7 @@ export default function TextModelManager() {
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState({}); // model id → "load" | "unload" | "delete"
   const [actionError, setActionError] = useState(null);
+  const [rowErrors, setRowErrors] = useState({}); // model id → last load/unload error
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const [query, setQuery] = useState("");
@@ -126,6 +127,7 @@ export default function TextModelManager() {
 
   const runAction = async (id, action) => {
     setActionError(null);
+    setRowErrors(({ [id]: _, ...rest }) => rest);
     setBusy((b) => ({ ...b, [id]: action }));
     try {
       if (action === "delete") {
@@ -136,7 +138,8 @@ export default function TextModelManager() {
       }
       await refreshModels();
     } catch (err) {
-      setActionError(`${action} ${id}: ${err.message}`);
+      if (action === "delete") setActionError(`Delete ${id}: ${err.message}`);
+      else setRowErrors((e) => ({ ...e, [id]: `${action === "load" ? "Load" : "Unload"} failed: ${err.message}` }));
     } finally {
       setBusy(({ [id]: _, ...rest }) => rest);
     }
@@ -181,10 +184,11 @@ export default function TextModelManager() {
               const usage = gpuUsage(m.memory);
               const dl = downloads[Object.keys(downloads).find((k) => k.toLowerCase() === m.name.toLowerCase())];
               const isDownloading = m.status === "downloading" || dl?.state === "downloading" || dl?.state === "starting";
-              const isLoaded = m.status === "loaded" || m.status === "sleeping" || m.status === "loading";
+              const isLoaded = !m.failed && (m.status === "loaded" || m.status === "sleeping" || m.status === "loading");
               const b = busy[m.name];
+              const rowError = rowErrors[m.name];
               return (
-                <div key={m.name} className="tmm-row">
+                <div key={m.name} className={`tmm-row ${m.failed || rowError ? "failed" : ""}`}>
                   <div className="tmm-row-main">
                     <div className="tmm-row-title">
                       <span className="tmm-model-id">{m.name}</span>
@@ -202,20 +206,31 @@ export default function TextModelManager() {
                     </div>
                     {isDownloading && <ProgressBar dl={dl} />}
                     {dl?.state === "failed" && <div className="tmm-row-error">{dl.error}</div>}
+                    {m.failed && (
+                      <div className="tmm-failure">
+                        <strong>
+                          llama.cpp failed to load this model
+                          {m.exitCode != null && ` (exit code ${m.exitCode})`}.
+                        </strong>{" "}
+                        It's usually an unsupported architecture or a broken download. The exact error is in the
+                        llama-server log on the GPU machine. Delete it, or try loading it again.
+                      </div>
+                    )}
+                    {rowError && <div className="tmm-failure">{rowError}</div>}
                   </div>
                   <div className="tmm-row-actions">
-                    {defaultModel !== m.name && !isDownloading && (
+                    {defaultModel !== m.name && !isDownloading && !m.failed && (
                       <Button variant="ghost" className="btn-sm" onClick={() => updateSetting("defaultModel", m.name)}>
                         Use in chat
                       </Button>
                     )}
-                    {!isDownloading && (isLoaded ? (
+                    {!isDownloading && (isLoaded && !m.failed ? (
                       <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "unload")}>
                         {b === "unload" ? "Unloading…" : "Unload"}
                       </Button>
                     ) : (
                       <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "load")}>
-                        {b === "load" ? "Loading…" : "Load"}
+                        {b === "load" ? "Loading…" : m.failed || rowError ? "Retry load" : "Load"}
                       </Button>
                     ))}
                     <Button

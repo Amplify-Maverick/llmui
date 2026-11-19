@@ -41,11 +41,25 @@ function mapModel(m) {
     provider: "openai",
     status: m.status,
     failed: m.failed,
+    exitCode: m.exitCode,
     canRemove: m.canRemove,
     memory: m.memory,
     size: m.size || 0,
     contextLength: m.contextLength || null,
   };
+}
+
+/** Refresh cached modelInfo.contextLength from a fresh router list. */
+function syncContext(cache, models) {
+  let next = cache;
+  for (const m of models) {
+    const info = cache[m.name];
+    if (info && m.contextLength && info.contextLength !== m.contextLength) {
+      if (next === cache) next = { ...cache };
+      next[m.name] = { ...info, contextLength: m.contextLength };
+    }
+  }
+  return next;
 }
 
 export const useModelsStore = create((set, get) => ({
@@ -69,7 +83,8 @@ export const useModelsStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const { models, gpu } = await llamaApi.list();
-      set({ models: models.map(mapModel), gpu, modelsLoaded: true, isLoading: false });
+      const mapped = models.map(mapModel);
+      set({ models: mapped, gpu, modelsLoaded: true, isLoading: false, modelInfoCache: syncContext(get().modelInfoCache, mapped) });
     } catch (error) {
       set({ error: error.message, isLoading: false });
     }
@@ -79,7 +94,8 @@ export const useModelsStore = create((set, get) => ({
   refreshModels: async () => {
     try {
       const { models, gpu } = await llamaApi.list();
-      set({ models: models.map(mapModel), gpu, modelsLoaded: true, error: null });
+      const mapped = models.map(mapModel);
+      set({ models: mapped, gpu, modelsLoaded: true, error: null, modelInfoCache: syncContext(get().modelInfoCache, mapped) });
     } catch (error) {
       set({ error: error.message });
     }
@@ -130,22 +146,33 @@ export const useModelsStore = create((set, get) => ({
     if (modelInfoCache[modelName]) return modelInfoCache[modelName];
 
     const model = models.find((m) => m.name === modelName);
-    // Not served (e.g. an old Ollama model name) — return a default without
-    // caching so it resolves properly if the model shows up later.
+    // Not served (e.g. an old Ollama model name): unknown context, not cached
+    // so it resolves properly if the model shows up later.
     if (!model) {
-      return { name: modelName, contextLength: 4096, supportsTools: false, details: {}, rawParameters: "" };
+      return { name: modelName, contextLength: null, supportsTools: false, details: {}, rawParameters: "" };
+    }
+
+    // Runtime context from the router (n_ctx). If the list doesn't have it
+    // and the model is loaded, ask its /props (never for unloaded models,
+    // which that request would autoload).
+    let contextLength = model.contextLength;
+    if (!contextLength && model.status === "loaded") {
+      contextLength = await llamaApi.props(modelName).then((p) => p.contextLength, () => null);
     }
 
     const modelInfo = {
       name: modelName,
-      contextLength: model.contextLength || 4096,
+      contextLength: contextLength || null,
       supportsTools: nameSuggestsToolSupport(modelName),
       details: { provider: "openai" },
       rawParameters: "",
     };
-    set((state) => ({
-      modelInfoCache: { ...state.modelInfoCache, [modelName]: modelInfo },
-    }));
+    // Only cache once the context is known; until then, retry next time.
+    if (modelInfo.contextLength) {
+      set((state) => ({
+        modelInfoCache: { ...state.modelInfoCache, [modelName]: modelInfo },
+      }));
+    }
     return modelInfo;
   },
 

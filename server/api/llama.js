@@ -27,10 +27,12 @@ export function normalizeModel(m) {
   return {
     id: m.id,
     status: m.status?.value || "unknown",
-    failed: !!m.status?.failed,
+    failed: !!m.status?.failed || m.memory?.status === "failed",
+    exitCode: m.status?.exit_code ?? null,
     canRemove: m.can_remove ?? true,
     memory: m.memory || null,
-    contextLength: m.meta?.n_ctx || null,
+    // Runtime context (--ctx-size), not the training context (context_length).
+    contextLength: m.memory?.effective?.n_ctx || m.meta?.n_ctx || m.memory?.min?.n_ctx || null,
     size: m.meta?.size || 0,
   };
 }
@@ -113,6 +115,29 @@ const postJson = (path, body) =>
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
   });
+
+// GET /api/llama/props?model=<id> — runtime context size of a model.
+// Only for models that are already loaded: a request naming an unloaded model
+// would make the router autoload it.
+router.get("/props", async (req, res) => {
+  const { model } = req.query;
+  if (!requireModelId(model, res)) return;
+  try {
+    const m = (await listModels()).find((x) => x.id === model);
+    if (!m) return res.status(404).json({ error: "Unknown model" });
+    if (m.status !== "loaded") return res.json({ model, contextLength: m.contextLength, loaded: false });
+    const response = await llamaFetch(`/props?model=${encodeURIComponent(model)}`, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return upstreamJson(res, response);
+    const props = await response.json();
+    res.json({
+      model,
+      loaded: true,
+      contextLength: props.default_generation_settings?.n_ctx || props.n_ctx || m.contextLength,
+    });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+});
 
 // POST /api/llama/models { model: "owner/repo:QUANT" } — start a download (non-blocking).
 router.post("/models", async (req, res) => {
@@ -241,17 +266,22 @@ const HF = "https://huggingface.co/api";
 const hfFetch = (url) =>
   fetch(url, { headers: { "User-Agent": "llmui" }, signal: AbortSignal.timeout(15000) });
 
-// GET /api/llama/hf/search?q=... — GGUF repos, most downloaded first.
+// Only chat/vision LLMs: other GGUF repos (music, TTS, embeddings, diffusion)
+// download fine but llama-server can't run them.
+export const CHAT_PIPELINE_TAGS = new Set(["text-generation", "image-text-to-text"]);
+
+// GET /api/llama/hf/search?q=... — GGUF chat-model repos, most downloaded first.
 router.get("/hf/search", async (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 100);
-  const params = new URLSearchParams({ filter: "gguf", sort: "downloads", direction: "-1", limit: "30" });
+  // Over-fetch, since non-chat repos are filtered out below.
+  const params = new URLSearchParams({ filter: "gguf", sort: "downloads", direction: "-1", limit: "100" });
   if (q) params.set("search", q);
   try {
     const response = await hfFetch(`${HF}/models?${params}`);
     if (!response.ok) return res.status(502).json({ error: `Hugging Face error (${response.status})` });
     const data = await response.json();
     res.json({
-      repos: data.map((r) => ({
+      repos: data.filter((r) => CHAT_PIPELINE_TAGS.has(r.pipeline_tag)).slice(0, 30).map((r) => ({
         id: r.id,
         downloads: r.downloads || 0,
         likes: r.likes || 0,

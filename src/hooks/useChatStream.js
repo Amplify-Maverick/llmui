@@ -15,6 +15,7 @@ export function useChatStream() {
     addMessage,
     setStreaming,
     appendStreamContent,
+    noteStreamToken,
     appendToolCall,
     completeToolCall,
     clearToolCalls,
@@ -90,6 +91,8 @@ export function useChatStream() {
 
       // Clear any previous tool calls
       clearToolCalls();
+      // llama.cpp's own speed measurement, if the server sends it
+      let timings = null;
 
       try {
         // Use tools endpoint if tools are enabled
@@ -114,7 +117,7 @@ export function useChatStream() {
                 completeToolCall(event.id, event.result, event.error);
                 break;
               case "done":
-                // Stream complete
+                timings = event.timings || null;
                 break;
               case "error":
                 throw new Error(event.error);
@@ -129,7 +132,10 @@ export function useChatStream() {
           )) {
             if (chunk.message?.content) {
               appendStreamContent(chunk.message.content);
+            } else if (chunk.message?.thinking) {
+              noteStreamToken();
             }
+            if (chunk.timings) timings = chunk.timings;
 
             if (chunk.done) {
               break;
@@ -138,7 +144,7 @@ export function useChatStream() {
         }
 
         const duration = (Date.now() - startTime) / 1000;
-        finalizeStream({ duration });
+        finalizeStream({ duration, timings });
       } catch (error) {
         if (error.name !== "AbortError") {
           console.error("Streaming error:", error);
@@ -169,6 +175,7 @@ export function useChatStream() {
       addMessage,
       setStreaming,
       appendStreamContent,
+      noteStreamToken,
       appendToolCall,
       completeToolCall,
       clearToolCalls,
@@ -221,6 +228,8 @@ export function useChatStream() {
 
       // Clear any previous tool calls
       clearToolCalls();
+      // llama.cpp's own speed measurement, if the server sends it
+      let timings = null;
 
       try {
         // Use tools endpoint if tools are enabled
@@ -245,6 +254,7 @@ export function useChatStream() {
                 completeToolCall(event.id, event.result, event.error);
                 break;
               case "done":
+                timings = event.timings || null;
                 break;
               case "error":
                 throw new Error(event.error);
@@ -258,7 +268,10 @@ export function useChatStream() {
           )) {
             if (chunk.message?.content) {
               appendStreamContent(chunk.message.content);
+            } else if (chunk.message?.thinking) {
+              noteStreamToken();
             }
+            if (chunk.timings) timings = chunk.timings;
 
             if (chunk.done) {
               break;
@@ -267,7 +280,7 @@ export function useChatStream() {
         }
 
         const duration = (Date.now() - startTime) / 1000;
-        finalizeStream({ duration });
+        finalizeStream({ duration, timings });
       } catch (error) {
         if (error.name !== "AbortError") {
           console.error("Streaming error:", error);
@@ -296,6 +309,7 @@ export function useChatStream() {
       addMessage,
       setStreaming,
       appendStreamContent,
+      noteStreamToken,
       appendToolCall,
       completeToolCall,
       clearToolCalls,
