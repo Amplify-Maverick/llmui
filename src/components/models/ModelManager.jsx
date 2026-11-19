@@ -2,23 +2,13 @@ import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useImageStore } from "../../stores/imageStore.js";
-import ModelCard from "./ModelCard.jsx";
+import TextModelManager from "./TextModelManager.jsx";
 import CivitaiModelBrowser from "./CivitaiModelBrowser.jsx";
 import Button from "../shared/Button.jsx";
 import "./ModelManager.css";
 
 export default function ModelManager() {
-  const {
-    models,
-    isLoading,
-    error,
-    modelInfoCache,
-    fetchModels,
-    fetchModelInfo,
-    clearError,
-  } = useModelsStore();
-
-  const { defaultModel, updateSetting } = useSettingsStore();
+  const { isLoading, error, fetchModels, clearError } = useModelsStore();
 
   const {
     checkpoints,
@@ -33,29 +23,12 @@ export default function ModelManager() {
   const [subTab, setSubTab] = useState("text"); // "text" | "image"
   const [showCivitaiBrowser, setShowCivitaiBrowser] = useState(false);
 
-  useEffect(() => {
-    fetchModels();
-  }, [fetchModels]);
-
   // Fetch image models when switching to image sub-tab
   useEffect(() => {
     if (subTab === "image") {
       fetchImageModels();
     }
   }, [subTab, fetchImageModels]);
-
-  // Fetch model info for each model to get tool support status
-  useEffect(() => {
-    models.forEach((model) => {
-      if (!modelInfoCache[model.name]) {
-        fetchModelInfo(model.name);
-      }
-    });
-  }, [models, modelInfoCache, fetchModelInfo]);
-
-  const handleSelect = (name) => {
-    updateSetting("defaultModel", name);
-  };
 
   return (
     <div className="model-manager">
@@ -67,7 +40,7 @@ export default function ModelManager() {
               className={`model-subtab ${subTab === "text" ? "active" : ""}`}
               onClick={() => setSubTab("text")}
             >
-              Text (/v1)
+              Text (llama.cpp)
             </button>
             <button
               className={`model-subtab ${subTab === "image" ? "active" : ""}`}
@@ -107,35 +80,8 @@ export default function ModelManager() {
         </div>
       )}
 
-      {/* ── Text Models (OpenAI-compatible /v1 server) ────────── */}
-      {subTab === "text" && (
-        <>
-          {isLoading && models.length === 0 ? (
-            <div className="model-manager-empty">Loading models...</div>
-          ) : models.length === 0 ? (
-            <div className="model-manager-empty">
-              <p className="model-manager-empty-icon"></p>
-              <h3>No models found</h3>
-              <p>
-                Models come from the OpenAI-compatible server (OPENAI_BASE_URL).
-                Load a model there, then Refresh.
-              </p>
-            </div>
-          ) : (
-            <div className="model-grid">
-              {models.map((model) => (
-                <ModelCard
-                  key={model.name}
-                  model={model}
-                  modelInfo={modelInfoCache[model.name]}
-                  isSelected={defaultModel === model.name}
-                  onSelect={handleSelect}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )}
+      {/* ── Text Models (llama.cpp router) ────────── */}
+      {subTab === "text" && <TextModelManager />}
 
       {/* ── Image Models (ComfyUI) ───────────────────────────── */}
       {subTab === "image" && (

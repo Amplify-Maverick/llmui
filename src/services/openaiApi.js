@@ -47,30 +47,6 @@ async function* readSSE(body) {
 }
 
 class OpenAIAPI {
-  /**
-   * Models known to the llama.cpp router, with load status
-   * (unloaded | loading | loaded | sleeping | downloading | incomplete).
-   * Served by /api/llama/models, which adds the upstream API key.
-   */
-  async listModels() {
-    const response = await fetch("/api/llama/models", {
-      headers: await authHeaders(),
-      signal: AbortSignal.timeout(12000),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Failed to fetch models (${response.status})`);
-    return (data.models || []).map((m) => ({
-      name: m.id,
-      model: m.id,
-      provider: "openai",
-      status: m.status,
-      failed: m.failed,
-      memory: m.memory,
-      size: m.size || 0,
-      contextLength: m.contextLength || null,
-    }));
-  }
-
   async *chatStream(model, messages, options = {}) {
     const body = {
       model,
