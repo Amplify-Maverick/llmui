@@ -2,11 +2,8 @@ import Button from "../shared/Button.jsx";
 import { formatBytes } from "../../utils/formatters.js";
 import "./ModelCard.css";
 
-export default function ModelCard({ model, modelInfo, onDelete, onSelect, isSelected }) {
-  const modifiedDate = model.modified_at
-    ? new Date(model.modified_at).toLocaleDateString()
-    : "Unknown";
-
+/** A model served by the OpenAI-compatible /v1 server. */
+export default function ModelCard({ model, modelInfo, onSelect, isSelected }) {
   return (
     <div className={`model-card ${isSelected ? "selected" : ""}`}>
       <div className="model-card-header">
@@ -15,35 +12,29 @@ export default function ModelCard({ model, modelInfo, onDelete, onSelect, isSele
           {modelInfo?.supportsTools && (
             <span className="model-card-tag tools">Tools</span>
           )}
-          {model.details?.family && (
-            <span className="model-card-tag">{model.details.family}</span>
-          )}
         </div>
       </div>
 
-      <div className="model-card-detail">
-        <span>Size</span>
-        <span>{formatBytes(model.size)}</span>
-      </div>
-
-      {model.details?.parameter_size && (
+      {model.size > 0 && (
         <div className="model-card-detail">
-          <span>Parameters</span>
-          <span>{model.details.parameter_size}</span>
+          <span>Size</span>
+          <span>{formatBytes(model.size)}</span>
         </div>
       )}
 
-      {model.details?.quantization_level && (
+      {model.contextLength && (
         <div className="model-card-detail">
-          <span>Quantization</span>
-          <span>{model.details.quantization_level}</span>
+          <span>Context</span>
+          <span>{model.contextLength.toLocaleString()} tokens</span>
         </div>
       )}
 
-      <div className="model-card-detail">
-        <span>Modified</span>
-        <span>{modifiedDate}</span>
-      </div>
+      {model.ownedBy && (
+        <div className="model-card-detail">
+          <span>Owned by</span>
+          <span>{model.ownedBy}</span>
+        </div>
+      )}
 
       <div className="model-card-actions">
         <Button
@@ -52,9 +43,6 @@ export default function ModelCard({ model, modelInfo, onDelete, onSelect, isSele
           style={{ flex: 1 }}
         >
           {isSelected ? "Selected" : "Use Model"}
-        </Button>
-        <Button variant="danger" onClick={() => onDelete(model.name)}>
-          Delete
         </Button>
       </div>
     </div>

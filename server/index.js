@@ -9,6 +9,7 @@ import path from "path";
 import os from "os";
 import { nanoid } from "nanoid";
 import { getToolsSchema, executeTool } from "./tools/index.js";
+import { openaiRouter, streamOpenAITurn, toOpenAIMessage, OPENAI_BASE_URL } from "./openai.js";
 
 // Database and API imports
 import { getDb, closeDb } from "./db/index.js";
@@ -25,118 +26,37 @@ import comfyuiRouter from "./api/comfyui.js";
 const execFileAsync = promisify(execFile);
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.LLMUI_PORT) || 3001;
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
 const TOKEN_FILE = path.join(STORAGE_DIR, "token");
-const OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
+const GPU_CONFIG_FILE = path.join(STORAGE_DIR, "gpu_config.json");
+// Pre-OpenAI-migration installs kept remoteGpuUrl in this file; read it once as a fallback.
+const LEGACY_OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
 const COMFYUI_CONFIG_FILE = path.join(STORAGE_DIR, "comfyui_config.json");
 
 let authToken = null;
-
-// Default Ollama URL, overridable by env var or persisted config
-const DEFAULT_OLLAMA_URL = "http://localhost:11434";
-let ollamaUrl = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
 
 // Optional remote GPU stats server URL (e.g. http://workstation-tailscale-ip:3002)
 // When set, /api/gpu and /api/hardware proxy to this server instead of running nvidia-smi locally.
 let remoteGpuUrl = process.env.REMOTE_GPU_URL || null;
 
-// Remote Ollama server (GPU box). When set, the UI can toggle between local and remote.
-let remoteOllamaUrl = process.env.REMOTE_OLLAMA_URL || null;
-// 'local' | 'remote' — tracks which preset is active; null means manually set URL
-let activeTarget = null;
-
-async function loadOllamaConfig() {
-  try {
-    const data = await fs.readFile(OLLAMA_CONFIG_FILE, "utf-8");
-    const config = JSON.parse(data);
-    if (config.ollamaUrl) ollamaUrl = config.ollamaUrl;
-    if (config.remoteGpuUrl) remoteGpuUrl = config.remoteGpuUrl;
-    if (config.remoteOllamaUrl) remoteOllamaUrl = config.remoteOllamaUrl;
-    if (config.activeTarget) activeTarget = config.activeTarget;
-  } catch (err) {
-    if (err.code !== "ENOENT") {
-      console.error("Error loading Ollama config:", err);
+async function loadGpuConfig() {
+  for (const file of [GPU_CONFIG_FILE, LEGACY_OLLAMA_CONFIG_FILE]) {
+    try {
+      const config = JSON.parse(await fs.readFile(file, "utf-8"));
+      if (config.remoteGpuUrl) remoteGpuUrl = config.remoteGpuUrl;
+      return;
+    } catch (err) {
+      if (err.code !== "ENOENT") console.error(`Error loading ${path.basename(file)}:`, err);
     }
   }
 }
 
-async function saveOllamaConfig() {
+async function saveGpuConfig() {
   await ensureStorageDir();
-  const config = { ollamaUrl };
-  if (remoteGpuUrl) config.remoteGpuUrl = remoteGpuUrl;
-  if (remoteOllamaUrl) config.remoteOllamaUrl = remoteOllamaUrl;
-  if (activeTarget) config.activeTarget = activeTarget;
-  await fs.writeFile(OLLAMA_CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-// Background liveness check for the GPU box's Ollama, independent of which
-// target is currently active — lets the UI show online/offline status before
-// the user switches, without pinging the GPU box on every client request.
-const REMOTE_HEALTH_POLL_MS = 15000;
-const REMOTE_HEALTH_TIMEOUT_MS = 5000;
-
-let remoteHealthCache = { online: null, checkedAt: null, latencyMs: null, error: null };
-let remoteHealthTimer = null;
-
-async function checkRemoteHealth() {
-  if (!remoteOllamaUrl) return;
-  const start = Date.now();
-  try {
-    const response = await fetch(`${remoteOllamaUrl}/api/tags`, {
-      signal: AbortSignal.timeout(REMOTE_HEALTH_TIMEOUT_MS),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    remoteHealthCache = { online: true, checkedAt: Date.now(), latencyMs: Date.now() - start, error: null };
-  } catch (err) {
-    remoteHealthCache = { online: false, checkedAt: Date.now(), latencyMs: null, error: err.message };
-  }
-}
-
-function startRemoteHealthPoll() {
-  if (remoteHealthTimer) clearInterval(remoteHealthTimer);
-  remoteHealthTimer = null;
-  if (!remoteOllamaUrl) {
-    remoteHealthCache = { online: null, checkedAt: null, latencyMs: null, error: null };
-    return;
-  }
-  checkRemoteHealth();
-  remoteHealthTimer = setInterval(checkRemoteHealth, REMOTE_HEALTH_POLL_MS);
-}
-
-function stopRemoteHealthPoll() {
-  if (remoteHealthTimer) clearInterval(remoteHealthTimer);
-  remoteHealthTimer = null;
-}
-
-/**
- * Rate how well a model (by its on-disk size) fits this machine's detected
- * capacity (hardware.effectiveCapacityGb — GPU VRAM if present, else real
- * available RAM capped for CPU inference speed; see getLocalHardwareInfo).
- * A model's disk size is a close proxy for the RAM/VRAM it needs to load,
- * plus headroom for context and runtime overhead — so this scales with real
- * hardware instead of fixed absolute thresholds that are wrong on both very
- * small and very large boxes.
- */
-function getModelFeasibility(sizeBytes, hardware) {
-  const GB = 1024 ** 3;
-  const requiredGb = (sizeBytes / GB) * 1.2;
-
-  const capacityGb = hardware?.effectiveCapacityGb;
-
-  if (!capacityGb) {
-    // Hardware unknown — fall back to the old conservative absolute bands.
-    if (sizeBytes < 4 * GB) return "good";
-    if (sizeBytes < 8 * GB) return "slow";
-    return "poor";
-  }
-
-  const ratio = capacityGb / requiredGb;
-  if (ratio >= 1.3) return "good";
-  if (ratio >= 0.9) return "slow";
-  return "poor";
+  await fs.writeFile(GPU_CONFIG_FILE, JSON.stringify({ remoteGpuUrl }, null, 2));
 }
 
 // Default ComfyUI URL, overridable by env var or persisted config
@@ -169,18 +89,6 @@ async function saveComfyuiConfig(url, modelsPathOverride) {
     COMFYUI_CONFIG_FILE,
     JSON.stringify({ comfyuiUrl, comfyModelsPath }, null, 2)
   );
-}
-
-function validateOllamaUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      return { valid: false, error: "URL must use http or https protocol" };
-    }
-    return { valid: true };
-  } catch {
-    return { valid: false, error: "Invalid URL format" };
-  }
 }
 
 async function getOrCreateToken() {
@@ -249,7 +157,10 @@ app.use(
   })
 );
 app.use(express.json({ limit: "5mb" }));
-app.set("trust proxy", false);
+// Requests arrive via the Vite dev proxy (and nginx in front of it), both on
+// loopback. Trust X-Forwarded-For only from loopback hops so req.ip is the real
+// client (for rate limiting and the localhost-only /auth/token check).
+app.set("trust proxy", "loopback");
 
 // ============================================================
 // Rate limiting
@@ -355,107 +266,6 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// ============================================================
-// Authenticated Ollama proxy endpoints
-// All Ollama access goes through these endpoints to prevent
-// unauthenticated LAN users from accessing Ollama resources.
-// ============================================================
-
-// GET /ollama/config - Get current Ollama URL and server target config
-app.get("/ollama/config", requireAuth, (req, res) => {
-  res.json({
-    ollamaUrl,
-    remoteOllamaUrl,
-    activeTarget,
-    remoteStatus: { configured: !!remoteOllamaUrl, ...remoteHealthCache },
-  });
-});
-
-// GET /ollama/remote-status - cached GPU-server liveness (no per-request network call)
-app.get("/ollama/remote-status", requireAuth, (req, res) => {
-  res.json({ configured: !!remoteOllamaUrl, ...remoteHealthCache });
-});
-
-// PUT /ollama/config - Update Ollama URL and/or remote URL
-app.put("/ollama/config", requireAuth, async (req, res) => {
-  const { ollamaUrl: newUrl, remoteOllamaUrl: newRemoteUrl } = req.body;
-
-  if (newUrl) {
-    const { valid, error } = validateOllamaUrl(newUrl);
-    if (!valid) return res.status(400).json({ error });
-    ollamaUrl = newUrl;
-    // If the URL is changed manually, clear the active target preset
-    activeTarget = null;
-  }
-
-  if (newRemoteUrl !== undefined) {
-    if (newRemoteUrl) {
-      const { valid, error } = validateOllamaUrl(newRemoteUrl);
-      if (!valid) return res.status(400).json({ error });
-      remoteOllamaUrl = newRemoteUrl;
-    } else {
-      remoteOllamaUrl = null;
-    }
-    startRemoteHealthPoll();
-  }
-
-  if (!newUrl && newRemoteUrl === undefined) {
-    return res.status(400).json({ error: "ollamaUrl or remoteOllamaUrl is required" });
-  }
-
-  try {
-    await saveOllamaConfig();
-    res.json({ success: true, ollamaUrl, remoteOllamaUrl, activeTarget });
-  } catch (err) {
-    console.error("Error saving Ollama config:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// PUT /ollama/switch - Toggle between local and remote GPU server
-app.put("/ollama/switch", requireAuth, async (req, res) => {
-  const { target } = req.body;
-  if (!["local", "remote"].includes(target)) {
-    return res.status(400).json({ error: "target must be 'local' or 'remote'" });
-  }
-  if (target === "remote" && !remoteOllamaUrl) {
-    return res.status(400).json({ error: "No remote Ollama URL configured. Set remoteOllamaUrl in Settings first." });
-  }
-
-  activeTarget = target;
-  ollamaUrl = target === "local" ? DEFAULT_OLLAMA_URL : remoteOllamaUrl;
-
-  try {
-    await saveOllamaConfig();
-    res.json({ success: true, ollamaUrl, activeTarget });
-  } catch (err) {
-    console.error("Error saving switch config:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// GET /ollama/local-capability - Check which models on local Ollama can run,
-// rated against this machine's actually detected RAM/VRAM (not just model size).
-app.get("/ollama/local-capability", requireAuth, async (req, res) => {
-  try {
-    const [response, hardware] = await Promise.all([
-      fetch(`${DEFAULT_OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) }),
-      getLocalHardwareInfo(),
-    ]);
-    if (!response.ok) {
-      return res.status(502).json({ error: "Local Ollama not reachable" });
-    }
-    const data = await response.json();
-    const models = (data.models || []).map((model) => ({
-      ...model,
-      cpuFeasibility: getModelFeasibility(model.size || 0, hardware),
-    }));
-    res.json({ models, hardware });
-  } catch {
-    res.status(502).json({ error: "Failed to connect to local Ollama" });
-  }
-});
-
 // GET /api/gpu-config - Get current remote GPU stats URL
 app.get("/api/gpu-config", requireAuth, (req, res) => {
   res.json({ remoteGpuUrl });
@@ -480,7 +290,7 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
   }
 
   try {
-    await saveOllamaConfig();
+    await saveGpuConfig();
     res.json({ ok: true, remoteGpuUrl });
   } catch (err) {
     console.error("Error saving GPU config:", err);
@@ -488,93 +298,13 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
   }
 });
 
-// GET /ollama/tags - List models
-app.get("/ollama/tags", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/tags`);
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error("Error proxying tags request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
-  }
-});
-
-// GET /ollama/ps - List running models
-app.get("/ollama/ps", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/ps`);
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error("Error proxying ps request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
-  }
-});
-
-// POST /ollama/show - Show model info
-app.post("/ollama/show", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
-    });
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error("Error proxying show request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
-  }
-});
-
-// POST /ollama/chat - Chat with streaming (authenticated)
-app.post("/ollama/chat", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-
-    // Stream the response back
-    res.setHeader("Content-Type", "application/x-ndjson");
-    const reader = response.body.getReader();
-    const pump = async () => {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          break;
-        }
-        res.write(Buffer.from(value));
-      }
-    };
-    await pump();
-  } catch (err) {
-    console.error("Error proxying chat request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
-  }
-});
-
-// POST /ollama/chat-with-tools - Chat with tool calling support (authenticated, streaming)
+// POST /api/chat-with-tools - Chat with tool calling support (authenticated, streaming NDJSON)
+//
+// Runs the tool loop server-side against the OpenAI-compatible server
+// (OPENAI_BASE_URL): stream a turn, execute any tool calls, feed results back,
+// repeat until the model answers without tools or MAX_TOOL_ITERATIONS is hit.
+// Body: { model, messages, options: { modelOptions }, enabledTools, enableThinking? }
+// Emits: {type:"content"|"tool_call"|"tool_result"|"done"|"error", ...}
 //
 // Manual test for abort handling:
 // 1. Start a chat that triggers a slow tool (e.g., web_search or fetch_url with a slow endpoint)
@@ -583,31 +313,44 @@ app.post("/ollama/chat", requireAuth, async (req, res) => {
 //    instead of the tool result being logged/processed
 const MAX_TOOL_ITERATIONS = 5;
 
-app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
-  const { model, messages, options = {}, enabledTools = null } = req.body;
+app.post("/api/chat-with-tools", requireAuth, async (req, res) => {
+  const {
+    model,
+    messages,
+    options = {},
+    enabledTools = null,
+    enableThinking = false,
+  } = req.body;
 
   if (!model) {
     return res.status(400).json({ error: "Model is required" });
   }
+  if (!Array.isArray(messages)) {
+    return res.status(400).json({ error: "messages must be an array" });
+  }
 
-  // Create abort controller for cancellation on client disconnect
+  // Create abort controller for cancellation on client disconnect.
+  // Listen on `res`, not `req`: since Node 16, req "close" fires once the
+  // request body has been read, not when the client goes away.
   const controller = new AbortController();
   const { signal } = controller;
-
-  // Abort all pending operations when client disconnects
-  req.on("close", () => {
-    if (!res.writableEnded) {
+  res.on("close", () => {
+    if (!res.writableFinished) {
       controller.abort();
     }
   });
 
-  // Get tools schema for enabled tools
+  // OpenAI function-tool schemas for the enabled tools
   const tools = getToolsSchema(enabledTools);
 
   res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("X-Accel-Buffering", "no");
 
-  let currentMessages = [...messages];
+  const currentMessages = messages.map(toOpenAIMessage);
   let iterations = 0;
+  const onContent = (text) => {
+    res.write(JSON.stringify({ type: "content", content: text }) + "\n");
+  };
 
   try {
     while (iterations < MAX_TOOL_ITERATIONS) {
@@ -618,98 +361,15 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
 
       iterations++;
 
-      // Call Ollama with tools
-      const response = await fetch(`${ollamaUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: currentMessages,
-          tools: tools.length > 0 ? tools : undefined,
-          stream: true,
-          options: options.modelOptions || {},
-        }),
+      const { content: assistantContent, toolCalls } = await streamOpenAITurn({
+        model,
+        messages: currentMessages,
+        tools,
+        modelOptions: options.modelOptions || {},
+        enableThinking,
         signal,
+        onContent,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        res.write(JSON.stringify({ type: "error", error: errorText }) + "\n");
-        res.end();
-        return;
-      }
-
-      // Stream and collect the response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      let toolCalls = [];
-      let buffer = "";
-
-      try {
-        while (true) {
-          // Check abort before each read
-          if (signal.aborted) {
-            reader.cancel();
-            throw new DOMException("Request aborted", "AbortError");
-          }
-
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-
-            try {
-              const parsed = JSON.parse(line);
-
-              // Stream content to client
-              if (parsed.message?.content) {
-                assistantContent += parsed.message.content;
-                res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
-              }
-
-              // Collect tool calls from the final message
-              if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
-                toolCalls = parsed.message.tool_calls;
-              }
-
-              if (parsed.done) {
-                break;
-              }
-            } catch {
-              // Skip malformed JSON lines
-            }
-          }
-        }
-      } finally {
-        // Ensure reader is released even on abort
-        try {
-          reader.releaseLock();
-        } catch {
-          // Reader may already be released
-        }
-      }
-
-      // Process remaining buffer
-      if (buffer.trim()) {
-        try {
-          const parsed = JSON.parse(buffer);
-          if (parsed.message?.content) {
-            assistantContent += parsed.message.content;
-            res.write(JSON.stringify({ type: "content", content: parsed.message.content }) + "\n");
-          }
-          if (parsed.message?.tool_calls && parsed.message.tool_calls.length > 0) {
-            toolCalls = parsed.message.tool_calls;
-          }
-        } catch {
-          // Skip malformed JSON
-        }
-      }
 
       // If no tool calls, we're done
       if (toolCalls.length === 0) {
@@ -717,6 +377,9 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
         res.end();
         return;
       }
+
+      // Every call needs an id so its tool result can reference it
+      for (const tc of toolCalls) tc.id ||= `call_${nanoid()}`;
 
       // Add assistant message with tool calls to history
       currentMessages.push({
@@ -733,14 +396,14 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
         }
 
         const { function: fn } = toolCall;
-        const toolId = toolCall.id || nanoid();
+        const toolId = toolCall.id;
         const toolName = fn.name;
         let toolArgs = fn.arguments;
 
         // Parse arguments if they're a string
         if (typeof toolArgs === "string") {
           try {
-            toolArgs = JSON.parse(toolArgs);
+            toolArgs = JSON.parse(toolArgs || "{}");
           } catch {
             toolArgs = {};
           }
@@ -771,9 +434,10 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
           error: result.success ? null : result.error,
         }) + "\n");
 
-        // Add tool result to messages (Ollama expects role: "tool")
+        // Feed the result back, linked to its call
         currentMessages.push({
           role: "tool",
+          tool_call_id: toolId,
           content: JSON.stringify(result.success ? result.result : { error: result.error }),
         });
       }
@@ -800,88 +464,6 @@ app.post("/ollama/chat-with-tools", requireAuth, async (req, res) => {
       res.write(JSON.stringify({ type: "error", error: err.message || "Tool execution failed" }) + "\n");
       res.end();
     }
-  }
-});
-
-// POST /ollama/pull - Pull a model (authenticated, streaming)
-app.post("/ollama/pull", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-
-    // Stream the response back
-    res.setHeader("Content-Type", "application/x-ndjson");
-    const reader = response.body.getReader();
-    const pump = async () => {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          break;
-        }
-        res.write(Buffer.from(value));
-      }
-    };
-    await pump();
-  } catch (err) {
-    console.error("Error proxying pull request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
-  }
-});
-
-// POST /ollama/unload - Unload a model from VRAM (authenticated)
-app.post("/ollama/unload", requireAuth, async (req, res) => {
-  const { name } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: "Model name is required" });
-  }
-
-  try {
-    // Ollama unloads a model when you send a generate request with keep_alive=0
-    const response = await fetch(`${ollamaUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: name, keep_alive: 0 }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Error unloading model:", err);
-    res.status(502).json({ error: "Failed to unload model" });
-  }
-});
-
-// DELETE /ollama/delete - Delete a model (authenticated)
-app.delete("/ollama/delete", requireAuth, async (req, res) => {
-  try {
-    const response = await fetch(`${ollamaUrl}/api/delete`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).send(error);
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Error proxying delete request:", err);
-    res.status(502).json({ error: "Failed to connect to Ollama" });
   }
 });
 
@@ -1009,7 +591,7 @@ app.get("/api/gpu", requireAuth, async (req, res) => {
   // Proxy to remote GPU stats server if configured — but not when the
   // Local/Remote switcher has explicitly selected "local", so switching to
   // Local actually reports on this machine instead of a stale remote box.
-  if (remoteGpuUrl && activeTarget !== "local") {
+  if (remoteGpuUrl) {
     try {
       const response = await fetch(`${remoteGpuUrl}/api/gpu`, {
         signal: AbortSignal.timeout(5000),
@@ -1066,9 +648,7 @@ async function getAvailableRamGb() {
 }
 
 /**
- * Detect this machine's CPU/RAM/GPU. Shared by /api/hardware (local case)
- * and /ollama/local-capability, so both use the same real numbers instead
- * of local-capability's previous size-only heuristic.
+ * Detect this machine's CPU/RAM/GPU for /api/hardware (local case).
  */
 async function getLocalHardwareInfo() {
   const totalRamGb = +(os.totalmem() / (1024 ** 3)).toFixed(1);
@@ -1136,12 +716,11 @@ async function getLocalHardwareInfo() {
 
 // ============================================================
 // Hardware info endpoint (authenticated)
-// Returns system RAM + GPU VRAM. When remoteGpuUrl is set AND the switcher
-// isn't pinned to "local", fetches from the remote GPU stats server (the
-// machine actually doing compute) instead of this one.
+// Returns system RAM + GPU VRAM. When remoteGpuUrl is set, fetches from the
+// remote GPU stats server (the machine actually doing compute) instead of this one.
 // ============================================================
 app.get("/api/hardware", requireAuth, async (req, res) => {
-  if (remoteGpuUrl && activeTarget !== "local") {
+  if (remoteGpuUrl) {
     try {
       const response = await fetch(`${remoteGpuUrl}/api/hardware`, {
         signal: AbortSignal.timeout(5000),
@@ -1185,6 +764,9 @@ app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
 app.use("/api/export", requireAuth, exportRouter);
 app.use("/comfyui", requireAuth, comfyuiRouter);
+// OpenAI-compatible model server (llama.cpp etc.) — the only model source.
+// Authenticated streaming passthrough; the browser never talks to it directly.
+app.use("/openai/v1", requireAuth, openaiRouter);
 
 // ============================================================
 // Startup
@@ -1194,8 +776,7 @@ const dryRun = args.includes("--dry-run");
 
 await ensureStorageDir();
 await getOrCreateToken();
-await loadOllamaConfig();
-startRemoteHealthPoll();
+await loadGpuConfig();
 
 await loadComfyuiConfig();
 
@@ -1223,7 +804,6 @@ if (dryRun && migrationResult.dryRun) {
 process.on("SIGTERM", () => {
   console.log("Shutting down...");
   stopNvidiaSmiLoop();
-  stopRemoteHealthPoll();
   closeDb();
   process.exit(0);
 });
@@ -1231,7 +811,6 @@ process.on("SIGTERM", () => {
 process.on("SIGINT", () => {
   console.log("Shutting down...");
   stopNvidiaSmiLoop();
-  stopRemoteHealthPoll();
   closeDb();
   process.exit(0);
 });
@@ -1239,5 +818,5 @@ process.on("SIGINT", () => {
 app.listen(PORT, () => {
   console.log(`Storage server running on http://localhost:${PORT}`);
   console.log(`Data directory: ${STORAGE_DIR}`);
-  console.log(`Ollama URL: ${ollamaUrl}`);
+  console.log(`OpenAI-compatible URL: ${OPENAI_BASE_URL}`);
 });

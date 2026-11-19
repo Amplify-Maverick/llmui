@@ -62,14 +62,15 @@ export const api = {
     request("PATCH", `/api/conversations/${encodeURIComponent(id)}`, { title }),
   deleteConversation: (id) =>
     request("DELETE", `/api/conversations/${encodeURIComponent(id)}`),
-  getModels: () => request("GET", `/ollama/tags`),
+  // Models served by the OpenAI-compatible /v1 server, via the authenticated proxy
+  getModels: async () => {
+    const data = await request("GET", `/openai/v1/models`);
+    return (data.data || []).map((m) => ({ name: m.id, size: m.meta?.size || 0 }));
+  },
   getSettings: async () => {
     const res = await request("GET", `/api/settings/llmui_settings`);
     return res.data || null;
   },
-  getOllamaConfig: () => request("GET", `/ollama/config`),
-  getRemoteStatus: () => request("GET", `/ollama/remote-status`),
-  switchServer: (target) => request("PUT", `/ollama/switch`, { target }),
 };
 
 function buildOptions(temperature, maxTokens) {
@@ -79,26 +80,14 @@ function buildOptions(temperature, maxTokens) {
   return o;
 }
 
-function* normalize(chunk, useTools) {
-  if (useTools) {
-    if (chunk.type === "content") yield { type: "content", text: chunk.content };
-    else if (chunk.type === "tool_call")
-      yield { type: "tool_call", id: chunk.id, name: chunk.name, arguments: chunk.arguments };
-    else if (chunk.type === "tool_result")
-      yield { type: "tool_result", id: chunk.id, name: chunk.name, result: chunk.result, error: chunk.error };
-    else if (chunk.type === "error") yield { type: "error", error: chunk.error };
-    else if (chunk.type === "done") yield { type: "done", tokensPerSec: null };
-    return;
-  }
-  // Plain /ollama/chat (raw Ollama ndjson)
-  if (chunk.message?.content) yield { type: "content", text: chunk.message.content };
-  if (chunk.done) {
-    let tokensPerSec = null;
-    if (chunk.eval_count && chunk.eval_duration) {
-      tokensPerSec = chunk.eval_count / (chunk.eval_duration / 1e9);
-    }
-    yield { type: "done", tokensPerSec };
-  }
+function* normalize(chunk) {
+  if (chunk.type === "content") yield { type: "content", text: chunk.content };
+  else if (chunk.type === "tool_call")
+    yield { type: "tool_call", id: chunk.id, name: chunk.name, arguments: chunk.arguments };
+  else if (chunk.type === "tool_result")
+    yield { type: "tool_result", id: chunk.id, name: chunk.name, result: chunk.result, error: chunk.error };
+  else if (chunk.type === "error") yield { type: "error", error: chunk.error };
+  else if (chunk.type === "done") yield { type: "done", tokensPerSec: null };
 }
 
 /**
@@ -110,23 +99,16 @@ function* normalize(chunk, useTools) {
  *   { type: "error", error }
  */
 export async function* streamChat({ model, messages, temperature, maxTokens, tools, enabledTools, signal }) {
-  const useTools = Boolean(tools);
-  const endpoint = useTools ? "/ollama/chat-with-tools" : "/ollama/chat";
-  const body = useTools
-    ? {
-        model,
-        messages,
-        enabledTools: enabledTools ?? null,
-        options: { modelOptions: buildOptions(temperature, maxTokens) },
-      }
-    : {
-        model,
-        messages,
-        stream: true,
-        options: buildOptions(temperature, maxTokens),
-      };
+  // Always use the server-side loop against the /v1 server; with tools off it
+  // gets an empty tool list and is a plain streamed completion.
+  const body = {
+    model,
+    messages,
+    enabledTools: tools ? enabledTools ?? null : [],
+    options: { modelOptions: buildOptions(temperature, maxTokens) },
+  };
 
-  const res = await fetch(`${SERVER}${endpoint}`, {
+  const res = await fetch(`${SERVER}/api/chat-with-tools`, {
     method: "POST",
     headers: headers({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
@@ -156,12 +138,12 @@ export async function* streamChat({ model, messages, temperature, maxTokens, too
       } catch {
         continue;
       }
-      yield* normalize(parsed, useTools);
+      yield* normalize(parsed);
     }
   }
   if (buf.trim()) {
     try {
-      yield* normalize(JSON.parse(buf), useTools);
+      yield* normalize(JSON.parse(buf));
     } catch {
       // ignore trailing partial
     }

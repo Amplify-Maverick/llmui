@@ -200,14 +200,17 @@ const MessageBubble = memo(function MessageBubble({
             >
               {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
-            <button
-              className="bubble-action-btn branch"
-              onClick={handleBranch}
-              title="Create branch from here"
-            >
-              <BranchIcon />
-            </button>
-            {isUser && (
+            {/* Mutating actions render only when a handler is passed (read-only chats pass none) */}
+            {onBranch && (
+              <button
+                className="bubble-action-btn branch"
+                onClick={handleBranch}
+                title="Create branch from here"
+              >
+                <BranchIcon />
+              </button>
+            )}
+            {isUser && onEdit && (
               <button
                 className="bubble-action-btn"
                 onClick={handleEdit}
@@ -216,7 +219,7 @@ const MessageBubble = memo(function MessageBubble({
                 <EditIcon />
               </button>
             )}
-            {!isUser && isLastAssistant && (
+            {!isUser && isLastAssistant && onRegenerate && (
               <button
                 className="bubble-action-btn"
                 onClick={handleRegenerate}
@@ -225,13 +228,15 @@ const MessageBubble = memo(function MessageBubble({
                 <RefreshIcon />
               </button>
             )}
-            <button
-              className="bubble-action-btn danger"
-              onClick={handleDelete}
-              title="Delete message"
-            >
-              <TrashIcon />
-            </button>
+            {onDelete && (
+              <button
+                className="bubble-action-btn danger"
+                onClick={handleDelete}
+                title="Delete message"
+              >
+                <TrashIcon />
+              </button>
+            )}
           </div>
         )}
 

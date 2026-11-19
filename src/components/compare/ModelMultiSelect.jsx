@@ -12,7 +12,7 @@ export default function ModelMultiSelect({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
-  const { localModels } = useModelsStore();
+  const { models } = useModelsStore();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function ModelMultiSelect({
 
       {isOpen && (
         <div className="model-multi-select-dropdown">
-          {localModels.map((model) => {
+          {models.map((model) => {
             const isSelected = value.includes(model.name);
             const isDisabled = !isSelected && value.length >= maxSelections;
 
@@ -92,13 +92,13 @@ export default function ModelMultiSelect({
                     {model.name}
                   </span>
                   <span className="model-multi-select-option-size">
-                    {formatBytes(model.size)}
+                    {model.size ? formatBytes(model.size) : ""}
                   </span>
                 </div>
               </div>
             );
           })}
-          {localModels.length === 0 && (
+          {models.length === 0 && (
             <div className="model-multi-select-empty">No models available</div>
           )}
         </div>

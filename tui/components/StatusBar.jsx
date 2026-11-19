@@ -1,19 +1,18 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-export default function StatusBar({ model, toolsOn, streaming, toolStatus, focus, error, columns, activeTarget, remoteStatus }) {
+export default function StatusBar({ model, toolsOn, streaming, toolStatus, focus, error, columns, readOnlyModel }) {
   return (
     <Box width={columns} paddingX={1} justifyContent="space-between">
       <Text wrap="truncate">
         <Text color="green">{model || "no model"}</Text>
         <Text dimColor> · </Text>
-        <Text color={activeTarget === "remote" ? "cyan" : "gray"}>{activeTarget === "remote" ? "GPU" : "Mini"}</Text>
-        {remoteStatus?.configured && (
-          <Text color={remoteStatus.online ? "green" : remoteStatus.online === false ? "red" : "gray"}>
-            {" "}{remoteStatus.online ? "●" : remoteStatus.online === false ? "○" : "?"}
-          </Text>
+        {readOnlyModel && (
+          <>
+            <Text color="yellow">read-only ({readOnlyModel})</Text>
+            <Text dimColor> · </Text>
+          </>
         )}
-        <Text dimColor> · </Text>
         <Text color={toolsOn ? "yellow" : "gray"}>tools {toolsOn ? "on" : "off"}</Text>
         <Text dimColor> · </Text>
         {toolStatus ? (
@@ -27,7 +26,7 @@ export default function StatusBar({ model, toolsOn, streaming, toolStatus, focus
           <Text color="red">⚠ {error}</Text>
         ) : (
           <Text dimColor>
-            {focus === "input" ? "tab →chats · esc list" : "tab →input · m model · t tools · s server"}
+            {focus === "input" ? "tab →chats · esc list" : "tab →input · m model · t tools"}
           </Text>
         )}
       </Text>

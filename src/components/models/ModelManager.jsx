@@ -3,24 +3,18 @@ import { useModelsStore } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useImageStore } from "../../stores/imageStore.js";
 import ModelCard from "./ModelCard.jsx";
-import ModelPullDialog from "./ModelPullDialog.jsx";
-import HardwareGuideModal from "./HardwareGuideModal.jsx";
 import CivitaiModelBrowser from "./CivitaiModelBrowser.jsx";
-import { ConfirmModal } from "../shared/Modal.jsx";
 import Button from "../shared/Button.jsx";
 import "./ModelManager.css";
 
 export default function ModelManager() {
   const {
-    localModels,
+    models,
     isLoading,
     error,
-    pullProgress,
     modelInfoCache,
     fetchModels,
     fetchModelInfo,
-    pullModel,
-    deleteModel,
     clearError,
   } = useModelsStore();
 
@@ -37,10 +31,7 @@ export default function ModelManager() {
   const { comfyModelsPath } = useSettingsStore();
 
   const [subTab, setSubTab] = useState("text"); // "text" | "image"
-  const [showPullDialog, setShowPullDialog] = useState(false);
-  const [showHardwareGuide, setShowHardwareGuide] = useState(false);
   const [showCivitaiBrowser, setShowCivitaiBrowser] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   useEffect(() => {
     fetchModels();
@@ -55,31 +46,12 @@ export default function ModelManager() {
 
   // Fetch model info for each model to get tool support status
   useEffect(() => {
-    localModels.forEach((model) => {
+    models.forEach((model) => {
       if (!modelInfoCache[model.name]) {
         fetchModelInfo(model.name);
       }
     });
-  }, [localModels, modelInfoCache, fetchModelInfo]);
-
-  const handlePull = async (name) => {
-    try {
-      await pullModel(name);
-      setShowPullDialog(false);
-    } catch (err) {
-      // Error is handled in store
-    }
-  };
-
-  const handleDelete = async () => {
-    if (deleteConfirm) {
-      await deleteModel(deleteConfirm);
-      if (defaultModel === deleteConfirm) {
-        updateSetting("defaultModel", "");
-      }
-      setDeleteConfirm(null);
-    }
-  };
+  }, [models, modelInfoCache, fetchModelInfo]);
 
   const handleSelect = (name) => {
     updateSetting("defaultModel", name);
@@ -95,7 +67,7 @@ export default function ModelManager() {
               className={`model-subtab ${subTab === "text" ? "active" : ""}`}
               onClick={() => setSubTab("text")}
             >
-              Text (Ollama)
+              Text (/v1)
             </button>
             <button
               className={`model-subtab ${subTab === "image" ? "active" : ""}`}
@@ -108,14 +80,8 @@ export default function ModelManager() {
         <div className="model-manager-actions">
           {subTab === "text" && (
             <>
-              <Button variant="secondary" onClick={() => setShowHardwareGuide(true)}>
-                Check Hardware
-              </Button>
               <Button variant="ghost" onClick={fetchModels} disabled={isLoading}>
                 Refresh
-              </Button>
-              <Button onClick={() => setShowPullDialog(true)}>
-                Pull Model
               </Button>
             </>
           )}
@@ -141,27 +107,29 @@ export default function ModelManager() {
         </div>
       )}
 
-      {/* ── Text Models (Ollama) ──────────────────────────────── */}
+      {/* ── Text Models (OpenAI-compatible /v1 server) ────────── */}
       {subTab === "text" && (
         <>
-          {isLoading && localModels.length === 0 ? (
+          {isLoading && models.length === 0 ? (
             <div className="model-manager-empty">Loading models...</div>
-          ) : localModels.length === 0 ? (
+          ) : models.length === 0 ? (
             <div className="model-manager-empty">
               <p className="model-manager-empty-icon"></p>
               <h3>No models found</h3>
-              <p>Pull a model to get started.</p>
+              <p>
+                Models come from the OpenAI-compatible server (OPENAI_BASE_URL).
+                Load a model there, then Refresh.
+              </p>
             </div>
           ) : (
             <div className="model-grid">
-              {localModels.map((model) => (
+              {models.map((model) => (
                 <ModelCard
                   key={model.name}
                   model={model}
                   modelInfo={modelInfoCache[model.name]}
                   isSelected={defaultModel === model.name}
                   onSelect={handleSelect}
-                  onDelete={setDeleteConfirm}
                 />
               ))}
             </div>
@@ -238,28 +206,6 @@ export default function ModelManager() {
           )}
         </>
       )}
-
-      <ModelPullDialog
-        isOpen={showPullDialog}
-        onClose={() => setShowPullDialog(false)}
-        onPull={handlePull}
-        pullProgress={pullProgress}
-        localModels={localModels}
-      />
-
-      <ConfirmModal
-        isOpen={deleteConfirm !== null}
-        onClose={() => setDeleteConfirm(null)}
-        onConfirm={handleDelete}
-        title="Delete Model"
-        message={`Are you sure you want to delete "${deleteConfirm}"? This cannot be undone.`}
-        confirmText="Delete"
-      />
-
-      <HardwareGuideModal
-        isOpen={showHardwareGuide}
-        onClose={() => setShowHardwareGuide(false)}
-      />
 
       <CivitaiModelBrowser
         isOpen={showCivitaiBrowser}

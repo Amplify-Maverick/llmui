@@ -11,11 +11,6 @@ export default function SettingsPanel() {
     systemPrompt,
     temperature,
     maxTokens,
-    ollamaUrl,
-    remoteOllamaUrl,
-    activeTarget,
-    ollamaUrlLoading,
-    ollamaUrlError,
     comfyuiUrl,
     comfyuiUrlLoading,
     comfyuiUrlError,
@@ -28,34 +23,20 @@ export default function SettingsPanel() {
     enabledTools,
     theme,
     updateSetting,
-    updateOllamaUrl,
-    updateRemoteOllamaUrl,
     updateComfyuiUrl,
     updateComfyModelsPath,
   } = useSettingsStore();
 
-  const { localModels, fetchModels } = useModelsStore();
+  const { models, fetchModels } = useModelsStore();
   const { loadConversations } = useChatStore();
 
   // Local state for the URL inputs so we can edit without saving on every keystroke
-  const [urlInput, setUrlInput] = useState(ollamaUrl);
-  const [urlSaved, setUrlSaved] = useState(false);
-  const [remoteUrlInput, setRemoteUrlInput] = useState(remoteOllamaUrl || "");
-  const [remoteUrlSaved, setRemoteUrlSaved] = useState(false);
   const [comfyUrlInput, setComfyUrlInput] = useState(comfyuiUrl);
   const [comfyUrlSaved, setComfyUrlSaved] = useState(false);
   const [modelsPathInput, setModelsPathInput] = useState(comfyModelsPath);
   const [modelsPathSaved, setModelsPathSaved] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
   const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    setUrlInput(ollamaUrl);
-  }, [ollamaUrl]);
-
-  useEffect(() => {
-    setRemoteUrlInput(remoteOllamaUrl || "");
-  }, [remoteOllamaUrl]);
 
   useEffect(() => {
     setComfyUrlInput(comfyuiUrl);
@@ -69,35 +50,7 @@ export default function SettingsPanel() {
     fetchModels();
   }, [fetchModels]);
 
-  const handleUrlSave = async () => {
-    if (urlInput === ollamaUrl) return;
-    setUrlSaved(false);
-    try {
-      await updateOllamaUrl(urlInput);
-      setUrlSaved(true);
-      fetchModels();
-      setTimeout(() => setUrlSaved(false), 2000);
-    } catch {
-      // Error is set in the store
-    }
-  };
-
-  const handleRemoteUrlSave = async () => {
-    if (remoteUrlInput === (remoteOllamaUrl || "")) return;
-    setRemoteUrlSaved(false);
-    try {
-      await updateRemoteOllamaUrl(remoteUrlInput || null);
-      setRemoteUrlSaved(true);
-      setTimeout(() => setRemoteUrlSaved(false), 2000);
-    } catch {
-      // Error is set in the store
-    }
-  };
-
-  const modelOptions = localModels.map((m) => ({
-    value: m.name,
-    label: m.name,
-  }));
+  const modelOptions = models.map((m) => ({ value: m.name, label: m.name }));
 
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
@@ -200,76 +153,11 @@ export default function SettingsPanel() {
       <div className="settings-divider" />
 
       <div className="settings-section">
-        <label className="settings-label">
-          Ollama Server URL
-          {activeTarget && (
-            <span style={{ marginLeft: "0.5rem", fontSize: "11px", fontWeight: 400, color: activeTarget === "local" ? "var(--color-primary)" : "#60a5fa" }}>
-              ({activeTarget === "local" ? "Mini Mode" : "GPU Mode"} active)
-            </span>
-          )}
-        </label>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleUrlSave()}
-            placeholder="http://localhost:11434"
-            disabled={ollamaUrlLoading}
-          />
-          <button
-            className="btn btn-sm"
-            onClick={handleUrlSave}
-            disabled={ollamaUrlLoading || urlInput === ollamaUrl}
-            style={{ whiteSpace: "nowrap" }}
-          >
-            {ollamaUrlLoading ? "Saving..." : "Save"}
-          </button>
-        </div>
-        {ollamaUrlError && (
-          <p className="settings-description" style={{ color: "#f87171" }}>
-            Error: {ollamaUrlError}
-          </p>
-        )}
-        {urlSaved && (
-          <p className="settings-description" style={{ color: "#6ee7b7" }}>
-            Ollama URL updated successfully.
-          </p>
-        )}
+        <label className="settings-label">Model Server</label>
         <p className="settings-description">
-          Active Ollama server. Use the Mini Mode / GPU Mode toggle in the header to switch presets.
-        </p>
-      </div>
-
-      <div className="settings-section">
-        <label className="settings-label">GPU Server Ollama URL</label>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            value={remoteUrlInput}
-            onChange={(e) => setRemoteUrlInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleRemoteUrlSave()}
-            placeholder="http://gpu-box:11434"
-            disabled={ollamaUrlLoading}
-          />
-          <button
-            className="btn btn-sm"
-            onClick={handleRemoteUrlSave}
-            disabled={ollamaUrlLoading || remoteUrlInput === (remoteOllamaUrl || "")}
-            style={{ whiteSpace: "nowrap" }}
-          >
-            {ollamaUrlLoading ? "Saving..." : "Save"}
-          </button>
-        </div>
-        {remoteUrlSaved && (
-          <p className="settings-description" style={{ color: "#6ee7b7" }}>
-            GPU server URL saved. You can now switch to it from the header.
-          </p>
-        )}
-        <p className="settings-description">
-          URL of the remote GPU machine&apos;s Ollama server. Once set, the header toggle enables one-click switching.
+          Chat models come from the OpenAI-compatible server (llama.cpp, vLLM, …)
+          configured with <code>OPENAI_BASE_URL</code> on the LLMUI server. All
+          requests go through the authenticated LLMUI backend.
         </p>
       </div>
 

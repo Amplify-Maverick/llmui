@@ -1,9 +1,9 @@
 import { useCallback, useRef } from "react";
 import { useChatStore } from "../stores/chatStore.js";
 import { useSettingsStore } from "../stores/settingsStore.js";
-import { ollamaApi } from "../services/ollamaApi.js";
+import { openaiApi } from "../services/openaiApi.js";
 
-export function useOllamaStream() {
+export function useChatStream() {
   const abortControllerRef = useRef(null);
 
   const {
@@ -94,10 +94,10 @@ export function useOllamaStream() {
       try {
         // Use tools endpoint if tools are enabled
         if (enableTools && enabledTools && enabledTools.length > 0) {
-          for await (const event of ollamaApi.chatStreamWithTools(
+          for await (const event of openaiApi.chatStreamWithTools(
             selectedModel,
             chatMessages,
-            { temperature, maxTokens, enabledTools, signal: abortControllerRef.current.signal }
+            { temperature, maxTokens, enabledTools, enableThinking, signal: abortControllerRef.current.signal }
           )) {
             switch (event.type) {
               case "content":
@@ -122,7 +122,7 @@ export function useOllamaStream() {
           }
         } else {
           // Regular chat without tools
-          for await (const chunk of ollamaApi.chatStream(
+          for await (const chunk of openaiApi.chatStream(
             selectedModel,
             chatMessages,
             { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }
@@ -225,10 +225,10 @@ export function useOllamaStream() {
       try {
         // Use tools endpoint if tools are enabled
         if (enableTools && enabledTools && enabledTools.length > 0) {
-          for await (const event of ollamaApi.chatStreamWithTools(
+          for await (const event of openaiApi.chatStreamWithTools(
             selectedModel,
             chatMessages,
-            { temperature, maxTokens, enabledTools, signal: abortControllerRef.current.signal }
+            { temperature, maxTokens, enabledTools, enableThinking, signal: abortControllerRef.current.signal }
           )) {
             switch (event.type) {
               case "content":
@@ -251,7 +251,7 @@ export function useOllamaStream() {
             }
           }
         } else {
-          for await (const chunk of ollamaApi.chatStream(
+          for await (const chunk of openaiApi.chatStream(
             selectedModel,
             chatMessages,
             { temperature, maxTokens, enableThinking, signal: abortControllerRef.current.signal }

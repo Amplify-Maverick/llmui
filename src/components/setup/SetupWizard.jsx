@@ -2,7 +2,7 @@ import { useState } from "react";
 import { getAuthToken } from "../../services/auth.js";
 import "./SetupWizard.css";
 
-const TOTAL_STEPS = 3; // ollama · gpu · done
+const TOTAL_STEPS = 2; // gpu · done
 
 async function authFetch(path, options = {}) {
   const token = await getAuthToken();
@@ -16,132 +16,7 @@ async function authFetch(path, options = {}) {
   });
 }
 
-// ── Step 1: Ollama ────────────────────────────────────────────────────────────
-
-function StepOllama({ onNext }) {
-  const [mode, setMode] = useState("local"); // "local" | "remote"
-  const [url, setUrl] = useState("http://");
-  const [testState, setTestState] = useState(null); // null | "testing" | {ok, message}
-  const [saving, setSaving] = useState(false);
-
-  const effectiveUrl = mode === "local" ? "http://localhost:11434" : url;
-
-  async function testConnection() {
-    setTestState("testing");
-    try {
-      const res = await authFetch("/api/setup/test-ollama", {
-        method: "POST",
-        body: JSON.stringify({ url: effectiveUrl }),
-      });
-      const data = await res.json();
-      setTestState(data.ok
-        ? { ok: true, message: `Connected — ${data.modelCount} model(s) available` }
-        : { ok: false, message: data.error });
-    } catch {
-      setTestState({ ok: false, message: "Request failed — is the server running?" });
-    }
-  }
-
-  async function handleNext() {
-    setSaving(true);
-    try {
-      await authFetch("/ollama/config", {
-        method: "PUT",
-        body: JSON.stringify({ ollamaUrl: effectiveUrl }),
-      });
-      onNext({ ollamaUrl: effectiveUrl });
-    } catch {
-      // proceed anyway — user can fix in settings
-      onNext({ ollamaUrl: effectiveUrl });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const canProceed = mode === "local" || (mode === "remote" && url.startsWith("http") && url.length > 8);
-
-  return (
-    <div className="setup-step">
-      <h2 className="setup-step-title">Where is Ollama running?</h2>
-      <p className="setup-step-desc">
-        LLMUI needs to reach an Ollama instance to list and chat with models.
-      </p>
-
-      <div className="setup-options">
-        <label className={`setup-option ${mode === "local" ? "selected" : ""}`}>
-          <input type="radio" name="ollama-mode" value="local"
-            checked={mode === "local"} onChange={() => { setMode("local"); setTestState(null); }} />
-          <div className="setup-option-body">
-            <span className="setup-option-label">This machine</span>
-            <span className="setup-option-hint">Ollama is running locally — http://localhost:11434</span>
-          </div>
-        </label>
-
-        <label className={`setup-option ${mode === "remote" ? "selected" : ""}`}>
-          <input type="radio" name="ollama-mode" value="remote"
-            checked={mode === "remote"} onChange={() => { setMode("remote"); setTestState(null); }} />
-          <div className="setup-option-body">
-            <span className="setup-option-label">Another server</span>
-            <span className="setup-option-hint">Ollama is on a different machine (e.g. your GPU workstation)</span>
-          </div>
-        </label>
-      </div>
-
-      {mode === "remote" && (
-        <div className="setup-url-row">
-          <input
-            className="setup-url-input"
-            type="url"
-            placeholder="http://100.x.x.x:11434"
-            value={url}
-            onChange={(e) => { setUrl(e.target.value); setTestState(null); }}
-          />
-          <button
-            className="setup-test-btn"
-            onClick={testConnection}
-            disabled={testState === "testing" || !url.startsWith("http")}
-          >
-            {testState === "testing" ? "Testing…" : "Test"}
-          </button>
-        </div>
-      )}
-
-      {mode === "local" && (
-        <div className="setup-url-row">
-          <button
-            className="setup-test-btn"
-            style={{ marginLeft: "auto" }}
-            onClick={testConnection}
-            disabled={testState === "testing"}
-          >
-            {testState === "testing" ? "Testing…" : "Test connection"}
-          </button>
-        </div>
-      )}
-
-      {testState && testState !== "testing" && (
-        <div className={`setup-status ${testState.ok ? "ok" : "error"}`}>
-          {testState.ok ? "✓" : "✗"} {testState.message}
-        </div>
-      )}
-      {testState === "testing" && (
-        <div className="setup-status testing">Connecting…</div>
-      )}
-
-      <div className="setup-actions">
-        <button
-          className="setup-btn setup-btn-primary"
-          onClick={handleNext}
-          disabled={!canProceed || saving}
-        >
-          {saving ? "Saving…" : "Continue"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Step 2: GPU stats ─────────────────────────────────────────────────────────
+// ── Step 1: GPU stats ─────────────────────────────────────────────────────────
 
 function StepGpu({ onNext, onBack }) {
   const [mode, setMode] = useState("none"); // "local" | "remote" | "none"
@@ -256,7 +131,9 @@ function StepGpu({ onNext, onBack }) {
       )}
 
       <div className="setup-actions">
-        <button className="setup-btn setup-btn-secondary" onClick={onBack}>Back</button>
+        {onBack && (
+          <button className="setup-btn setup-btn-secondary" onClick={onBack}>Back</button>
+        )}
         <button
           className="setup-btn setup-btn-primary"
           onClick={handleNext}
@@ -269,7 +146,7 @@ function StepGpu({ onNext, onBack }) {
   );
 }
 
-// ── Step 3: Done ──────────────────────────────────────────────────────────────
+// ── Step 2: Done ──────────────────────────────────────────────────────────────
 
 function StepDone({ config, onFinish, finishing }) {
   return (
@@ -281,10 +158,6 @@ function StepDone({ config, onFinish, finishing }) {
       </p>
 
       <div className="setup-summary">
-        <div className="setup-summary-row">
-          <span className="setup-summary-label">Ollama</span>
-          <span className="setup-summary-value">{config.ollamaUrl}</span>
-        </div>
         <div className="setup-summary-row">
           <span className="setup-summary-label">GPU stats</span>
           <span className="setup-summary-value">
@@ -313,18 +186,13 @@ function StepDone({ config, onFinish, finishing }) {
 // ── Wizard shell ──────────────────────────────────────────────────────────────
 
 export default function SetupWizard({ onComplete }) {
-  const [step, setStep] = useState(0); // 0 = ollama, 1 = gpu, 2 = done
+  const [step, setStep] = useState(0); // 0 = gpu, 1 = done
   const [config, setConfig] = useState({});
   const [finishing, setFinishing] = useState(false);
 
-  function handleOllamaNext(data) {
-    setConfig((c) => ({ ...c, ...data }));
-    setStep(1);
-  }
-
   function handleGpuNext(data) {
     setConfig((c) => ({ ...c, ...data }));
-    setStep(2);
+    setStep(1);
   }
 
   async function handleFinish() {
@@ -338,7 +206,7 @@ export default function SetupWizard({ onComplete }) {
   }
 
   const progress = (step) => {
-    const dots = [0, 1, 2].map((i) => {
+    const dots = [0, 1].map((i) => {
       let cls = "setup-progress-dot";
       if (i < step) cls += " done";
       else if (i === step) cls += " active";
@@ -349,8 +217,6 @@ export default function SetupWizard({ onComplete }) {
         {dots[0]}
         <div className="setup-progress-line" />
         {dots[1]}
-        <div className="setup-progress-line" />
-        {dots[2]}
       </div>
     );
   };
@@ -367,14 +233,8 @@ export default function SetupWizard({ onComplete }) {
 
         {progress(step)}
 
-        {step === 0 && <StepOllama onNext={handleOllamaNext} />}
+        {step === 0 && <StepGpu onNext={handleGpuNext} />}
         {step === 1 && (
-          <StepGpu
-            onNext={handleGpuNext}
-            onBack={() => setStep(0)}
-          />
-        )}
-        {step === 2 && (
           <StepDone
             config={config}
             onFinish={handleFinish}

@@ -1,8 +1,6 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { STORAGE_KEYS } from "../constants/config.js";
-import { MODE_TAG_IDS } from "../constants/modeTags.js";
-import { useSettingsStore } from "./settingsStore.js";
 import {
   loadFromStorage,
   saveToStorage,
@@ -14,11 +12,6 @@ import {
 import { authHeaders } from "../services/auth.js";
 
 const API_BASE = "/api";
-
-function currentModeTag() {
-  const { activeTarget } = useSettingsStore.getState();
-  return MODE_TAG_IDS[activeTarget] || MODE_TAG_IDS.local;
-}
 
 // Strip messages from a conversation object, keep only sidebar metadata
 function toMeta(conv) {
@@ -119,7 +112,6 @@ export const useChatStore = create((set, get) => ({
         body: JSON.stringify({
           model,
           title: options.title || 'New Chat',
-          tags: [currentModeTag()],
           isCompare: options.isCompare || false,
           compareModels: options.compareModels || null
         })
@@ -156,7 +148,6 @@ export const useChatStore = create((set, get) => ({
         body: JSON.stringify({
           model: models.join(', '),
           title: userPrompt.slice(0, 30) + (userPrompt.length > 30 ? '...' : ''),
-          tags: [currentModeTag()],
           isCompare: true,
           compareModels: models
         })

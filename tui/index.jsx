@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * LLMUI TUI — full-screen terminal interface for local Ollama models.
+ * LLMUI TUI — full-screen terminal interface for models on the OpenAI-compatible server.
  *
  * Browse and resume conversations you've already started (shared with the web
  * UI's SQLite history), start new ones, and chat with streaming responses.

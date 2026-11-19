@@ -20,15 +20,6 @@ if ! command -v npm &> /dev/null; then
 fi
 echo "[OK] npm $(npm --version)"
 
-# Install Ollama if not present
-if command -v ollama &> /dev/null; then
-    echo "[OK] Ollama $(ollama --version 2>/dev/null | head -1 || echo 'installed')"
-else
-    echo "Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
-    echo "[OK] Ollama installed"
-fi
-
 # Install npm dependencies if needed
 cd "$(dirname "$0")/.."
 
@@ -46,5 +37,6 @@ echo
 echo "To start the app:"
 echo "  npm run dev"
 echo
-echo "Make sure Ollama is running:"
-echo "  ollama serve"
+echo "Models come from an OpenAI-compatible server (llama.cpp, vLLM, ...)."
+echo "Point LLMUI at it with:"
+echo "  export OPENAI_BASE_URL=http://<host>:<port>/v1"

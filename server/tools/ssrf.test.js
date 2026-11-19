@@ -209,7 +209,7 @@ describe("Redirect SSRF Protection", () => {
     }
   });
 
-  it("should block redirect to 127.0.0.1 (Ollama port)", async () => {
+  it("should block redirect to 127.0.0.1 (local service port)", async () => {
     // Set env to allow initial localhost connection for testing
     const oldEnv = process.env.LLMUI_ALLOW_PRIVATE_FETCH;
     process.env.LLMUI_ALLOW_PRIVATE_FETCH = "true";

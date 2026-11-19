@@ -8,13 +8,6 @@ if [ ! -d "node_modules" ]; then
     exit 1
 fi
 
-# Start Ollama if not running
-if ! pgrep -x "ollama" > /dev/null; then
-    echo "Starting Ollama..."
-    ollama serve &> /dev/null &
-    sleep 2
-fi
-
 # Start storage server if not running
 if ! lsof -i:3001 > /dev/null 2>&1; then
     echo "Starting storage server..."
@@ -23,4 +16,4 @@ if ! lsof -i:3001 > /dev/null 2>&1; then
 fi
 
 echo "Starting LLMUI at http://localhost:3000"
-./node_modules/.bin/vite --host
+./node_modules/.bin/vite

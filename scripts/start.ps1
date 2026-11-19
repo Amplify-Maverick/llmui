@@ -14,18 +14,6 @@ if (-not (Test-Path "node_modules")) {
     exit 1
 }
 
-# Check if Ollama is accessible
-Write-Host "Checking Ollama..." -ForegroundColor Gray
-try {
-    $response = Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -TimeoutSec 2 -ErrorAction SilentlyContinue
-    Write-Host "[OK] Ollama is running" -ForegroundColor Green
-} catch {
-    Write-Host "[WARN] Cannot connect to Ollama at localhost:11434" -ForegroundColor Yellow
-    Write-Host "   Make sure Ollama is running (check system tray or start from Start Menu)" -ForegroundColor Yellow
-    Write-Host "   The app will start anyway, but you won't be able to chat until Ollama is running." -ForegroundColor Yellow
-    Write-Host ""
-}
-
 # Check if ports are available
 $port3000 = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
 $port3001 = Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue

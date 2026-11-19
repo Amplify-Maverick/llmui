@@ -17,11 +17,11 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
   const { streams, startCompare, stopAll, stopOne, reset, anyStreaming, allComplete } =
     useCompareStreams();
 
-  const { localModels, runningModels } = useModelsStore();
+  const { models: servedModels } = useModelsStore();
   const { saveCompareConversation } = useChatStore();
 
-  // Fetch available capacity on mount — the server actually running Ollama,
-  // not the browser viewing this dashboard.
+  // Fetch available capacity on mount — the server actually running the
+  // models, not the browser viewing this dashboard.
   useEffect(() => {
     const getCapacity = async () => {
       // Try live GPU stats first
@@ -43,22 +43,10 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
     getCapacity();
   }, []);
 
-  // Estimate VRAM for a model
+  // Estimate VRAM for a model from its file size (when the server reports it)
   const estimateModelVram = useCallback(
-    (modelName) => {
-      // Check if model is currently running (has actual VRAM usage)
-      const runningModel = runningModels.find((m) => m.name === modelName);
-      if (runningModel?.size_vram) {
-        return runningModel.size_vram;
-      }
-      // Fall back to disk size as estimate
-      const localModel = localModels.find((m) => m.name === modelName);
-      if (localModel?.size) {
-        return localModel.size;
-      }
-      return 0;
-    },
-    [localModels, runningModels]
+    (modelName) => servedModels.find((m) => m.name === modelName)?.size || 0,
+    [servedModels]
   );
 
   // Calculate total estimated VRAM
@@ -123,8 +111,8 @@ export default function CompareView({ models, onPickResponse, onSaveComplete }) 
             {formatBytes(totalEstimatedVram)}, exceeding this server's{" "}
             {hasGpu ? "GPU VRAM" : "usable RAM"} of {formatBytes(gpuVram)}.{" "}
             {hasGpu
-              ? "Ollama will swap models between GPU and RAM, reducing parallelism and speed."
-              : "Running these together may be very slow or cause Ollama to swap models in and out."}
+              ? "The model server may need to swap models in and out, reducing parallelism and speed."
+              : "Running these together may be very slow or cause the model server to swap models in and out."}
           </div>
         </div>
       )}

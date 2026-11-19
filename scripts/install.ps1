@@ -35,23 +35,6 @@ try {
     exit 1
 }
 
-# Check for Ollama
-$ollamaInstalled = $false
-try {
-    $ollamaVersion = ollama --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Ollama installed" -ForegroundColor Green
-        $ollamaInstalled = $true
-    }
-} catch {}
-
-if (-not $ollamaInstalled) {
-    Write-Host "[WARN] Ollama not found in PATH." -ForegroundColor Yellow
-    Write-Host "   Download from: https://ollama.com/download" -ForegroundColor Yellow
-    Write-Host "   (You can continue without it, but you'll need it to use the app)" -ForegroundColor Yellow
-    Write-Host ""
-}
-
 # Navigate to project root
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $scriptDir
@@ -105,6 +88,6 @@ Write-Host ""
 Write-Host "To start the app:" -ForegroundColor White
 Write-Host "  npm run dev" -ForegroundColor Green
 Write-Host ""
-Write-Host "Make sure Ollama is running (check system tray or start from Start Menu)" -ForegroundColor Gray
+Write-Host "Set OPENAI_BASE_URL to your OpenAI-compatible model server (e.g. http://host:8081/v1)" -ForegroundColor Gray
 Write-Host "Then open http://localhost:3000 in your browser" -ForegroundColor Gray
 Write-Host ""

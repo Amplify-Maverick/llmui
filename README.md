@@ -2,22 +2,20 @@
 
 > **Beta Software**: This project is under active development. Works on Linux, Windows (sort of), and macOS.
 
-A web interface for chatting with local LLMs through Ollama.
+A web interface for chatting with local LLMs served by an OpenAI-compatible server (llama.cpp `llama-server`, vLLM, LM Studio, ...).
 
 ![LLMUI Chat Interface](screenshots/sc.png)
 
 ## What it does
 
-- **Chat** with any model you have installed in Ollama
+- **Chat** with any model your OpenAI-compatible `/v1` server provides
 - **Compare models** - send the same prompt to 2-4 models and see responses side-by-side
-- **Browse and pull models** - search a curated catalog with VRAM estimates, or pull any tag from the registry
 - **Tool calling** - web search, URL fetch, calculator, current time, sandboxed file reads, and a Blender bridge for models that support function calling
 - **Per-chat settings** - override model, system prompt, temperature, or max tokens for a single conversation without touching your defaults
 - **GPU monitoring** - see your VRAM usage, temperature, utilization in real-time (NVIDIA only)
 - **Conversation history** - stored in SQLite at `~/.llmui/` with full-text search
 - **Conversation branching** - edit any message to create alternate branches, navigate between them
-- **Hardware guide** - helps figure out what models will run on your system
-- **Setup wizard** - walks first-time users through pointing at Ollama (local or remote) and verifying GPU stats
+- **Setup wizard** - walks first-time users through verifying GPU stats
 - **Terminal UI** - a full-screen TUI (`npm run tui`) to browse, resume, and continue your chats from the terminal, sharing the same history as the web UI
 - **Light and dark themes**
 - Configurable system prompts, temperature, max tokens
@@ -25,7 +23,7 @@ A web interface for chatting with local LLMs through Ollama.
 ## Requirements
 
 - [Node.js](https://nodejs.org/) (v18 or higher)
-- [Ollama](https://ollama.ai/) running locally
+- An OpenAI-compatible model server exposing `/v1/models` and `/v1/chat/completions` (e.g. llama.cpp `llama-server`)
 
 For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't have one, the app still works fine - you just won't see the GPU panel.
 
@@ -46,12 +44,7 @@ For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't hav
    sudo pacman -S nodejs npm
    ```
 
-2. Install Ollama:
-   ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
-   ```
-
-3. Clone and install:
+2. Clone and install:
    ```bash
    git clone <repo-url>
    cd llmui
@@ -64,10 +57,7 @@ For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't hav
    - Download from [nodejs.org](https://nodejs.org/) and run the installer
    - Or use winget: `winget install OpenJS.NodeJS`
 
-2. Install Ollama:
-   - Download from [ollama.com](https://ollama.com/download) and run the installer
-
-3. Clone and install (in PowerShell):
+2. Clone and install (in PowerShell):
    ```powershell
    git clone <repo-url>
    cd llmui
@@ -81,35 +71,30 @@ For GPU stats you'll need an NVIDIA GPU with drivers installed. If you don't hav
 
 ## Running
 
-### Linux
+Point LLMUI at your model server with `OPENAI_BASE_URL` (must include the `/v1` suffix), then start the UI:
 
-Start Ollama (if not running as a service):
 ```bash
-ollama serve
+OPENAI_BASE_URL=http://<host>:<port>/v1 npm run dev
 ```
 
-Then start the UI:
-```bash
-npm run dev
-```
-
-### Windows
-
-Ollama runs automatically after installation. If needed, start it from the Start Menu or system tray.
-
-Then start the UI (in PowerShell):
 ```powershell
+# Windows (PowerShell)
+$env:OPENAI_BASE_URL="http://<host>:<port>/v1"
 npm run dev
 ```
 
-Or use the start script which checks Ollama and port availability:
+Or use the start script which checks port availability:
 ```powershell
 .\scripts\start.ps1
 ```
 
-Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000).
+Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000). The dev server listens on `127.0.0.1` only; for remote access put a reverse proxy in front of it (see `deploy/llmui.nginx`).
 
-On first launch a setup wizard appears. It asks where Ollama is running (local or a remote URL like your GPU workstation), tests the connection, and confirms GPU stats are reachable. You can rerun it any time by clearing the `setup_completed` setting in the database, or just adjust everything from the Settings tab afterwards.
+The browser never talks to the model server directly: all model traffic goes through the authenticated Express server (`/openai/v1/*` passthrough, and `/api/chat-with-tools` for the server-side tool loop).
+
+Conversations from older versions that used Ollama models still open, but read-only (their model isn't served anymore) — start a new chat to continue.
+
+On first launch a setup wizard appears. It confirms GPU stats are reachable. You can rerun it any time by clearing the `setup_completed` setting in the database, or just adjust everything from the Settings tab afterwards.
 
 ### Windows Troubleshooting
 
@@ -143,16 +128,14 @@ npm run dev
 - Close other development servers or apps
 - Check with: `netstat -ano | findstr :3000`
 
-**Cannot connect to Ollama:**
-- Make sure Ollama is running (check system tray)
-- Try opening http://localhost:11434 in your browser
-- Restart Ollama from the Start Menu
+**No models listed:**
+- Make sure your model server is running and `OPENAI_BASE_URL` points at it (including `/v1`)
+- Try `curl $OPENAI_BASE_URL/models` from the machine running LLMUI
 
 ## Configuration
 
 Most settings can be changed in the Settings tab:
 
-- **Ollama URL** - defaults to `http://localhost:11434`, change it if your Ollama server is running somewhere else
 - **System Prompt** - gets sent at the start of every conversation
 - **Temperature** - lower = more focused, higher = more creative
 - **Max Tokens** - limit on response length
@@ -174,33 +157,15 @@ When tool calling is enabled and the model supports it (most recent Llama, Qwen,
 
 Tool calls and their results render inline in the conversation as expandable cards.
 
-### Model browser
+### Models
 
-The Models tab lists everything you have installed and lets you delete or pull new ones. The pull dialog includes a curated catalog (Llama, Qwen, Gemma, DeepSeek, Mistral, Phi, embedding models, vision models, etc.) with rough VRAM estimates per quantization so you can see what will fit on your GPU before downloading. You can also type any `model:tag` directly to pull arbitrary models from the Ollama registry.
+The Models tab lists the models your `/v1` server provides. Loading and unloading models is done on the model server itself.
 
 ### Compare Mode
 
 Compare mode lets you send the same prompt to 2-4 models simultaneously and view their responses side-by-side. Click the "Compare" toggle in the chat header to enable it.
 
-For optimal parallel inference performance, set the `OLLAMA_NUM_PARALLEL` environment variable to match the maximum number of models you want to compare at once (Ollama's default is 1):
-
-```bash
-# Linux/macOS
-OLLAMA_NUM_PARALLEL=4 ollama serve
-
-# Or set it in your environment
-export OLLAMA_NUM_PARALLEL=4
-```
-
-```powershell
-# Windows (PowerShell)
-$env:OLLAMA_NUM_PARALLEL=4
-ollama serve
-
-# Or set it permanently via System Properties > Environment Variables
-```
-
-Without this setting, Ollama will swap models in and out of GPU memory sequentially, which significantly reduces the parallelism benefit. The UI will show a warning if your selected models' combined VRAM exceeds your GPU capacity.
+For real parallelism, configure your model server to serve several models/requests concurrently (e.g. llama.cpp `--parallel`). The UI will show a warning if your selected models' combined size exceeds your GPU capacity.
 
 ### Conversation Branching
 
@@ -232,7 +197,7 @@ It reads the auth token from `~/.llmui/token` and talks to the LLMUI server on p
 Flags: `--model <name>` preselects a model, `--tools` starts with tool calling on, and `--server <url>` (or the `LLMUI_SERVER` env var) points at a non-default server.
 
 ```bash
-npm run tui -- --model qwen2.5-coder:7b --tools
+npm run tui -- --model qwen2.5-coder-7b --tools
 ```
 
 The server must be running first (`npm run server`, or `npm run dev`). The TUI is built with [Ink](https://github.com/vadimdemedes/ink) and run via `tsx`.

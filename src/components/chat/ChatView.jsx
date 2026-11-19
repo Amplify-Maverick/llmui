@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore } from "../../stores/modelsStore.js";
-import { useOllamaStream } from "../../hooks/useOllamaStream.js";
+import { useChatStream } from "../../hooks/useChatStream.js";
 import MessageBubble from "./MessageBubble.jsx";
 import StreamingBubble from "./StreamingBubble.jsx";
 import MessageInput from "./MessageInput.jsx";
@@ -10,7 +10,6 @@ import StreamingIndicator from "./StreamingIndicator.jsx";
 import TokenCounter from "./TokenCounter.jsx";
 import BranchRow from "./BranchRow.jsx";
 import GpuMini from "../stats/GpuMini.jsx";
-import ConnectionStatus from "./ConnectionStatus.jsx";
 import ModelSwitchModal from "./ModelSwitchModal.jsx";
 import ConversationSettingsPopover from "./ConversationSettingsPopover.jsx";
 import CompareView from "../compare/CompareView.jsx";
@@ -28,7 +27,6 @@ export default function ChatView({ onBack }) {
   const [compareMode, setCompareMode] = useState(false);
   const [compareModels, setCompareModels] = useState([]);
   const [showConvSettings, setShowConvSettings] = useState(false);
-  const [poorFitPending, setPoorFitPending] = useState(null);
 
   const {
     messages,
@@ -45,65 +43,51 @@ export default function ChatView({ onBack }) {
     addMessage,
     createBranch,
     getBranchCountForMessage,
+    conversations,
+    activeConversationId,
   } = useChatStore();
 
-  const { defaultModel, enableThinking, enableTools, updateSetting, activeTarget } = useSettingsStore();
-  const { localModels, fetchModels, modelInfoCache, fetchModelInfo, runningModels, fetchRunningModels, unloadModel, localCapability, fetchLocalCapability } = useModelsStore();
-  const { sendMessage, stopStreaming, regenerateLastMessage } = useOllamaStream();
-  const [isUnloading, setIsUnloading] = useState(false);
+  const { defaultModel: savedDefaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
+  const { models, modelsLoaded, fetchModels, modelInfoCache, fetchModelInfo } = useModelsStore();
+  const { sendMessage, stopStreaming, regenerateLastMessage } = useChatStream();
 
   useEffect(() => {
     fetchModels();
-    fetchRunningModels();
-    const id = setInterval(fetchRunningModels, 5000);
-    return () => clearInterval(id);
-  }, [fetchModels, fetchRunningModels]);
+  }, [fetchModels]);
 
-  const isMiniMode = activeTarget === "local";
+  const isServed = useCallback((name) => models.some((m) => m.name === name), [models]);
 
-  // Feasibility is only meaningful in Mini Mode: /ollama/local-capability always
-  // reflects this machine's hardware, but in GPU Mode `localModels` lists the
-  // remote box's own models, so names wouldn't line up.
-  useEffect(() => {
-    if (isMiniMode) fetchLocalCapability();
-  }, [isMiniMode, localModels, fetchLocalCapability]);
+  // A saved default that the /v1 server doesn't serve (e.g. an old Ollama
+  // model name) counts as "no model selected" rather than being sent upstream.
+  const defaultModel = !modelsLoaded || isServed(savedDefaultModel) ? savedDefaultModel : "";
 
-  const feasibilityByName = useMemo(() => {
-    if (!isMiniMode) return {};
-    return Object.fromEntries(localCapability.models.map((m) => [m.name, m.cpuFeasibility]));
-  }, [isMiniMode, localCapability]);
-
-  const hasRunningModels = runningModels.length > 0;
-
-  const handleUnloadModel = async () => {
-    if (runningModels.length === 0 || isUnloading) return;
-    setIsUnloading(true);
-    try {
-      // Unload all running models
-      await Promise.all(runningModels.map((m) => unloadModel(m.name)));
-    } catch (err) {
-      console.error("Failed to unload models:", err);
-    } finally {
-      setIsUnloading(false);
+  // Conversations whose model isn't served by the /v1 server (typically chats
+  // from the Ollama era) open read-only: history renders, but nothing can be
+  // sent, edited, regenerated, branched or deleted. Only decided once the
+  // model list has actually loaded, so a slow/failed fetch doesn't lock chats.
+  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+  const conversationModel = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant" && messages[i].model) return messages[i].model;
     }
-  };
+    return activeConversation?.model || null;
+  }, [messages, activeConversation]);
+  const isReadOnly =
+    modelsLoaded && !isStreaming && messages.length > 0 &&
+    !!conversationModel && !isServed(conversationModel);
 
   // Fetch model info when model changes
   useEffect(() => {
     if (defaultModel && !modelInfoCache[defaultModel]) {
       fetchModelInfo(defaultModel);
     }
-  }, [defaultModel, modelInfoCache, fetchModelInfo]);
+  }, [defaultModel, models, modelInfoCache, fetchModelInfo]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  const modelOptions = localModels.map((m) => ({
-    value: m.name,
-    label: m.name,
-    feasibility: feasibilityByName[m.name],
-  }));
+  const modelOptions = models.map((m) => ({ value: m.name, label: m.name }));
 
   const currentModelInfo = modelInfoCache[defaultModel];
 
@@ -115,28 +99,12 @@ export default function ChatView({ onBack }) {
     setInputValue(value);
   }, []);
 
-  const commitModelChange = (newModel) => {
+  const handleModelChange = (newModel) => {
     // If there are messages, show warning modal
     if (messages.length > 0) {
       setModelSwitchPending(newModel);
     } else {
       updateSetting("defaultModel", newModel);
-    }
-  };
-
-  const handleModelChange = (newModel) => {
-    if (feasibilityByName[newModel] === "poor") {
-      setPoorFitPending(newModel);
-      return;
-    }
-    commitModelChange(newModel);
-  };
-
-  const confirmPoorFitModel = () => {
-    if (poorFitPending) {
-      const newModel = poorFitPending;
-      setPoorFitPending(null);
-      commitModelChange(newModel);
     }
   };
 
@@ -150,6 +118,7 @@ export default function ChatView({ onBack }) {
   // Stable callback refs — these don't change between renders so
   // memoized MessageBubble children won't re-render.
   const handleEditMessage = useCallback(async (id, newContent) => {
+    if (!defaultModel) return;
     // Create a branch instead of truncating the conversation
     const branchId = await createBranch(id, newContent);
     if (branchId) {
@@ -166,6 +135,7 @@ export default function ChatView({ onBack }) {
   }, [deleteConfirm, deleteMessage]);
 
   const handleRegenerate = useCallback(() => {
+    if (!defaultModel) return;
     regenerateLastMessage(defaultModel);
   }, [regenerateLastMessage, defaultModel]);
 
@@ -252,7 +222,6 @@ export default function ChatView({ onBack }) {
             </svg>
           </button>
           <span className="chat-header-title">Chat</span>
-          <ConnectionStatus />
           <div className="conv-settings-wrapper">
             <button
               className={`conv-settings-btn ${showConvSettings ? 'active' : ''}`}
@@ -309,16 +278,6 @@ export default function ChatView({ onBack }) {
           >
             Compare
           </button>
-          {!compareMode && (
-            <button
-              className={`unload-btn ${hasRunningModels ? "active" : ""}`}
-              onClick={handleUnloadModel}
-              disabled={!hasRunningModels || isUnloading || isStreaming}
-              title={hasRunningModels ? `Unload ${runningModels.length} model(s) from VRAM` : "No models loaded in VRAM"}
-            >
-              {isUnloading ? "Unloading..." : "Unload"}
-            </button>
-          )}
           {compareMode ? (
             <ModelMultiSelect
               value={compareModels}
@@ -332,6 +291,7 @@ export default function ChatView({ onBack }) {
               onChange={(e) => handleModelChange(e.target.value)}
               options={modelOptions}
               placeholder="Select a model"
+              disabled={isReadOnly}
               style={{ width: "200px" }}
             />
           )}
@@ -391,10 +351,10 @@ export default function ChatView({ onBack }) {
                   <MessageBubble
                     key={msg.id || idx}
                     message={msg}
-                    onEdit={handleEditMessage}
-                    onDelete={handleSetDeleteConfirm}
-                    onRegenerate={handleRegenerate}
-                    onBranch={handleBranch}
+                    onEdit={isReadOnly ? undefined : handleEditMessage}
+                    onDelete={isReadOnly ? undefined : handleSetDeleteConfirm}
+                    onRegenerate={isReadOnly ? undefined : handleRegenerate}
+                    onBranch={isReadOnly ? undefined : handleBranch}
                     isLastAssistant={idx === lastAssistantIndex}
                     branchCount={getBranchCountForMessage(msg.id)}
                   />
@@ -410,13 +370,28 @@ export default function ChatView({ onBack }) {
             <div ref={messagesEndRef} />
           </div>
 
-          <MessageInput
-            onSend={handleSend}
-            onStop={stopStreaming}
-            onInputChange={handleInputChange}
-            disabled={!defaultModel}
-            isStreaming={isStreaming}
-          />
+          {isReadOnly ? (
+            <div className="chat-readonly-banner" role="status">
+              <span>
+                Read-only — this conversation used <code>{conversationModel}</code>,
+                which the model server doesn&apos;t provide.
+              </span>
+              <button
+                className="chat-readonly-new"
+                onClick={() => createConversation(defaultModel)}
+              >
+                New chat
+              </button>
+            </div>
+          ) : (
+            <MessageInput
+              onSend={handleSend}
+              onStop={stopStreaming}
+              onInputChange={handleInputChange}
+              disabled={!defaultModel}
+              isStreaming={isStreaming}
+            />
+          )}
         </>
       )}
 
@@ -437,17 +412,6 @@ export default function ChatView({ onBack }) {
         onConfirm={confirmModelSwitch}
         newModel={modelSwitchPending}
         currentModel={defaultModel}
-      />
-
-      {/* Poor Hardware Fit Warning Modal */}
-      <ConfirmModal
-        isOpen={poorFitPending !== null}
-        onClose={() => setPoorFitPending(null)}
-        onConfirm={confirmPoorFitModel}
-        title="Model not recommended for this machine"
-        message={`"${poorFitPending}" is rated a poor fit for this machine's detected hardware — it will likely run very slowly or fail to load. Continue anyway?`}
-        confirmText="Use anyway"
-        variant="danger"
       />
     </div>
   );

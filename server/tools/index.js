@@ -1,6 +1,6 @@
 /**
  * Tool Registry and Executor
- * Manages built-in tools for Ollama function calling.
+ * Manages built-in tools for OpenAI-style function calling.
  */
 
 import webSearch from "./web_search.js";
@@ -55,9 +55,9 @@ export const TOOL_INFO = {
 };
 
 /**
- * Convert tools to Ollama's expected schema format
+ * Convert tools to the OpenAI chat-completions `tools` schema
  * @param {string[]|null} enabledTools - List of enabled tool names, or null for all
- * @returns {Array} Ollama-compatible tools array
+ * @returns {Array} OpenAI-compatible tools array
  */
 export function getToolsSchema(enabledTools = null) {
   const toolEntries = Object.entries(TOOLS);

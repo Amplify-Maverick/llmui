@@ -205,13 +205,35 @@
   margin-left: 2px;
 }
 
-.unload-btn {
+/* ── Read-only banner (conversation's model isn't served) ── */
+.chat-readonly-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg, rgba(245, 158, 11, 0.1));
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.chat-readonly-banner code {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.chat-readonly-new {
+  flex-shrink: 0;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 1px solid var(--color-border-separator);
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-size: 12px;
   font-family: var(--font-sans);
   font-weight: 500;
@@ -219,19 +241,8 @@
   transition: all var(--transition-fast);
 }
 
-.unload-btn:hover:not(:disabled) {
-  color: var(--color-text-primary);
+.chat-readonly-new:hover {
   border-color: var(--color-text-secondary);
-}
-
-.unload-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.unload-btn.active {
-  color: var(--color-text-secondary);
-  border-color: var(--color-border);
 }
 
 /* ── Conversation Settings Button ─────────────────────────── */

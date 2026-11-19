@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { ollamaApi } from "../services/ollamaApi.js";
+import { openaiApi } from "../services/openaiApi.js";
 import { useSettingsStore } from "../stores/settingsStore.js";
 
 /**
@@ -33,7 +33,7 @@ export function useCompareStreams() {
       messages.push({ role: "user", content: prompt });
 
       try {
-        for await (const chunk of ollamaApi.chatStream(model, messages, {
+        for await (const chunk of openaiApi.chatStream(model, messages, {
           temperature,
           maxTokens,
           signal: abortController.signal,
