@@ -1,16 +1,35 @@
 .btn {
-  border-radius: var(--radius-lg);
-  padding: 10px 20px;
-  font-size: 14px;
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  min-height: 34px;
+  font-size: 13px;
   font-family: var(--font-sans);
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition-normal);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   border: 1px solid;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+/* Default look for a bare .btn (no variant class) */
+.btn {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--color-ghost-border-hover);
+}
+
+.btn-sm {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 12px;
 }
 
 .btn:disabled {
@@ -40,10 +59,14 @@
   border-color: var(--color-secondary-border-hover);
 }
 
-/* Danger */
+.btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+/* Danger — quiet until hovered, so destructive actions don't dominate */
 .btn-danger {
-  background: var(--color-danger-bg);
-  border-color: var(--color-danger-border);
+  background: transparent;
+  border-color: var(--color-ghost-border);
   color: var(--color-danger);
 }
 .btn-danger:hover:not(:disabled) {

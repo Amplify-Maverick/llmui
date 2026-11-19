@@ -8,69 +8,82 @@
 }
 
 .app-header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
+  gap: 16px;
+  padding-bottom: 16px;
   margin-bottom: 20px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .app-header-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 .app-logo {
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--color-text-primary);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .app-logo-icon {
-  width: 32px;
-  height: 32px;
+  position: relative;
+  width: 28px;
+  height: 28px;
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border-radius: var(--radius-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset, 0 4px 14px rgba(110, 231, 183, 0.18);
 }
 
 .app-tabs {
   display: flex;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 4px;
+  padding: 3px;
 }
 
 .app-tab {
-  padding: 8px 16px;
+  padding: 6px 14px;
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-family: var(--font-sans);
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition-normal);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.app-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
 }
 
 .app-tab.active {
   background: var(--color-border-light);
+  box-shadow: var(--shadow-sm);
 }
 
 .app-tab.shortcuts-btn {
-  width: 32px;
-  padding: 8px;
-  font-size: 16px;
+  width: 30px;
+  padding: 6px 0;
+  font-size: 13px;
   font-weight: 600;
-  border-radius: 50%;
+  color: var(--color-text-muted);
+  margin-left: 4px;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
 .app-tab.shortcuts-btn:hover {
@@ -104,24 +117,30 @@
   }
 
   .app-header {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "logo right"
+      "tabs tabs";
     margin-bottom: 10px;
-    padding-top: env(safe-area-inset-top);
-    gap: 8px;
-    flex-wrap: wrap;
-    row-gap: 8px;
+    padding-top: calc(env(safe-area-inset-top) + 10px);
+    padding-bottom: 10px;
+    gap: 10px;
   }
 
-  .app-logo-text {
-    display: none;
-  }
+  .app-logo { grid-area: logo; font-size: 16px; }
+  .app-header-right { grid-area: right; }
 
   .app-tabs {
-    gap: 2px;
-    padding: 3px;
+    grid-area: tabs;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
+  .app-tabs::-webkit-scrollbar { display: none; }
+
   .app-tab {
-    padding: 8px 10px;
+    flex: 1 0 auto;
+    padding: 7px 10px;
     font-size: 13px;
   }
 

@@ -1,9 +1,9 @@
 .conv-item {
-  padding: 12px;
-  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--transition-normal);
-  margin-bottom: 4px;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  margin-bottom: 2px;
   background: transparent;
   border: 1px solid transparent;
   position: relative;
@@ -14,8 +14,19 @@
 }
 
 .conv-item.active {
-  background: rgba(110, 231, 183, 0.1);
-  border-color: rgba(110, 231, 183, 0.2);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-light);
+}
+
+.conv-item.active::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
 }
 
 .conv-item-header {
@@ -26,10 +37,10 @@
 }
 
 .conv-item-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--color-text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -96,30 +107,41 @@
 
 /* Tags display */
 .conv-item-tags {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 6px;
+  margin: 0 4px 6px 0;
+  vertical-align: top;
 }
 
 .conv-item-tag {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
   font-weight: 500;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--tag-color) 15%, transparent);
-  color: var(--tag-color);
-  border: 1px solid color-mix(in srgb, var(--tag-color) 30%, transparent);
+  line-height: 16px;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tag-color) 10%, transparent);
+  color: color-mix(in srgb, var(--tag-color) 85%, var(--color-text-primary));
+  border: 1px solid color-mix(in srgb, var(--tag-color) 22%, transparent);
+}
+
+.conv-item-tag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tag-color);
 }
 
 .conv-item-model {
   display: inline-block;
   font-size: 11px;
-  color: var(--color-primary);
-  background: rgba(110, 231, 183, 0.10);
-  border: 1px solid rgba(110, 231, 183, 0.18);
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  line-height: 18px;
   margin-bottom: 4px;
   max-width: 100%;
   overflow: hidden;
@@ -128,8 +150,8 @@
 }
 
 .conv-item-meta {
-  font-size: 12px;
-  color: var(--color-text-secondary);
+  font-size: 11px;
+  color: var(--color-text-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -191,11 +213,13 @@
 
 /* Info row with model and branch indicator */
 .conv-item-info-row {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  vertical-align: top;
+  max-width: 100%;
 }
 
 .conv-item-info-row .conv-item-model {
@@ -252,11 +276,12 @@
   gap: 3px;
   font-size: 10px;
   font-weight: 500;
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: var(--radius-sm);
-  padding: 2px 5px;
+  color: var(--color-secondary);
+  background: var(--color-secondary-bg);
+  border: 1px solid var(--color-secondary-border);
+  border-radius: 999px;
+  line-height: 16px;
+  padding: 0 7px;
 }
 
 .conv-item-compare-indicator svg {

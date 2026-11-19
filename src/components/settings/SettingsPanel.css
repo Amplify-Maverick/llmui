@@ -1,30 +1,32 @@
 .settings {
   padding: 20px;
-  max-width: 600px;
+  max-width: 680px;
 }
 
 .settings-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--color-text-primary);
   margin: 0 0 24px 0;
 }
 
 .settings-section {
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 
 .settings-label {
   display: block;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--color-text-primary);
   margin-bottom: 8px;
 }
 
 .settings-description {
-  font-size: 13px;
-  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
   margin-top: 6px;
 }
 
@@ -49,7 +51,7 @@
 .settings-divider {
   height: 1px;
   background: var(--color-border);
-  margin: 32px 0;
+  margin: 28px 0;
 }
 
 .settings-toggle-row {
