@@ -46,6 +46,8 @@ function mapModel(m) {
     memory: m.memory,
     size: m.size || 0,
     contextLength: m.contextLength || null,
+    sidecars: m.sidecars || [],
+    mmprojFileSize: m.mmprojFileSize ?? null,
   };
 }
 

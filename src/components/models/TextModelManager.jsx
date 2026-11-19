@@ -3,6 +3,7 @@ import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { llamaApi, estimateFit, FIT_LABEL } from "../../services/llamaApi.js";
 import { formatBytes } from "../../utils/formatters.js";
+import { hasMmproj, mmprojAllowance, mmprojAllowanceForFile } from "../../utils/mmproj.js";
 import Button from "../shared/Button.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
 import "./TextModelManager.css";
@@ -10,12 +11,22 @@ import "./TextModelManager.css";
 const GiB = 1024 ** 3;
 const gib = (b) => `${(b / GiB).toFixed(1)} GiB`;
 
-/** GPU bytes for a model from its memory report: effective if loaded, else measured min. */
-function gpuUsage(memory) {
+/**
+ * GPU bytes for a model from its memory report (effective if loaded, else
+ * measured min), plus the mmproj allowance llama.cpp doesn't report.
+ */
+function gpuUsage(m) {
+  const memory = m.memory;
   const snap = memory?.effective || memory?.min;
   const d = snap?.devices?.find((x) => x.kind !== "host" && x.total);
   if (!d) return null;
-  return { bytes: (d.model || 0) + (d.context || 0) + (d.compute || 0), nCtx: snap.n_ctx, live: !!memory.effective };
+  const addOn = mmprojAllowance(m);
+  return {
+    bytes: (d.model || 0) + (d.context || 0) + (d.compute || 0) + addOn,
+    addOn,
+    nCtx: snap.n_ctx,
+    live: !!memory.effective,
+  };
 }
 
 function ProgressBar({ dl }) {
@@ -41,6 +52,8 @@ export default function TextModelManager() {
   const [actionError, setActionError] = useState(null);
   const [rowErrors, setRowErrors] = useState({}); // model id → last load/unload error
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [removeImageTarget, setRemoveImageTarget] = useState(null);
+  const [imageOpt, setImageOpt] = useState({}); // repo → include mmproj on install (overrides the default)
 
   const [query, setQuery] = useState("");
   const [repos, setRepos] = useState([]);
@@ -114,11 +127,11 @@ export default function TextModelManager() {
   // ── Actions ──
   const installedIds = useMemo(() => new Set(models.map((m) => m.name.toLowerCase())), [models]);
 
-  const install = async (id) => {
+  const install = async (id, sidecars) => {
     setActionError(null);
     setDownload(id, { state: "starting", done: 0, total: 0, error: null });
     try {
-      await llamaApi.install(id);
+      await llamaApi.install(id, sidecars);
       scheduleRefresh();
     } catch (err) {
       setDownload(id, { state: "failed", error: err.message });
@@ -133,12 +146,15 @@ export default function TextModelManager() {
       if (action === "delete") {
         await llamaApi.remove(id);
         clearDownload(id);
+      } else if (action === "removeImage") {
+        await llamaApi.removeSidecar(id, "mmproj");
       } else {
         await llamaApi[action](id);
       }
       await refreshModels();
     } catch (err) {
       if (action === "delete") setActionError(`Delete ${id}: ${err.message}`);
+      else if (action === "removeImage") setActionError(`Remove image support from ${id}: ${err.message}`);
       else setRowErrors((e) => ({ ...e, [id]: `${action === "load" ? "Load" : "Unload"} failed: ${err.message}` }));
     } finally {
       setBusy(({ [id]: _, ...rest }) => rest);
@@ -181,7 +197,8 @@ export default function TextModelManager() {
         ) : (
           <div className="tmm-list">
             {models.map((m) => {
-              const usage = gpuUsage(m.memory);
+              const usage = gpuUsage(m);
+              const vision = hasMmproj(m);
               const dl = downloads[Object.keys(downloads).find((k) => k.toLowerCase() === m.name.toLowerCase())];
               const isDownloading = m.status === "downloading" || dl?.state === "downloading" || dl?.state === "starting";
               const isLoaded = !m.failed && (m.status === "loaded" || m.status === "sleeping" || m.status === "loading");
@@ -194,12 +211,18 @@ export default function TextModelManager() {
                       <span className="tmm-model-id">{m.name}</span>
                       <span className={`model-status-pill status-${m.failed ? "failed" : m.status}`}>{modelStatusLabel(m)}</span>
                       {defaultModel === m.name && <span className="tmm-default">chat default</span>}
+                      {vision && <span className="tmm-default" title="Has a vision projector (mmproj) sidecar">images</span>}
                     </div>
                     <div className="tmm-row-meta">
                       {m.size > 0 && <span>{formatBytes(m.size)} file</span>}
                       {usage && (
                         <span title={usage.live ? "Currently allocated on the GPU" : "Measured minimum on the GPU"}>
                           {gib(usage.bytes)} on GPU {usage.live ? "(in use)" : "(measured)"}
+                        </span>
+                      )}
+                      {usage?.addOn > 0 && (
+                        <span title="llama.cpp's memory report doesn't count the vision projector (mmproj); this allowance is included in the GPU figure">
+                          incl. + {gib(usage.addOn)} image add-on
                         </span>
                       )}
                       {usage?.nCtx && <span>ctx {usage.nCtx.toLocaleString()}</span>}
@@ -233,6 +256,17 @@ export default function TextModelManager() {
                         {b === "load" ? "Loading…" : m.failed || rowError ? "Retry load" : "Load"}
                       </Button>
                     ))}
+                    {vision && !isDownloading && (
+                      <Button
+                        variant="ghost"
+                        className="btn-sm"
+                        disabled={!!b || isLoaded}
+                        title={isLoaded ? "Unload the model first" : "Delete the vision projector (mmproj) and keep the model"}
+                        onClick={() => setRemoveImageTarget(m.name)}
+                      >
+                        {b === "removeImage" ? "Removing…" : "Remove image support"}
+                      </Button>
+                    )}
                     <Button
                       variant="danger"
                       className="btn-sm"
@@ -288,7 +322,7 @@ export default function TextModelManager() {
           <Button type="submit" disabled={searching}>{searching ? "Searching…" : "Search"}</Button>
         </form>
         <p className="tmm-hint">
-          Fit = file size + ~1 GiB for context and compute, against {gpu ? gib(gpu.budget) : "the GPU's"} usable VRAM.
+          Fit = file size + ~1 GiB for context and compute (+ 1.5× the projector size with image support), against {gpu ? gib(gpu.budget) : "the GPU's"} usable VRAM.
           Larger models can still run with partial CPU offload, but slowly.
         </p>
         {searchError && <p className="tmm-row-error">{searchError}</p>}
@@ -297,6 +331,8 @@ export default function TextModelManager() {
           {repos.map((r) => {
             const files = repoFiles[r.id];
             const open = openRepo === r.id;
+            const includeImage = !!files?.hasMmproj && (imageOpt[r.id] ?? r.pipelineTag === "image-text-to-text");
+            const imageExtra = includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0;
             return (
               <div key={r.id} className={`tmm-repo ${open ? "open" : ""}`}>
                 <button className="tmm-repo-head" onClick={() => toggleRepo(r.id)} aria-expanded={open}>
@@ -314,11 +350,21 @@ export default function TextModelManager() {
                     {files?.error && <p className="tmm-row-error">{files.error}</p>}
                     {files?.quants?.length === 0 && <p className="tmm-empty">No GGUF quant files found in this repo.</p>}
                     {files?.hasMmproj && (
-                      <p className="tmm-hint">Includes a vision projector (mmproj), downloaded alongside the model.</p>
+                      <label className="tmm-image-opt">
+                        <input
+                          type="checkbox"
+                          checked={includeImage}
+                          onChange={(e) => setImageOpt((o) => ({ ...o, [r.id]: e.target.checked }))}
+                        />
+                        Include image support
+                        <span className="tmm-hint">
+                          (vision projector{files.mmprojSize ? `, ${formatBytes(files.mmprojSize)}` : ""}; adds ≈{gib(mmprojAllowanceForFile(files.mmprojSize))} on the GPU)
+                        </span>
+                      </label>
                     )}
                     {files?.quants?.map((q) => {
                       const id = `${r.id}:${q.quant}`;
-                      const fit = estimateFit(q.size, gpu);
+                      const fit = estimateFit(q.size, gpu, imageExtra);
                       const dl = downloads[id];
                       const installed = installedIds.has(id.toLowerCase());
                       const active = dl && (dl.state === "starting" || dl.state === "downloading");
@@ -331,7 +377,7 @@ export default function TextModelManager() {
                           </span>
                           <span
                             className={`tmm-fit fit-${fit.level}`}
-                            title={`Needs ≈${gib(fit.need)} of ${gib(fit.budget)} usable`}
+                            title={`Needs ≈${gib(fit.need)} of ${gib(fit.budget)} usable${fit.extra ? ` (incl. ${gib(fit.extra)} image add-on)` : ""}`}
                           >
                             {FIT_LABEL[fit.level]}
                           </span>
@@ -341,7 +387,7 @@ export default function TextModelManager() {
                             ) : active ? (
                               <ProgressBar dl={dl} />
                             ) : (
-                              <Button variant={fit.level === "nofit" ? "ghost" : "primary"} className="btn-sm" onClick={() => install(id)}>
+                              <Button variant={fit.level === "nofit" ? "ghost" : "primary"} className="btn-sm" onClick={() => install(id, files.hasMmproj && includeImage ? ["mmproj"] : [])}>
                                 {dl?.state === "failed" ? "Retry" : "Install"}
                               </Button>
                             )}
@@ -368,6 +414,18 @@ export default function TextModelManager() {
         title="Delete model"
         message={`Remove ${deleteTarget} from the server's model cache? It will need to be downloaded again to use it.`}
         confirmText="Delete"
+      />
+
+      <ConfirmModal
+        isOpen={!!removeImageTarget}
+        onClose={() => setRemoveImageTarget(null)}
+        onConfirm={() => {
+          runAction(removeImageTarget, "removeImage");
+          setRemoveImageTarget(null);
+        }}
+        title="Remove image support"
+        message={`Delete the vision projector (mmproj) of ${removeImageTarget}? The model stays installed but can no longer read images.`}
+        confirmText="Remove"
       />
     </div>
   );

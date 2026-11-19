@@ -23,8 +23,12 @@ async function call(method, path, body) {
 export const llamaApi = {
   /** { models: [...], gpu: { name, total, margin, budget, source } } */
   list: () => call("GET", "/models"),
-  install: (model) => call("POST", "/models", { model }),
+  /** sidecars: ["mmproj"] to include image support, [] for text only. */
+  install: (model, sidecars) => call("POST", "/models", sidecars ? { model, sidecars } : { model }),
   remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`),
+  /** Remove only a sidecar file (e.g. "mmproj") and keep the model. */
+  removeSidecar: (model, sidecar) =>
+    call("DELETE", `/models?model=${encodeURIComponent(model)}&sidecar=${encodeURIComponent(sidecar)}`),
   load: (model) => call("POST", "/models/load", { model }),
   unload: (model) => call("POST", "/models/unload", { model }),
   props: (model) => call("GET", `/props?model=${encodeURIComponent(model)}`),
@@ -116,15 +120,16 @@ export function parseProgress(data) {
 export const RUNTIME_OVERHEAD_BYTES = 1 * GiB;
 
 /**
- * GPU fit of a GGUF of `fileBytes`: file + ~1 GiB for context/compute,
- * against total VRAM minus the router's memory margin.
- * Returns { level: "fits" | "tight" | "nofit", need, budget }.
+ * GPU fit of a GGUF of `fileBytes`: file + ~1 GiB for context/compute
+ * + `extraBytes` (e.g. the mmproj allowance), against total VRAM minus the
+ * router's memory margin.
+ * Returns { level: "fits" | "tight" | "nofit", need, budget, extra }.
  */
-export function estimateFit(fileBytes, gpu) {
-  const need = fileBytes + RUNTIME_OVERHEAD_BYTES;
+export function estimateFit(fileBytes, gpu, extraBytes = 0) {
+  const need = fileBytes + RUNTIME_OVERHEAD_BYTES + extraBytes;
   const budget = gpu?.budget ?? 7 * GiB;
   const level = need <= budget * 0.9 ? "fits" : need <= budget ? "tight" : "nofit";
-  return { level, need, budget };
+  return { level, need, budget, extra: extraBytes };
 }
 
 export const FIT_LABEL = { fits: "Fits on GPU", tight: "Tight", nofit: "Won't fit" };

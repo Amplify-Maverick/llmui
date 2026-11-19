@@ -34,6 +34,8 @@ export function normalizeModel(m) {
     // Runtime context (--ctx-size), not the training context (context_length).
     contextLength: m.memory?.effective?.n_ctx || m.meta?.n_ctx || m.memory?.min?.n_ctx || null,
     size: m.meta?.size || 0,
+    // Extra files installed with the model, e.g. ["mmproj"] (vision projector).
+    sidecars: Array.isArray(m.sidecars) ? m.sidecars : [],
   };
 }
 
@@ -85,12 +87,53 @@ function gpuInfo(models) {
   return { name: null, total: FALLBACK_VRAM_BYTES, source: "assumed" };
 }
 
+// ------------------------------------------------------------
+// mmproj (vision projector) file sizes. llama.cpp's memory report doesn't
+// count the projector yet, so the UI adds an allowance based on this size.
+// ------------------------------------------------------------
+
+const mmprojCache = new Map(); // model id → { size, at }
+const MMPROJ_RETRY_MS = 10 * 60 * 1000;
+
+/** "owner/repo:QUANT" → manifest URL (the endpoint llama.cpp's -hf uses), or null for local names. */
+export function manifestUrl(id) {
+  const m = /^([^/:]+)\/([^/:]+)(?::(.+))?$/.exec(id || "");
+  if (!m) return null;
+  return `https://huggingface.co/v2/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}/manifests/${encodeURIComponent(m[3] || "latest")}`;
+}
+
+/** Size in bytes of the mmproj llama.cpp downloads for a model, or null if unknown. Cached. */
+async function mmprojFileSize(id) {
+  const hit = mmprojCache.get(id);
+  if (hit && (hit.size != null || Date.now() - hit.at < MMPROJ_RETRY_MS)) return hit.size;
+  let size = null;
+  const url = manifestUrl(id);
+  if (url) {
+    try {
+      const r = await fetch(url, { headers: { "User-Agent": "llama-cpp" }, signal: AbortSignal.timeout(8000) });
+      if (r.ok) {
+        const s = (await r.json())?.mmprojFile?.size;
+        if (typeof s === "number" && s > 0) size = s;
+      }
+    } catch {
+      // unknown → flat allowance in the UI; retried after MMPROJ_RETRY_MS
+    }
+  }
+  mmprojCache.set(id, { size, at: Date.now() });
+  return size;
+}
+
 // GET /api/llama/models — every model the router knows about, with status,
 // plus the GPU size and memory margin used for fit estimates.
 router.get("/models", async (req, res) => {
   try {
-    const models = await listModels();
-    const gpu = gpuInfo(models);
+    const listed = await listModels();
+    const gpu = gpuInfo(listed);
+    const models = await Promise.all(
+      listed.map(async (m) =>
+        m.sidecars.includes("mmproj") ? { ...m, mmprojFileSize: await mmprojFileSize(m.id) } : m
+      )
+    );
     res.json({
       models,
       gpu: { ...gpu, margin: MEMORY_MARGIN_BYTES, budget: gpu.total - MEMORY_MARGIN_BYTES },
@@ -139,23 +182,34 @@ router.get("/props", async (req, res) => {
   }
 });
 
-// POST /api/llama/models { model: "owner/repo:QUANT" } — start a download (non-blocking).
+const SIDECARS = new Set(["mmproj"]);
+
+// POST /api/llama/models { model: "owner/repo:QUANT", sidecars?: ["mmproj"] | [] }
+// — start a download (non-blocking).
 router.post("/models", async (req, res) => {
-  const { model } = req.body || {};
+  const { model, sidecars } = req.body || {};
   if (!requireModelId(model, res)) return;
+  if (sidecars !== undefined && (!Array.isArray(sidecars) || !sidecars.every((s) => SIDECARS.has(s)))) {
+    return res.status(400).json({ error: "Invalid sidecars (allowed: mmproj)" });
+  }
   try {
-    await upstreamJson(res, await postJson("/models", { model }));
+    await upstreamJson(res, await postJson("/models", sidecars === undefined ? { model } : { model, sidecars }));
   } catch (err) {
     res.status(502).json({ error: `Model server unreachable: ${err.message}` });
   }
 });
 
-// DELETE /api/llama/models?model=<id> — remove a cached model.
+// DELETE /api/llama/models?model=<id>[&sidecar=mmproj] — remove a cached
+// model, or only one of its sidecar files.
 router.delete("/models", async (req, res) => {
-  const { model } = req.query;
+  const { model, sidecar } = req.query;
   if (!requireModelId(model, res)) return;
+  if (sidecar !== undefined && !SIDECARS.has(sidecar)) {
+    return res.status(400).json({ error: "Invalid sidecar (allowed: mmproj)" });
+  }
+  const qs = `model=${encodeURIComponent(model)}${sidecar ? `&sidecar=${sidecar}` : ""}`;
   try {
-    await upstreamJson(res, await llamaFetch(`/models?model=${encodeURIComponent(model)}`, {
+    await upstreamJson(res, await llamaFetch(`/models?${qs}`, {
       method: "DELETE",
       signal: AbortSignal.timeout(30000),
     }));
@@ -302,11 +356,13 @@ const SHARD_RE = /-(\d{5})-of-(\d{5})\.gguf$/i;
 export function groupQuants(files) {
   const quants = new Map();
   let hasMmproj = false;
+  const mmproj = []; // { name, size }
   for (const f of files) {
     if (f.type !== "file" || !/\.gguf$/i.test(f.path)) continue;
     const name = f.path.split("/").pop();
     if (/mmproj/i.test(name)) {
       hasMmproj = true;
+      mmproj.push({ name, size: f.lfs?.size ?? f.size ?? 0 });
       continue;
     }
     // Prefer the quant in the filename; fall back to a directory name.
@@ -321,8 +377,19 @@ export function groupQuants(files) {
   }
   return {
     hasMmproj,
+    // Best guess at the projector llama.cpp picks (F16, else BF16, else the smallest).
+    mmprojSize: pickMmproj(mmproj)?.size || null,
     quants: [...quants.values()].sort((a, b) => a.size - b.size),
   };
+}
+
+function pickMmproj(files) {
+  if (!files.length) return null;
+  return (
+    files.find((f) => /[-_.]F16\.gguf$/i.test(f.name)) ||
+    files.find((f) => /[-_.]BF16\.gguf$/i.test(f.name)) ||
+    [...files].sort((a, b) => a.size - b.size)[0]
+  );
 }
 
 // GET /api/llama/hf/files?repo=owner/name — quant files with sizes.

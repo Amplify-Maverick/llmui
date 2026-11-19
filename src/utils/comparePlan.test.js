@@ -46,3 +46,19 @@ test("shortModelName drops the owner", () => {
   assert.equal(shortModelName("Qwen/Qwen3-8B-GGUF:Q4_K_M"), "Qwen3-8B-GGUF:Q4_K_M");
   assert.equal(shortModelName("local"), "local");
 });
+
+test("mmproj allowance is added to the measured figure", () => {
+  const vision = { ...model("v", 3.32), sidecars: ["mmproj"], mmprojFileSize: 0.855 * GiB };
+  const p = planCompare([vision, model("b", 3.17)], gpu);
+  assert.equal(p.addOns[0], Math.round(0.855 * GiB * 1.5));
+  assert.equal(p.addOns[1], 0);
+  assert.equal(p.needs[0], 3.32 * GiB + p.addOns[0]);
+  // 3.32 + 1.28 + 3.17 = 7.77 GiB > 7 GiB budget; without the add-on it would be 6.49 (parallel).
+  assert.equal(p.mode, "sequential");
+});
+
+test("mmproj with unknown size uses the flat allowance", () => {
+  const p = planCompare([{ ...model("v", 1), sidecars: ["mmproj"] }, model("b", 1)], gpu);
+  assert.equal(p.addOns[0], 1.25 * GiB);
+  assert.equal(p.total, 3.25 * GiB);
+});

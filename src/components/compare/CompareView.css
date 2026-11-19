@@ -42,6 +42,11 @@
 .compare-plan-reason {
   color: var(--color-text-secondary);
 }
+.compare-plan-addon {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
 .compare-plan-steps {
   color: var(--color-text-muted);
 }

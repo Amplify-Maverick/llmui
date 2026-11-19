@@ -170,6 +170,14 @@ function ComparePlanBanner({ plan, models, phase }) {
           )}
         </span>
       </div>
+      {plan.addOns?.some((x) => x > 0) &&
+        plan.addOns.map((bytes, i) =>
+          bytes > 0 ? (
+            <div key={i} className="compare-plan-addon" title="llama.cpp's memory report doesn't count the vision projector (mmproj), so it's added here">
+              + {gib(bytes)} image add-on for {[a, b][i]}{plan.total != null && " (included above)"}
+            </div>
+          ) : null
+        )}
       <div className="compare-plan-steps">
         {parallel
           ? `Load ${a} and ${b}, then run both at the same time. Each model's speed drops because they share the GPU.`
