@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { openaiApi } from "../services/openaiApi.js";
 import { llamaApi } from "../services/llamaApi.js";
 import { useSettingsStore } from "../stores/settingsStore.js";
@@ -294,6 +294,9 @@ export function useCompareStreams() {
     setPlan(null);
     setPhase(null);
   }, []);
+
+  // Leaving compare mode unmounts the view; don't keep generating into it.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const values = Array.from(streams.values());
   const allComplete =

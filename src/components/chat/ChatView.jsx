@@ -69,6 +69,13 @@ export default function ChatView({ onBack }) {
     if (!isStreaming) refreshModels();
   }, [isStreaming, refreshModels]);
 
+  // Compare mode is a view over no conversation; switching to or creating a
+  // conversation (e.g. "New Chat") leaves it.
+  useEffect(() => {
+    setCompareMode(false);
+    setCompareModels([]);
+  }, [activeConversationId]);
+
   const isServed = useCallback((name) => models.some((m) => m.name === name), [models]);
 
   // A saved default that the /v1 server doesn't serve (e.g. an old Ollama
