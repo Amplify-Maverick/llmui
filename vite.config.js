@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react(), tokenPlugin()],
   server: {
     port: 3000,
-    // Loopback only — remote (Tailscale) clients come in through nginx
-    // (deploy/llmui.nginx), which proxies to 127.0.0.1:3000.
+    // Loopback only — remote (Tailscale) clients come in through
+    // `tailscale serve`, which proxies HTTPS on the tailnet to 127.0.0.1:3000.
     host: "127.0.0.1",
     allowedHosts: ["box.tailde6c83.ts.net"],
     // No direct proxy to any model server. Model calls go through the
@@ -24,7 +24,7 @@ export default defineConfig({
             target: "http://127.0.0.1:3001",
             changeOrigin: true,
             // changeOrigin only rewrites Host. The browser's Origin header
-            // (e.g. https://box.tailde6c83.ts.net:8446) would otherwise be
+            // (e.g. https://box.tailde6c83.ts.net:8452) would otherwise be
             // forwarded and rejected by the Express CORS allowlist. From the
             // browser's point of view this is a same-origin request, so drop
             // the header and let Express treat it as a server-to-server call.

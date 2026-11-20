@@ -1,7 +1,7 @@
 /**
  * API client for the LLMUI TUI.
  *
- * Talks to the LLMUI Express server (default http://localhost:3001) using the
+ * Talks to the LLMUI Express server (default http://127.0.0.1:3001) using the
  * bearer token stored at ~/.llmui/token. This is the same backend the web UI
  * uses, so conversations created/edited here show up there and vice versa.
  */
@@ -12,7 +12,7 @@ import os from "node:os";
 
 const TOKEN_FILE = path.join(os.homedir(), ".llmui", "token");
 
-let SERVER = process.env.LLMUI_SERVER || "http://localhost:3001";
+let SERVER = process.env.LLMUI_SERVER || "http://127.0.0.1:3001";
 let TOKEN = null;
 
 export function configureServer(url) {

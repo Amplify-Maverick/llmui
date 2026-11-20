@@ -28,6 +28,10 @@ const execFileAsync = promisify(execFile);
 
 const app = express();
 const PORT = Number(process.env.LLMUI_PORT) || 3001;
+// Loopback only by default. Remote clients reach LLMUI through `tailscale serve`
+// (HTTPS on the tailnet -> Vite on 127.0.0.1:3000 -> this server). Set HOST to
+// override, e.g. HOST=0.0.0.0 to listen on every interface.
+const HOST = process.env.HOST || "127.0.0.1";
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
@@ -158,7 +162,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "5mb" }));
-// Requests arrive via the Vite dev proxy (and nginx in front of it), both on
+// Requests arrive via the Vite dev proxy (and tailscale serve in front of it), both on
 // loopback. Trust X-Forwarded-For only from loopback hops so req.ip is the real
 // client (for rate limiting and the localhost-only /auth/token check).
 app.set("trust proxy", "loopback");
@@ -820,8 +824,8 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-app.listen(PORT, () => {
-  console.log(`Storage server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Storage server running on http://${HOST}:${PORT}`);
   console.log(`Data directory: ${STORAGE_DIR}`);
   console.log(`OpenAI-compatible URL: ${OPENAI_BASE_URL}`);
 });

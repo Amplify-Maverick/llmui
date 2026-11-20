@@ -15,7 +15,10 @@ User=shogun
 Group=shogun
 WorkingDirectory=/home/shogun/Projects/llmui
 Environment=PATH=/home/shogun/.nvm/versions/node/v24.16.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=LLMUI_ALLOWED_ORIGINS=https://box.tailde6c83.ts.net:8446
+# Both servers listen on loopback only; tailscale serve is the way in:
+#   tailscale serve --bg --https=8452 http://127.0.0.1:3000
+Environment=HOST=127.0.0.1
+Environment=LLMUI_ALLOWED_ORIGINS=https://box.tailde6c83.ts.net:8452
 ExecStart=/home/shogun/.nvm/versions/node/v24.16.0/bin/npm run dev
 Restart=on-failure
 RestartSec=5

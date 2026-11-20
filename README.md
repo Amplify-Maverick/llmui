@@ -88,7 +88,7 @@ Or use the start script which checks port availability:
 .\scripts\start.ps1
 ```
 
-Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000). The dev server listens on `127.0.0.1` only; for remote access put a reverse proxy in front of it (see `deploy/llmui.nginx`).
+Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000). Both servers listen on `127.0.0.1` only (set `HOST` to change the storage server's bind address). For access from other machines, publish the frontend on your tailnet with `tailscale serve --bg --https=<port> http://127.0.0.1:3000`.
 
 The browser never talks to the model server directly: all model traffic goes through the authenticated Express server (`/openai/v1/*` passthrough, and `/api/chat-with-tools` for the server-side tool loop).
 
