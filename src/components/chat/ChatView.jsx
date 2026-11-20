@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
+import { useMachinesStore } from "../../stores/machinesStore.js";
+import { useOtherMachineModels } from "../../stores/otherMachineModelsStore.js";
 import { useChatStream } from "../../hooks/useChatStream.js";
 import MessageBubble from "./MessageBubble.jsx";
 import StreamingBubble from "./StreamingBubble.jsx";
@@ -112,6 +114,20 @@ export default function ChatView({ onBack }) {
     value: m.name,
     label: `${m.name} — ${modelStatusLabel(m)}`,
   }));
+  // Models on the other machine(s): shown greyed, can't be picked here.
+  const servedNames = useMemo(() => models.map((m) => m.name), [models]);
+  const otherModels = useOtherMachineModels("chat", servedNames);
+  const chatMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.chat));
+  const otherGroups = otherModels.map(({ machine, names }) => ({
+    label: `On ${machine.name}: select it on the System page`,
+    disabled: true,
+    options: names.map((n) => ({ value: `other:${machine.id}:${n}`, label: n })),
+  }));
+  const noModelsHere = modelsLoaded && models.length === 0;
+  // The read-only banner can say where that conversation's model lives.
+  const conversationModelElsewhere = isReadOnly
+    ? otherModels.find((g) => g.names.includes(conversationModel))?.machine
+    : null;
   const selectedModelEntry = models.find((m) => m.name === defaultModel);
 
   const currentModelInfo = modelInfoCache[defaultModel];
@@ -329,7 +345,10 @@ export default function ChatView({ onBack }) {
                 value={defaultModel}
                 onChange={(e) => handleModelChange(e.target.value)}
                 options={modelOptions}
-                placeholder={modelsLoaded && models.length === 0 ? "No models on server" : "Select a model"}
+                groups={otherGroups}
+                placeholder={
+                  noModelsHere ? `No models on ${chatMachine?.name || "server"}` : "Select a model"
+                }
                 disabled={isReadOnly}
                 style={{ width: "240px" }}
               />
@@ -414,7 +433,9 @@ export default function ChatView({ onBack }) {
             <div className="chat-readonly-banner" role="status">
               <span>
                 Read-only — this conversation used <code>{conversationModel}</code>,
-                which the model server doesn&apos;t provide.
+                {conversationModelElsewhere
+                  ? ` which is on ${conversationModelElsewhere.name}. Select ${conversationModelElsewhere.name} on the System page to continue it.`
+                  : " which the model server doesn't provide."}
               </span>
               <button
                 className="chat-readonly-new"
@@ -424,6 +445,15 @@ export default function ChatView({ onBack }) {
               </button>
             </div>
           ) : (
+            <>
+            {noModelsHere && (
+              <div className="chat-readonly-banner" role="status">
+                <span>
+                  No chat models on {chatMachine?.name || "the model server"}. Install one on the Models page
+                  {otherModels.length > 0 && `, or select ${otherModels[0].machine.name} on the System page`}.
+                </span>
+              </div>
+            )}
             <MessageInput
               onSend={handleSend}
               onStop={stopStreaming}
@@ -431,6 +461,7 @@ export default function ChatView({ onBack }) {
               disabled={!defaultModel}
               isStreaming={isStreaming}
             />
+            </>
           )}
         </>
       )}

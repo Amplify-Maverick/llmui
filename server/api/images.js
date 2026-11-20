@@ -50,7 +50,8 @@ router.get("/status", toImageMachine, async (req, res) => {
 
 const names = (list) => (list || []).map((x) => (typeof x === "string" ? x : x.name)).filter(Boolean);
 
-router.get("/options", toImageMachine, async (req, res) => {
+// ?machine=<id>: another machine's options, read-only (greyed picker entries).
+router.get("/options", machineFromQuery("/options"), toImageMachine, async (req, res) => {
   const cfg = getSdConfig(req.machine);
   try {
     const [files, samplers, schedulers] = await Promise.all([
@@ -78,7 +79,8 @@ router.get("/options", toImageMachine, async (req, res) => {
       samplers: names(samplers).filter((s) => s !== "default"),
       schedulers: names(schedulers),
       defaults: {
-        checkpoint: cfg.model,
+        // Only a model this machine can load; never another machine's default.
+        checkpoint: checkpoints.includes(cfg.model) ? cfg.model : checkpoints[0] || null,
         steps: cfg.steps,
         width: cfg.width,
         height: cfg.height,
@@ -163,11 +165,30 @@ function saveGeneration(machine, p, result) {
 router.post("/txt2img", toImageMachine, async (req, res) => {
   // Fixed for the whole job: switching machines mid-job doesn't move it.
   const machine = req.machine;
-  const [p, invalid] = parseParams(req.body, getSdConfig(machine));
+  const cfg = getSdConfig(machine);
+  if (!req.body?.checkpoint && !cfg.model) {
+    return res.status(400).json({ error: `No image model on ${machine.name}; install one under Models → Image`, code: "no_model" });
+  }
+  const [p, invalid] = parseParams(req.body, cfg);
   if (invalid) return res.status(400).json({ error: invalid });
   const setup = resolveModelSetup(machine, p.checkpoint);
   if (!setup) {
     return res.status(400).json({ error: `${p.checkpoint} has no recipe set on ${machine.name}; configure it under Models → Image` });
+  }
+  // Every file of the setup must be on this machine before anything is
+  // unloaded or loaded: never ask sd-server to load a file it doesn't have.
+  let present;
+  try {
+    present = new Set(((await sdFetch(machine, "/sdcpp/v1/model-files")).files || []).map((f) => f.id));
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  const missing = Object.values(setup.models).filter((id) => !present.has(id));
+  if (missing.length) {
+    return res.status(400).json({
+      error: `${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} on ${machine.name}; install ${missing.length === 1 ? "it" : "them"} under Models → Image`,
+      code: "no_model",
+    });
   }
 
   const busy = acquireImageLock(machine);

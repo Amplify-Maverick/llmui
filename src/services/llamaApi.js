@@ -33,7 +33,8 @@ export const llamaApi = {
    * `machine`: list that machine's models instead, with each model's size on
    * disk as `diskSize` (read-only, System page).
    */
-  list: (machine) => call("GET", machine ? `/models?machine=${encodeURIComponent(machine)}&sizes=1` : "/models"),
+  list: (machine, { sizes = true } = {}) =>
+    call("GET", machine ? `/models?machine=${encodeURIComponent(machine)}${sizes ? "&sizes=1" : ""}` : "/models"),
   /** sidecars: ["mmproj"] to include image support, [] for text only. */
   install: (model, sidecars) => call("POST", "/models", sidecars ? { model, sidecars } : { model }, pinned),
   remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`, undefined, pinned),

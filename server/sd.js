@@ -42,13 +42,37 @@ export const DEFAULT_SD_CONFIG = {
   models: {},
 };
 
-/** Defaults for one machine: its URLs and VRAM. */
+/**
+ * Defaults for one machine: its URLs and VRAM. Only the default machine starts
+ * with a default model (the file it shipped with); any other machine has none
+ * until one is installed and made its default there.
+ */
 export const machineDefaults = (machine) => ({
   ...DEFAULT_SD_CONFIG,
+  ...(machine.isDefault ? {} : { recipe: null, model: null, components: {} }),
   url: machine.sdUrl,
   fetchUrl: machine.fetchUrl,
   gpuMemoryGiB: machine.gpuMemoryGiB,
 });
+
+/**
+ * Earlier versions wrote the default machine's model into every machine's
+ * config. On a non-default machine, a default identical to that one with no
+ * setup of its own is that copy: drop it. Returns true if it changed `config`.
+ */
+export function dropInheritedDefault(machine, config) {
+  if (machine.isDefault || !config.model) return false;
+  const inherited =
+    config.model === DEFAULT_SD_CONFIG.model &&
+    config.recipe === DEFAULT_SD_CONFIG.recipe &&
+    !Object.keys(config.components || {}).length &&
+    !config.models?.[config.model];
+  if (!inherited) return false;
+  config.model = null;
+  config.recipe = null;
+  config.components = {};
+  return true;
+}
 
 const configs = new Map(); // machine id → config
 
@@ -69,6 +93,10 @@ async function loadOne(machine) {
   }
   config.url = String(config.url).replace(/\/+$/, "");
   configs.set(machine.id, config);
+  if (dropInheritedDefault(machine, config)) {
+    console.log(`${file}: removed the default image model copied from ${defaultMachine().name}`);
+    await saveSdConfig(machine, {});
+  }
   return config;
 }
 

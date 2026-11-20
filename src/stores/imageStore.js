@@ -74,18 +74,17 @@ export const useImageStore = create((set, get) => ({
           samplers: opts.samplers || [],
           schedulers: opts.schedulers || [],
         };
-        // First load: take the defaults from ~/.llmui/sd_config.json
+        // First load: take the defaults from the machine's sd config.
         if (!state._defaultsApplied && opts.defaults) {
-          update.params = { ...state.params, ...opts.defaults };
+          update.params = { ...state.params, ...opts.defaults, checkpoint: opts.defaults.checkpoint || "" };
           update._defaultsApplied = true;
-        } else if (
-          update.checkpoints.length > 0 &&
-          (!state.params.checkpoint || !update.checkpoints.includes(state.params.checkpoint))
-        ) {
-          // None picked yet, or the picked one was deleted / lost its setup.
+        } else if (!update.checkpoints.includes(state.params.checkpoint)) {
+          // None picked yet, the picked one was deleted / lost its setup, or
+          // requests now go to a machine that doesn't have it. Never keep a
+          // model this machine can't load: no model means Generate is off.
           const pick = opts.defaults?.checkpoint && update.checkpoints.includes(opts.defaults.checkpoint)
             ? opts.defaults.checkpoint
-            : update.checkpoints[0];
+            : update.checkpoints[0] || "";
           update.params = { ...state.params, checkpoint: pick, ...(update.modelDefaults[pick] || {}) };
         }
         return update;
@@ -119,8 +118,14 @@ export const useImageStore = create((set, get) => ({
   // ── Generate ─────────────────────────────────────────────────────────
 
   generate: async () => {
-    const { params, isGenerating } = get();
+    const { params, isGenerating, checkpoints } = get();
     if (isGenerating) return;
+    // Never start a job for a model this machine doesn't have (it would make
+    // sd-server try to load a missing file).
+    if (!checkpoints.includes(params.checkpoint)) {
+      set({ error: checkpoints.length ? "Select a model" : "No image models on this machine; install one under Models → Image" });
+      return;
+    }
     if (!params.prompt.trim()) {
       set({ error: "Prompt is required" });
       return;

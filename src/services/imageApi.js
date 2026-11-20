@@ -32,9 +32,9 @@ class ImageAPI {
     }
   }
 
-  /** { checkpoints, modelDefaults, samplers, schedulers, defaults } */
-  options() {
-    return getJson("/options");
+  /** { checkpoints, modelDefaults, samplers, schedulers, defaults }; `machine`: that machine's, read-only. */
+  options(machine) {
+    return getJson(machine ? `/options?machine=${encodeURIComponent(machine)}` : "/options");
   }
 
   // ── Model management (Models → Image) ────────────────────────────────

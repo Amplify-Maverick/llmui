@@ -1,4 +1,6 @@
 import { useImageStore } from "../../stores/imageStore.js";
+import { useMachinesStore } from "../../stores/machinesStore.js";
+import { useOtherMachineModels } from "../../stores/otherMachineModelsStore.js";
 import "./GenerationSettings.css";
 
 // SD 1.5 is trained at 512×512; larger sizes need an SDXL-class checkpoint.
@@ -32,6 +34,12 @@ export default function GenerationSettings() {
     cancelGeneration,
     clearError,
   } = useImageStore();
+
+  const imageMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.image));
+  // Checkpoints on the other machine(s): greyed, can't be picked here.
+  const otherModels = useOtherMachineModels("image", checkpoints);
+  const noModelsHere = isConnected && checkpoints.length === 0;
+  const machineName = imageMachine?.name || "this machine";
 
   const handleRandomSeed = () => {
     updateParam("seed", -1);
@@ -76,13 +84,28 @@ export default function GenerationSettings() {
           className="gen-select"
           value={params.checkpoint}
           onChange={(e) => updateParam("checkpoint", e.target.value)}
-          disabled={isGenerating || checkpoints.length === 0}
+          disabled={isGenerating || (checkpoints.length === 0 && otherModels.length === 0)}
         >
-          <option value="">Select checkpoint...</option>
+          <option value="" disabled>
+            {noModelsHere ? `No image models on ${machineName}` : "Select checkpoint..."}
+          </option>
           {checkpoints.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
+          {otherModels.map(({ machine, names }) => (
+            <optgroup key={machine.id} label={`On ${machine.name}: select it on the System page`} disabled>
+              {names.map((n) => (
+                <option key={n} value={`other:${machine.id}:${n}`} disabled>{n}</option>
+              ))}
+            </optgroup>
+          ))}
         </select>
+        {noModelsHere && (
+          <p className="gen-empty">
+            No image models on {machineName}. Install one under Models → Image
+            {otherModels.length > 0 && `, or select ${otherModels[0].machine.name} on the System page`}.
+          </p>
+        )}
       </div>
 
       {/* Sampler + Scheduler row */}
@@ -237,7 +260,8 @@ export default function GenerationSettings() {
         <button
           className="gen-btn gen-btn-generate"
           onClick={generate}
-          disabled={!isConnected || !params.prompt.trim() || !params.checkpoint}
+          disabled={!isConnected || !params.prompt.trim() || !params.checkpoint || !checkpoints.includes(params.checkpoint)}
+          title={noModelsHere ? `No image models on ${machineName}` : undefined}
         >
           ▶ Generate
         </button>

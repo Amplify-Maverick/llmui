@@ -152,3 +152,24 @@ test("machineFromQuery: only a GET of the listing path can name a machine", () =
 
   assert.deepEqual(run(mw, { method: "GET", path: "/models", query: { machine: "nope" } }), { status: 404, nexted: false });
 });
+
+test("only the default machine starts with a default image model", async () => {
+  const { machineDefaults, dropInheritedDefault, DEFAULT_SD_CONFIG } = await import("./sd.js");
+  const jelly = b.getMachine("jellyfin");
+  const ws = b.getMachine("workstation");
+  assert.equal(machineDefaults(jelly).model, DEFAULT_SD_CONFIG.model);
+  assert.equal(machineDefaults(ws).model, null);
+  assert.equal(machineDefaults(ws).recipe, null);
+  assert.equal(machineDefaults(ws).steps, DEFAULT_SD_CONFIG.steps);
+
+  // A copy of Jellyfin's default in the workstation's file is dropped...
+  const copied = { ...DEFAULT_SD_CONFIG, models: {} };
+  assert.equal(dropInheritedDefault(ws, copied), true);
+  assert.deepEqual([copied.model, copied.recipe], [null, null]);
+  // ...but not on Jellyfin, and not a default set up on the workstation itself.
+  assert.equal(dropInheritedDefault(jelly, { ...DEFAULT_SD_CONFIG }), false);
+  const ownSetup = { ...DEFAULT_SD_CONFIG, models: { [DEFAULT_SD_CONFIG.model]: { recipe: "sd1-checkpoint" } } };
+  assert.equal(dropInheritedDefault(ws, ownSetup), false);
+  const other = { ...DEFAULT_SD_CONFIG, model: "checkpoints/other.safetensors" };
+  assert.equal(dropInheritedDefault(ws, other), false);
+});

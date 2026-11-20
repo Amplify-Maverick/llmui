@@ -48,10 +48,15 @@ export function TextArea({
   );
 }
 
+/**
+ * `groups`: extra <optgroup>s after `options`, as [{ label, options, disabled }].
+ * A disabled group's entries show greyed and can't be picked.
+ */
 export function Select({
   value,
   onChange,
   options = [],
+  groups = [],
   placeholder,
   disabled = false,
   className = "",
@@ -73,9 +78,18 @@ export function Select({
         </option>
       )}
       {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
+        <option key={opt.value} value={opt.value} disabled={opt.disabled}>
           {opt.label}
         </option>
+      ))}
+      {groups.map((g) => (
+        <optgroup key={g.label} label={g.label} disabled={g.disabled}>
+          {g.options.map((opt) => (
+            <option key={opt.value} value={opt.value} disabled={g.disabled || opt.disabled}>
+              {opt.label}
+            </option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );
