@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tokenPlugin from "./config/vite-token-plugin.js";
 
 export default defineConfig({
-  plugins: [react(), tokenPlugin()],
+  plugins: [react()],
+  // Development only. In production (the llmui systemd unit) Express on 3001
+  // serves the `npm run build` output in dist/ directly and nothing listens on 3000.
   server: {
     port: 3000,
     // Loopback only — remote (Tailscale) clients come in through
@@ -13,7 +14,8 @@ export default defineConfig({
     // No direct proxy to any model server. Model calls go through the
     // authenticated Express server on port 3001 (/openai/v1/*, /api/chat-with-tools,
     // see server/openai.js), as do GPU stats (/api/gpu).
-    // The /api/llmui-token endpoint is served by a Vite plugin (middleware).
+    // The /api/llmui-token bootstrap endpoint lives in Express too and is
+    // proxied like everything else under /api.
     proxy: Object.fromEntries(
       // Forward all backend routes to the Express server on 3001.
       // This lets remote clients use relative URLs without CORS issues.

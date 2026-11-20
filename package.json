@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "npx concurrently \"npm:server\" \"npm:client\"",
+    "start": "node server/index.js",
     "server": "node server/index.js",
     "client": "npx vite",
     "build": "npx vite build",

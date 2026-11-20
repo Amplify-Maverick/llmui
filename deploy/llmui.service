@@ -1,5 +1,10 @@
 # /etc/systemd/system/llmui.service
+# Serves the prebuilt frontend (dist/) and the API from one Express process on
+# 127.0.0.1:3001. The unit never builds: run `npm run build` first, and again
+# after pulling frontend changes, then `sudo systemctl restart llmui`.
+#
 # Install:
+#   npm run build
 #   sudo cp deploy/llmui.service /etc/systemd/system/llmui.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now llmui.service
@@ -15,11 +20,13 @@ User=shogun
 Group=shogun
 WorkingDirectory=/home/shogun/Projects/llmui
 Environment=PATH=/home/shogun/.nvm/versions/node/v24.16.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Both servers listen on loopback only; tailscale serve is the way in:
-#   tailscale serve --bg --https=8452 http://127.0.0.1:3000
+Environment=NODE_ENV=production
+# Loopback only; tailscale serve is the way in:
+#   tailscale serve --bg --https=8452 http://127.0.0.1:3001
 Environment=HOST=127.0.0.1
+Environment=LLMUI_PORT=3001
 Environment=LLMUI_ALLOWED_ORIGINS=https://box.tailde6c83.ts.net:8452
-ExecStart=/home/shogun/.nvm/versions/node/v24.16.0/bin/npm run dev
+ExecStart=/home/shogun/.nvm/versions/node/v24.16.0/bin/node server/index.js
 Restart=on-failure
 RestartSec=5
 

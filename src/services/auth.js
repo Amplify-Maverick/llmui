@@ -21,8 +21,7 @@ export async function getAuthToken() {
       if (!res.ok) {
         throw new Error(
           `Failed to fetch auth token (${res.status}). ` +
-            "Ensure the storage server is running (node server/index.js) " +
-            "and the Vite dev server is active."
+            "Ensure the LLMUI server is running (node server/index.js)."
         );
       }
       return res.json();

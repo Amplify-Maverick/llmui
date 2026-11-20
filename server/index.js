@@ -7,6 +7,8 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { existsSync } from "fs";
+import { fileURLToPath } from "url";
 import { nanoid } from "nanoid";
 import { getToolsSchema, executeTool } from "./tools/index.js";
 import { openaiRouter, streamOpenAITurn, toOpenAIMessage, combineTimings, OPENAI_BASE_URL } from "./openai.js";
@@ -29,9 +31,18 @@ const execFileAsync = promisify(execFile);
 const app = express();
 const PORT = Number(process.env.LLMUI_PORT) || 3001;
 // Loopback only by default. Remote clients reach LLMUI through `tailscale serve`
-// (HTTPS on the tailnet -> Vite on 127.0.0.1:3000 -> this server). Set HOST to
-// override, e.g. HOST=0.0.0.0 to listen on every interface.
+// (HTTPS on the tailnet -> this server on 127.0.0.1:3001, which also serves the
+// built frontend from dist/). Set HOST to override, e.g. HOST=0.0.0.0 to listen
+// on every interface.
 const HOST = process.env.HOST || "127.0.0.1";
+
+// Production frontend build (`npm run build` -> dist/). Served as static files
+// with an SPA fallback when present; in development Vite serves the frontend
+// on :3000 and proxies backend routes here instead.
+const DIST_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const DIST_INDEX = path.join(DIST_DIR, "index.html");
+// Path prefixes owned by the backend. Never answered with index.html.
+const BACKEND_PREFIXES = ["/api", "/openai", "/comfyui", "/storage", "/auth", "/health"];
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
@@ -162,7 +173,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "5mb" }));
-// Requests arrive via the Vite dev proxy (and tailscale serve in front of it), both on
+// Requests arrive via tailscale serve (production) or the Vite dev proxy, both on
 // loopback. Trust X-Forwarded-For only from loopback hops so req.ip is the real
 // client (for rate limiting and the localhost-only /auth/token check).
 app.set("trust proxy", "loopback");
@@ -188,7 +199,39 @@ const storageWriteLimiter = rateLimit({
   message: { error: "Too many storage writes, please try again later" },
 });
 
+// Built frontend assets. Mounted ahead of the rate limiter so a page load's
+// asset requests don't eat into the API budget. index: false keeps "/" for the
+// SPA handler below. Vite fingerprints everything under /assets, so those are
+// cached hard; everything else (index.html, favicon, ...) revalidates.
+const hasDist = existsSync(DIST_INDEX);
+if (hasDist) {
+  app.use(
+    express.static(DIST_DIR, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (filePath.startsWith(path.join(DIST_DIR, "assets") + path.sep)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else {
+          res.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    })
+  );
+}
+
 app.use(globalLimiter);
+
+// Browser token bootstrap: the SPA fetches its bearer token from here (see
+// src/services/auth.js). Same exposure as before, when Vite served it: anyone
+// who can load the page (loopback, or the tailnet via tailscale serve) gets it.
+// Registered before the authenticated /api routers so they don't shadow it.
+app.get("/api/llmui-token", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!authToken) {
+    return res.status(503).json({ error: "Token not ready" });
+  }
+  res.json({ token: authToken });
+});
 
 // Token endpoint - only serves to localhost
 app.get("/auth/token", (req, res) => {
@@ -258,8 +301,12 @@ app.delete("/storage/:key", requireAuth, async (req, res) => {
   }
 });
 
-// Root route - no sensitive info exposed
+// Root route: the app when a build is present, else a status blurb.
 app.get("/", (req, res) => {
+  if (hasDist) {
+    res.set("Cache-Control", "no-cache");
+    return res.sendFile(DIST_INDEX);
+  }
   res.json({
     name: "LLMUI Storage Server",
     status: "running",
@@ -777,6 +824,20 @@ app.use("/comfyui", requireAuth, comfyuiRouter);
 app.use("/openai/v1", requireAuth, openaiRouter);
 app.use("/api/llama", requireAuth, llamaRouter);
 
+// SPA fallback: client-side routes get index.html. Backend prefixes are
+// excluded so an unknown API path still 404s rather than returning the app, and
+// only browser navigations (Accept: text/html) are rewritten.
+if (hasDist) {
+  app.get("*", (req, res, next) => {
+    const isBackend = BACKEND_PREFIXES.some(
+      (p) => req.path === p || req.path.startsWith(p + "/")
+    );
+    if (isBackend || !req.accepts("html")) return next();
+    res.set("Cache-Control", "no-cache");
+    res.sendFile(DIST_INDEX);
+  });
+}
+
 // ============================================================
 // Startup
 // ============================================================
@@ -826,6 +887,11 @@ process.on("SIGINT", () => {
 
 app.listen(PORT, HOST, () => {
   console.log(`Storage server running on http://${HOST}:${PORT}`);
+  console.log(
+    hasDist
+      ? `Serving frontend build from ${DIST_DIR}`
+      : `No frontend build at ${DIST_DIR} (run \`npm run build\`); API only`
+  );
   console.log(`Data directory: ${STORAGE_DIR}`);
   console.log(`OpenAI-compatible URL: ${OPENAI_BASE_URL}`);
 });

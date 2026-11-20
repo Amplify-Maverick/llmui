@@ -88,7 +88,9 @@ Or use the start script which checks port availability:
 .\scripts\start.ps1
 ```
 
-Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the frontend (port 3000). Both servers listen on `127.0.0.1` only (set `HOST` to change the storage server's bind address). For access from other machines, publish the frontend on your tailnet with `tailscale serve --bg --https=<port> http://127.0.0.1:3000`.
+Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the Vite dev server for the frontend (port 3000). Both servers listen on `127.0.0.1` only (set `HOST` to change the storage server's bind address).
+
+**Production / always-on:** build the frontend once with `npm run build`, then run `npm start` (or the `deploy/llmui.service` systemd unit). Express serves the built app and the API together on `127.0.0.1:3001`; no Vite process is involved. Rebuild after frontend changes and restart. For access from other machines, publish it on your tailnet with `tailscale serve --bg --https=<port> http://127.0.0.1:3001`.
 
 The browser never talks to the model server directly: all model traffic goes through the authenticated Express server (`/openai/v1/*` passthrough, and `/api/chat-with-tools` for the server-side tool loop).
 
