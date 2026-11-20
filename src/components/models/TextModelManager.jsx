@@ -61,6 +61,15 @@ export default function TextModelManager() {
   const [searchError, setSearchError] = useState(null);
   const [openRepo, setOpenRepo] = useState(null);
   const [repoFiles, setRepoFiles] = useState({}); // repo → { quants, hasMmproj } | { error } | "loading"
+  const [fitOnly, setFitOnly] = useState(() => {
+    try {
+      return localStorage.getItem("tmm-fit-only") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const repoFilesRef = useRef(repoFiles);
+  repoFilesRef.current = repoFiles;
 
   // ── Live updates: router events, plus polling as a fallback ──
   const refreshTimer = useRef(null);
@@ -111,10 +120,7 @@ export default function TextModelManager() {
     search("");
   }, [search]);
 
-  const toggleRepo = async (repo) => {
-    if (openRepo === repo) return setOpenRepo(null);
-    setOpenRepo(repo);
-    if (repoFiles[repo] && repoFiles[repo] !== "loading" && !repoFiles[repo].error) return;
+  const loadFiles = useCallback(async (repo) => {
     setRepoFiles((s) => ({ ...s, [repo]: "loading" }));
     try {
       const data = await llamaApi.repoFiles(repo);
@@ -122,7 +128,53 @@ export default function TextModelManager() {
     } catch (err) {
       setRepoFiles((s) => ({ ...s, [repo]: { error: err.message } }));
     }
+  }, []);
+
+  const toggleRepo = (repo) => {
+    if (openRepo === repo) return setOpenRepo(null);
+    setOpenRepo(repo);
+    const f = repoFiles[repo];
+    if (!f || f.error) loadFiles(repo);
   };
+
+  const toggleFitOnly = (on) => {
+    setFitOnly(on);
+    try {
+      localStorage.setItem("tmm-fit-only", on ? "1" : "0");
+    } catch {
+      // per-browser convenience only
+    }
+  };
+
+  // Filtering by fit needs every result's quant sizes: fetch the missing file
+  // lists a few at a time.
+  useEffect(() => {
+    if (!fitOnly) return;
+    const pending = repos.map((r) => r.id).filter((id) => !repoFilesRef.current[id]);
+    if (!pending.length) return;
+    let cancelled = false;
+    const worker = async () => {
+      while (!cancelled && pending.length) await loadFiles(pending.shift());
+    };
+    for (let i = 0; i < 6; i++) worker();
+    return () => {
+      cancelled = true;
+    };
+  }, [fitOnly, repos, loadFiles]);
+
+  const includeImageFor = (r, files) => !!files?.hasMmproj && (imageOpt[r.id] ?? r.pipelineTag === "image-text-to-text");
+  const quantFits = (q, files, includeImage) =>
+    estimateFit(q.size, gpu, includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0).level !== "nofit";
+
+  const checking = fitOnly ? repos.filter((r) => !repoFiles[r.id] || repoFiles[r.id] === "loading").length : 0;
+  const visibleRepos = fitOnly
+    ? repos.filter((r) => {
+        const files = repoFiles[r.id];
+        if (!files?.quants) return false;
+        const inc = includeImageFor(r, files);
+        return files.quants.some((q) => quantFits(q, files, inc));
+      })
+    : repos;
 
   // ── Actions ──
   const installedIds = useMemo(() => new Set(models.map((m) => m.name.toLowerCase())), [models]);
@@ -325,13 +377,27 @@ export default function TextModelManager() {
           Fit = file size + ~1 GiB for context and compute (+ 1.5× the projector size with image support), against {gpu ? gib(gpu.budget) : "the GPU's"} usable VRAM.
           Larger models can still run with partial CPU offload, but slowly.
         </p>
+        <label className="tmm-image-opt">
+          <input type="checkbox" checked={fitOnly} onChange={(e) => toggleFitOnly(e.target.checked)} />
+          Only show models that fit on my GPU
+          {fitOnly && repos.length > 0 && (
+            <span className="tmm-hint">
+              {checking > 0
+                ? `(checking file sizes… ${repos.length - checking}/${repos.length})`
+                : `(${visibleRepos.length} of ${repos.length} repos have a quant that fits)`}
+            </span>
+          )}
+        </label>
         {searchError && <p className="tmm-row-error">{searchError}</p>}
         {!searching && repos.length === 0 && !searchError && <p className="tmm-empty">No GGUF repos found.</p>}
+        {!searching && fitOnly && repos.length > 0 && checking === 0 && visibleRepos.length === 0 && (
+          <p className="tmm-empty">None of these repos has a quant that fits in {gpu ? gib(gpu.budget) : "the GPU's VRAM"}.</p>
+        )}
         <div className="tmm-list">
-          {repos.map((r) => {
+          {visibleRepos.map((r) => {
             const files = repoFiles[r.id];
             const open = openRepo === r.id;
-            const includeImage = !!files?.hasMmproj && (imageOpt[r.id] ?? r.pipelineTag === "image-text-to-text");
+            const includeImage = includeImageFor(r, files);
             const imageExtra = includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0;
             return (
               <div key={r.id} className={`tmm-repo ${open ? "open" : ""}`}>
@@ -362,7 +428,7 @@ export default function TextModelManager() {
                         </span>
                       </label>
                     )}
-                    {files?.quants?.map((q) => {
+                    {files?.quants?.filter((q) => !fitOnly || quantFits(q, files, includeImage)).map((q) => {
                       const id = `${r.id}:${q.quant}`;
                       const fit = estimateFit(q.size, gpu, imageExtra);
                       const dl = downloads[id];

@@ -201,6 +201,21 @@ export default function ImageModelManager() {
   const [searchError, setSearchError] = useState(null);
   const [openRepo, setOpenRepo] = useState(null);
   const [lastQuery, setLastQuery] = useState("");
+  const [fitOnly, setFitOnly] = useState(() => {
+    try {
+      return localStorage.getItem("imm-fit-only") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleFitOnly = (on) => {
+    setFitOnly(on);
+    try {
+      localStorage.setItem("imm-fit-only", on ? "1" : "0");
+    } catch {
+      // per-browser convenience only
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -261,6 +276,10 @@ export default function ImageModelManager() {
   const helperReady = !!helper?.ok;
   const jobActive = !!job && ACTIVE.has(job.state);
   const gpuBytes = data?.gpuBytes || results?.gpuBytes || 8 * GiB;
+  const fileShown = (f) => !fitOnly || f.kind !== "model" || f.fit !== "nofit";
+  const visibleRepos = (results?.repos || []).filter(
+    (r) => !fitOnly || r.files.some((f) => f.kind === "model" && f.fit !== "nofit")
+  );
   const usableDisk = helper?.disk ? Math.max(0, helper.disk.free - helper.disk.reserve) : null;
 
   const install = async (repo, f) => {
@@ -483,13 +502,25 @@ export default function ImageModelManager() {
           Only repos with a single-file .safetensors or .gguf checkpoint are shown (diffusers folders can't be loaded).
           Fit compares the file size with {gib(gpuBytes)} of VRAM; recipes that need text encoders load those too.
         </p>
+        <label className="tmm-image-opt">
+          <input type="checkbox" checked={fitOnly} onChange={(e) => toggleFitOnly(e.target.checked)} />
+          Only show models that fit on my GPU
+          {fitOnly && results?.repos.length > 0 && (
+            <span className="tmm-hint">
+              ({visibleRepos.length} of {results.repos.length} repos have a checkpoint that fits)
+            </span>
+          )}
+        </label>
         {searchError && <p className="tmm-row-error">{searchError}</p>}
+        {fitOnly && results && !searching && results.repos.length > 0 && visibleRepos.length === 0 && (
+          <p className="tmm-empty">None of these repos has a checkpoint that fits in {gib(gpuBytes)} of VRAM.</p>
+        )}
         {searching && !results && <p className="tmm-empty">Searching… (reads each repo's file list)</p>}
         {results && !searching && results.repos.length === 0 && !searchError && (
           <p className="tmm-empty">No repos with single-file checkpoints found.</p>
         )}
         <div className="tmm-list">
-          {results?.repos.map((r) => {
+          {visibleRepos.map((r) => {
             const open = openRepo === r.id;
             const modelFiles = r.files.filter((f) => f.kind === "model");
             const families = [...new Set(modelFiles.map((f) => f.recipeName).filter(Boolean))];
@@ -507,7 +538,7 @@ export default function ImageModelManager() {
                 </button>
                 {open && (
                   <div className="tmm-quants">
-                    {r.files.map((f) => {
+                    {r.files.filter(fileShown).map((f) => {
                       const loadable = f.kind === "component" || !!f.recipe;
                       const tooBigForDisk = usableDisk != null && f.size > usableDisk;
                       const isThisJob = jobActive && job.repo === r.id && job.path === f.path;
