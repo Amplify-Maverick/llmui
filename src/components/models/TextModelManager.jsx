@@ -6,6 +6,9 @@ import { formatBytes } from "../../utils/formatters.js";
 import { hasMmproj, mmprojAllowance, mmprojAllowanceForFile } from "../../utils/mmproj.js";
 import Button from "../shared/Button.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
+import { useMachinesStore } from "../../stores/machinesStore.js";
+import { MachineColumns, MachineColumn, InstallOn } from "./MachineColumns.jsx";
+import { useRemoteTextModels } from "./useRemoteTextModels.js";
 import "./TextModelManager.css";
 
 const GiB = 1024 ** 3;
@@ -70,6 +73,16 @@ export default function TextModelManager() {
   });
   const repoFilesRef = useRef(repoFiles);
   repoFilesRef.current = repoFiles;
+
+  // ── Machines: the selected one (chat goes there) gets every control; the
+  // others are listed beside it for install / delete only.
+  const machines = useMachinesStore((s) => s.machines);
+  const chatId = useMachinesStore((s) => s.effective.chat);
+  const otherUpIds = machines.filter((m) => m.id !== chatId && m.status?.llama?.ok === true).map((m) => m.id);
+  const { remote, install: installRemote, remove: removeRemote, clearDownload: clearRemoteDownload } =
+    useRemoteTextModels(otherUpIds);
+  const [remoteDelete, setRemoteDelete] = useState(null); // { machine, model }
+  const [remoteBusy, setRemoteBusy] = useState({}); // `${machine}:${model}` → true
 
   // ── Live updates: router events, plus polling as a fallback ──
   const refreshTimer = useRef(null);
@@ -213,10 +226,91 @@ export default function TextModelManager() {
     }
   };
 
+  const deleteOnOther = async ({ machine, model }) => {
+    const k = `${machine.id}:${model}`;
+    setActionError(null);
+    setRemoteBusy((b) => ({ ...b, [k]: true }));
+    try {
+      await removeRemote(machine.id, model);
+    } catch (err) {
+      setActionError(`Delete ${model} on ${machine.name}: ${err.message}`);
+    } finally {
+      setRemoteBusy(({ [k]: _, ...rest }) => rest);
+    }
+  };
+
   // Installs started here that the router hasn't listed yet.
   const pending = Object.entries(downloads).filter(
     ([id, dl]) => !installedIds.has(id.toLowerCase()) && dl.state !== "done"
   );
+
+  /** Installed list of a machine chat doesn't go to: status, size, Delete. */
+  const renderOther = (machine) => {
+    if (machine.status?.online === false) return <p className="tmm-empty">{machine.name} is offline.</p>;
+    if (machine.status && machine.status.llama?.ok !== true) {
+      return <p className="tmm-empty">{machine.name}'s model server is unreachable{machine.status.llama?.error ? `: ${machine.status.llama.error}` : ""}.</p>;
+    }
+    const r = remote[machine.id];
+    if (!r?.loaded) return <p className="tmm-empty">Loading…</p>;
+    if (r.error) return <p className="tmm-row-error">{r.error}</p>;
+    const ids = new Set(r.models.map((m) => m.id.toLowerCase()));
+    const pendingHere = Object.entries(r.downloads).filter(([id, dl]) => !ids.has(id.toLowerCase()) && dl.state !== "done");
+    if (r.models.length === 0 && pendingHere.length === 0) {
+      return <p className="tmm-empty">No models here yet. Install one from Hugging Face below.</p>;
+    }
+    return (
+      <div className="tmm-list">
+        {r.models.map((m) => {
+          const dl = r.downloads[Object.keys(r.downloads).find((k) => k.toLowerCase() === m.id.toLowerCase())];
+          const downloading = m.status === "downloading" || dl?.state === "downloading" || dl?.state === "starting";
+          const b = remoteBusy[`${machine.id}:${m.id}`];
+          return (
+            <div key={m.id} className={`tmm-row ${m.failed ? "failed" : ""}`}>
+              <div className="tmm-row-main">
+                <div className="tmm-row-title">
+                  <span className="tmm-model-id">{m.id}</span>
+                  <span className={`model-status-pill status-${m.failed ? "failed" : m.status}`}>{modelStatusLabel(m)}</span>
+                  {m.sidecars?.includes("mmproj") && <span className="tmm-default">images</span>}
+                </div>
+                <div className="tmm-row-meta">{m.diskSize > 0 && <span>{formatBytes(m.diskSize)} on disk</span>}</div>
+                {downloading && <ProgressBar dl={dl} />}
+                {dl?.state === "failed" && <div className="tmm-row-error">{dl.error}</div>}
+              </div>
+              <div className="tmm-row-actions">
+                <Button
+                  variant="danger"
+                  className="btn-sm"
+                  disabled={!!b || m.canRemove === false}
+                  title={m.canRemove === false ? "This model can't be removed (not from the download cache)" : undefined}
+                  onClick={() => setRemoteDelete({ machine, model: m.id })}
+                >
+                  {b ? "Deleting…" : "Delete"}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+        {pendingHere.map(([id, dl]) => (
+          <div key={id} className="tmm-row">
+            <div className="tmm-row-main">
+              <div className="tmm-row-title">
+                <span className="tmm-model-id">{id}</span>
+                <span className={`model-status-pill status-${dl.state === "failed" ? "failed" : "downloading"}`}>
+                  {dl.state === "failed" ? "failed" : "downloading…"}
+                </span>
+              </div>
+              {dl.state === "failed" ? <div className="tmm-row-error">{dl.error}</div> : <ProgressBar dl={dl} />}
+            </div>
+            {dl.state === "failed" && (
+              <div className="tmm-row-actions">
+                <Button variant="ghost" className="btn-sm" onClick={() => clearRemoteDownload(machine.id, id)}>Dismiss</Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="tmm">
@@ -239,119 +333,129 @@ export default function TextModelManager() {
         </div>
       )}
 
-      {/* ── Installed ── */}
+      {/* ── Installed, one column per machine ── */}
       <section className="tmm-section">
-        <h3 className="tmm-section-title">
-          Installed <span className="image-models-count">{models.length}</span>
-        </h3>
-        {models.length === 0 && pending.length === 0 ? (
-          <p className="tmm-empty">No models on the server yet. Install one from Hugging Face below.</p>
-        ) : (
-          <div className="tmm-list">
-            {models.map((m) => {
-              const usage = gpuUsage(m);
-              const vision = hasMmproj(m);
-              const dl = downloads[Object.keys(downloads).find((k) => k.toLowerCase() === m.name.toLowerCase())];
-              const isDownloading = m.status === "downloading" || dl?.state === "downloading" || dl?.state === "starting";
-              const isLoaded = !m.failed && (m.status === "loaded" || m.status === "sleeping" || m.status === "loading");
-              const b = busy[m.name];
-              const rowError = rowErrors[m.name];
-              return (
-                <div key={m.name} className={`tmm-row ${m.failed || rowError ? "failed" : ""}`}>
-                  <div className="tmm-row-main">
-                    <div className="tmm-row-title">
-                      <span className="tmm-model-id">{m.name}</span>
-                      <span className={`model-status-pill status-${m.failed ? "failed" : m.status}`}>{modelStatusLabel(m)}</span>
-                      {defaultModel === m.name && <span className="tmm-default">chat default</span>}
-                      {vision && <span className="tmm-default" title="Has a vision projector (mmproj) sidecar">images</span>}
+        <h3 className="tmm-section-title">Installed</h3>
+        <MachineColumns>
+          {machines.map((machine) =>
+            machine.id === chatId ? (
+              <MachineColumn key={machine.id} machine={machine} selected count={models.length}>
+            {models.length === 0 && pending.length === 0 ? (
+              <p className="tmm-empty">No models here yet. Install one from Hugging Face below.</p>
+            ) : (
+              <div className="tmm-list">
+                {models.map((m) => {
+                  const usage = gpuUsage(m);
+                  const vision = hasMmproj(m);
+                  const dl = downloads[Object.keys(downloads).find((k) => k.toLowerCase() === m.name.toLowerCase())];
+                  const isDownloading = m.status === "downloading" || dl?.state === "downloading" || dl?.state === "starting";
+                  const isLoaded = !m.failed && (m.status === "loaded" || m.status === "sleeping" || m.status === "loading");
+                  const b = busy[m.name];
+                  const rowError = rowErrors[m.name];
+                  return (
+                    <div key={m.name} className={`tmm-row ${m.failed || rowError ? "failed" : ""}`}>
+                      <div className="tmm-row-main">
+                        <div className="tmm-row-title">
+                          <span className="tmm-model-id">{m.name}</span>
+                          <span className={`model-status-pill status-${m.failed ? "failed" : m.status}`}>{modelStatusLabel(m)}</span>
+                          {defaultModel === m.name && <span className="tmm-default">chat default</span>}
+                          {vision && <span className="tmm-default" title="Has a vision projector (mmproj) sidecar">images</span>}
+                        </div>
+                        <div className="tmm-row-meta">
+                          {m.size > 0 && <span>{formatBytes(m.size)} file</span>}
+                          {usage && (
+                            <span title={usage.live ? "Currently allocated on the GPU" : "Measured minimum on the GPU"}>
+                              {gib(usage.bytes)} on GPU {usage.live ? "(in use)" : "(measured)"}
+                            </span>
+                          )}
+                          {usage?.addOn > 0 && (
+                            <span title="llama.cpp's memory report doesn't count the vision projector (mmproj); this allowance is included in the GPU figure">
+                              incl. + {gib(usage.addOn)} image add-on
+                            </span>
+                          )}
+                          {usage?.nCtx && <span>ctx {usage.nCtx.toLocaleString()}</span>}
+                        </div>
+                        {isDownloading && <ProgressBar dl={dl} />}
+                        {dl?.state === "failed" && <div className="tmm-row-error">{dl.error}</div>}
+                        {m.failed && (
+                          <div className="tmm-failure">
+                            <strong>
+                              llama.cpp failed to load this model
+                              {m.exitCode != null && ` (exit code ${m.exitCode})`}.
+                            </strong>{" "}
+                            It's usually an unsupported architecture or a broken download. The exact error is in the
+                            llama-server log on the GPU machine. Delete it, or try loading it again.
+                          </div>
+                        )}
+                        {rowError && <div className="tmm-failure">{rowError}</div>}
+                      </div>
+                      <div className="tmm-row-actions">
+                        {defaultModel !== m.name && !isDownloading && !m.failed && (
+                          <Button variant="ghost" className="btn-sm" onClick={() => updateSetting("defaultModel", m.name)}>
+                            Use in chat
+                          </Button>
+                        )}
+                        {!isDownloading && (isLoaded && !m.failed ? (
+                          <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "unload")}>
+                            {b === "unload" ? "Unloading…" : "Unload"}
+                          </Button>
+                        ) : (
+                          <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "load")}>
+                            {b === "load" ? "Loading…" : m.failed || rowError ? "Retry load" : "Load"}
+                          </Button>
+                        ))}
+                        {vision && !isDownloading && (
+                          <Button
+                            variant="ghost"
+                            className="btn-sm"
+                            disabled={!!b || isLoaded}
+                            title={isLoaded ? "Unload the model first" : "Delete the vision projector (mmproj) and keep the model"}
+                            onClick={() => setRemoveImageTarget(m.name)}
+                          >
+                            {b === "removeImage" ? "Removing…" : "Remove image support"}
+                          </Button>
+                        )}
+                        <Button
+                          variant="danger"
+                          className="btn-sm"
+                          disabled={!!b || m.canRemove === false}
+                          title={m.canRemove === false ? "This model can't be removed (not from the download cache)" : undefined}
+                          onClick={() => setDeleteTarget(m.name)}
+                        >
+                          {b === "delete" ? "Deleting…" : "Delete"}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="tmm-row-meta">
-                      {m.size > 0 && <span>{formatBytes(m.size)} file</span>}
-                      {usage && (
-                        <span title={usage.live ? "Currently allocated on the GPU" : "Measured minimum on the GPU"}>
-                          {gib(usage.bytes)} on GPU {usage.live ? "(in use)" : "(measured)"}
+                  );
+                })}
+                {pending.map(([id, dl]) => (
+                  <div key={id} className="tmm-row">
+                    <div className="tmm-row-main">
+                      <div className="tmm-row-title">
+                        <span className="tmm-model-id">{id}</span>
+                        <span className={`model-status-pill status-${dl.state === "failed" ? "failed" : "downloading"}`}>
+                          {dl.state === "failed" ? "failed" : "downloading…"}
                         </span>
-                      )}
-                      {usage?.addOn > 0 && (
-                        <span title="llama.cpp's memory report doesn't count the vision projector (mmproj); this allowance is included in the GPU figure">
-                          incl. + {gib(usage.addOn)} image add-on
-                        </span>
-                      )}
-                      {usage?.nCtx && <span>ctx {usage.nCtx.toLocaleString()}</span>}
+                      </div>
+                      {dl.state === "failed" ? <div className="tmm-row-error">{dl.error}</div> : <ProgressBar dl={dl} />}
                     </div>
-                    {isDownloading && <ProgressBar dl={dl} />}
-                    {dl?.state === "failed" && <div className="tmm-row-error">{dl.error}</div>}
-                    {m.failed && (
-                      <div className="tmm-failure">
-                        <strong>
-                          llama.cpp failed to load this model
-                          {m.exitCode != null && ` (exit code ${m.exitCode})`}.
-                        </strong>{" "}
-                        It's usually an unsupported architecture or a broken download. The exact error is in the
-                        llama-server log on the GPU machine. Delete it, or try loading it again.
+                    {dl.state === "failed" && (
+                      <div className="tmm-row-actions">
+                        <Button variant="ghost" className="btn-sm" onClick={() => clearDownload(id)}>Dismiss</Button>
                       </div>
                     )}
-                    {rowError && <div className="tmm-failure">{rowError}</div>}
                   </div>
-                  <div className="tmm-row-actions">
-                    {defaultModel !== m.name && !isDownloading && !m.failed && (
-                      <Button variant="ghost" className="btn-sm" onClick={() => updateSetting("defaultModel", m.name)}>
-                        Use in chat
-                      </Button>
-                    )}
-                    {!isDownloading && (isLoaded && !m.failed ? (
-                      <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "unload")}>
-                        {b === "unload" ? "Unloading…" : "Unload"}
-                      </Button>
-                    ) : (
-                      <Button variant="secondary" className="btn-sm" disabled={!!b} onClick={() => runAction(m.name, "load")}>
-                        {b === "load" ? "Loading…" : m.failed || rowError ? "Retry load" : "Load"}
-                      </Button>
-                    ))}
-                    {vision && !isDownloading && (
-                      <Button
-                        variant="ghost"
-                        className="btn-sm"
-                        disabled={!!b || isLoaded}
-                        title={isLoaded ? "Unload the model first" : "Delete the vision projector (mmproj) and keep the model"}
-                        onClick={() => setRemoveImageTarget(m.name)}
-                      >
-                        {b === "removeImage" ? "Removing…" : "Remove image support"}
-                      </Button>
-                    )}
-                    <Button
-                      variant="danger"
-                      className="btn-sm"
-                      disabled={!!b || m.canRemove === false}
-                      title={m.canRemove === false ? "This model can't be removed (not from the download cache)" : undefined}
-                      onClick={() => setDeleteTarget(m.name)}
-                    >
-                      {b === "delete" ? "Deleting…" : "Delete"}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-            {pending.map(([id, dl]) => (
-              <div key={id} className="tmm-row">
-                <div className="tmm-row-main">
-                  <div className="tmm-row-title">
-                    <span className="tmm-model-id">{id}</span>
-                    <span className={`model-status-pill status-${dl.state === "failed" ? "failed" : "downloading"}`}>
-                      {dl.state === "failed" ? "failed" : "downloading…"}
-                    </span>
-                  </div>
-                  {dl.state === "failed" ? <div className="tmm-row-error">{dl.error}</div> : <ProgressBar dl={dl} />}
-                </div>
-                {dl.state === "failed" && (
-                  <div className="tmm-row-actions">
-                    <Button variant="ghost" className="btn-sm" onClick={() => clearDownload(id)}>Dismiss</Button>
-                  </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+              </MachineColumn>
+            ) : (
+              <MachineColumn key={machine.id} machine={machine} count={remote[machine.id]?.models.length}>
+                {renderOther(machine)}
+              </MachineColumn>
+            )
+          )}
+        </MachineColumns>
       </section>
 
       {/* ── Hugging Face ── */}
@@ -431,9 +535,7 @@ export default function TextModelManager() {
                     {files?.quants?.filter((q) => !fitOnly || quantFits(q, files, includeImage)).map((q) => {
                       const id = `${r.id}:${q.quant}`;
                       const fit = estimateFit(q.size, gpu, imageExtra);
-                      const dl = downloads[id];
-                      const installed = installedIds.has(id.toLowerCase());
-                      const active = dl && (dl.state === "starting" || dl.state === "downloading");
+                      const sidecars = files.hasMmproj && includeImage ? ["mmproj"] : [];
                       return (
                         <div key={q.quant} className="tmm-quant">
                           <span className="tmm-quant-tag">{q.quant}</span>
@@ -447,18 +549,44 @@ export default function TextModelManager() {
                           >
                             {FIT_LABEL[fit.level]}
                           </span>
-                          <span className="tmm-quant-action">
-                            {installed && !active ? (
-                              <span className="tmm-installed">Installed</span>
-                            ) : active ? (
-                              <ProgressBar dl={dl} />
-                            ) : (
-                              <Button variant={fit.level === "nofit" ? "ghost" : "primary"} className="btn-sm" onClick={() => install(id, files.hasMmproj && includeImage ? ["mmproj"] : [])}>
-                                {dl?.state === "failed" ? "Retry" : "Install"}
-                              </Button>
-                            )}
+                          <span className="tmm-quant-action mcol-installs">
+                            {machines.map((machine) => {
+                              const here = machine.id === chatId;
+                              const r = remote[machine.id];
+                              const dl = here
+                                ? downloads[id]
+                                : r?.downloads[Object.keys(r.downloads).find((k) => k.toLowerCase() === id.toLowerCase())];
+                              const installed = here
+                                ? installedIds.has(id.toLowerCase())
+                                : !!r?.models.some((m) => m.id.toLowerCase() === id.toLowerCase());
+                              const active = !!dl && (dl.state === "starting" || dl.state === "downloading");
+                              const up = here || (machine.status?.llama?.ok === true && r?.loaded && !r.error);
+                              return (
+                                <InstallOn
+                                  key={machine.id}
+                                  machine={machine}
+                                  many={machines.length > 1}
+                                  installed={installed}
+                                  active={active}
+                                  progress={!here || machines.length === 1 ? <ProgressBar dl={dl} /> : null}
+                                  failed={dl?.state === "failed"}
+                                  disabled={!up}
+                                  title={up ? undefined : `${machine.name}'s model server is unreachable`}
+                                  variant={fit.level === "nofit" ? "ghost" : "primary"}
+                                  onInstall={() => (here ? install(id, sidecars) : installRemote(machine.id, id, sidecars))}
+                                />
+                              );
+                            })}
                           </span>
-                          {dl?.state === "failed" && <span className="tmm-row-error tmm-quant-error">{dl.error}</span>}
+                          {machines.map((machine) => {
+                            const r = remote[machine.id];
+                            const dl = machine.id === chatId ? downloads[id] : r?.downloads[id];
+                            return dl?.state === "failed" ? (
+                              <span key={machine.id} className="tmm-row-error tmm-quant-error">
+                                {machines.length > 1 && `${machine.name}: `}{dl.error}
+                              </span>
+                            ) : null;
+                          })}
                         </div>
                       );
                     })}
@@ -478,7 +606,19 @@ export default function TextModelManager() {
           setDeleteTarget(null);
         }}
         title="Delete model"
-        message={`Remove ${deleteTarget} from the server's model cache? It will need to be downloaded again to use it.`}
+        message={`Remove ${deleteTarget} from ${machines.find((m) => m.id === chatId)?.name || "the server"}'s model cache? It will need to be downloaded again to use it.`}
+        confirmText="Delete"
+      />
+
+      <ConfirmModal
+        isOpen={!!remoteDelete}
+        onClose={() => setRemoteDelete(null)}
+        onConfirm={() => {
+          deleteOnOther(remoteDelete);
+          setRemoteDelete(null);
+        }}
+        title={`Delete model on ${remoteDelete?.machine.name}`}
+        message={`Remove ${remoteDelete?.model} from ${remoteDelete?.machine.name}'s model cache? It will need to be downloaded again to use it there.`}
         confirmText="Delete"
       />
 

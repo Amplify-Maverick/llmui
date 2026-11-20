@@ -4,6 +4,9 @@ import { useImageStore } from "../../stores/imageStore.js";
 import { formatBytes } from "../../utils/formatters.js";
 import Button from "../shared/Button.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
+import { useMachinesStore } from "../../stores/machinesStore.js";
+import { MachineColumns, MachineColumn, InstallOn } from "./MachineColumns.jsx";
+import { useRemoteImageModels, installedId } from "./useRemoteImageModels.js";
 import "./TextModelManager.css";
 import "./ImageModelManager.css";
 
@@ -201,6 +204,15 @@ export default function ImageModelManager() {
   const [searchError, setSearchError] = useState(null);
   const [openRepo, setOpenRepo] = useState(null);
   const [lastQuery, setLastQuery] = useState("");
+  // ── Machines: the selected one (images go there) gets every control; the
+  // others are listed beside it for install / delete only.
+  const machines = useMachinesStore((s) => s.machines);
+  const imageId = useMachinesStore((s) => s.effective.image);
+  const otherUpIds = machines.filter((m) => m.id !== imageId && m.status?.sd?.ok === true).map((m) => m.id);
+  const other = useRemoteImageModels(otherUpIds);
+  const [remoteDelete, setRemoteDelete] = useState(null); // { machine, file }
+  const [remoteBusy, setRemoteBusy] = useState({}); // `${machine}:${file id}` → true
+
   const [fitOnly, setFitOnly] = useState(() => {
     try {
       return localStorage.getItem("imm-fit-only") === "1";
@@ -345,6 +357,34 @@ export default function ImageModelManager() {
     }
   };
 
+  const installOn = async (machine, repo, f) => {
+    setActionError(null);
+    try {
+      await other.install(machine.id, {
+        repo: repo.id,
+        path: f.path,
+        revision: repo.sha || "main",
+        category: f.category,
+        recipe: f.kind === "model" ? f.recipe : undefined,
+      });
+    } catch (err) {
+      setActionError(`Install ${f.name} on ${machine.name}: ${err.message}`);
+    }
+  };
+
+  const deleteOnOther = async ({ machine, file }) => {
+    const k = `${machine.id}:${file.id}`;
+    setActionError(null);
+    setRemoteBusy((b) => ({ ...b, [k]: true }));
+    try {
+      await other.remove(machine.id, file);
+    } catch (err) {
+      setActionError(`Delete ${file.id} on ${machine.name}: ${err.message}`);
+    } finally {
+      setRemoteBusy(({ [k]: _, ...rest }) => rest);
+    }
+  };
+
   const files = data?.files || [];
   const models = files.filter((f) => f.kind === "model");
   const components = files.filter((f) => f.kind === "component");
@@ -418,6 +458,80 @@ export default function ImageModelManager() {
     );
   };
 
+  /** Files on a machine images don't go to: size, recipe, Delete, its download. */
+  const renderOther = (machine) => {
+    if (machine.status?.online === false) return <p className="tmm-empty">{machine.name} is offline.</p>;
+    if (machine.status && machine.status.sd?.ok !== true) {
+      return <p className="tmm-empty">{machine.name}'s sd-server is unreachable{machine.status.sd?.error ? `: ${machine.status.sd.error}` : ""}.</p>;
+    }
+    const r = other.remote[machine.id];
+    if (!r?.loaded) return <p className="tmm-empty">Loading…</p>;
+    if (r.error) return <p className="tmm-row-error">{r.error}</p>;
+    const h = r.data.helper;
+    const hReady = !!h?.ok;
+    const job = r.job;
+    const jActive = !!job && ACTIVE.has(job.state);
+    const showRemoteJob = job && job.id !== r.dismissed && (jActive || job.state === "failed" || job.state === "cancelled");
+    const list = r.data.files || [];
+    return (
+      <>
+        {h && !hReady && <div className="tmm-failure">Can't install or delete here: {h.error}</div>}
+        {showRemoteJob && (
+          <JobProgress
+            job={job}
+            onCancel={() => other.cancel(machine.id, job.id).catch((err) => setActionError(`Cancel: ${err.message}`))}
+            onDismiss={() => other.dismissJob(machine.id, job.id)}
+          />
+        )}
+        {list.length === 0 ? (
+          <p className="tmm-empty">No image models here yet. Install one from Hugging Face below.</p>
+        ) : (
+          <div className="tmm-list">
+            {list.map((f) => {
+              const b = remoteBusy[`${machine.id}:${f.id}`];
+              const protectedFile = f.isDefault || f.usedByDefault;
+              return (
+                <div key={f.id} className="tmm-row">
+                  <div className="tmm-row-main">
+                    <div className="tmm-row-title">
+                      <span className="tmm-model-id">{f.id}</span>
+                      {f.kind === "component" && <span className="imm-tag">component</span>}
+                      {f.isDefault && <span className="tmm-default">default</span>}
+                      {f.usedByDefault && <span className="tmm-default">used by default</span>}
+                    </div>
+                    <div className="tmm-row-meta">
+                      {f.size != null && <span>{formatBytes(f.size)}</span>}
+                      {f.kind === "model" && (f.setup ? <span>recipe {f.setup.recipe}</span> : <span className="imm-warn">no recipe set</span>)}
+                    </div>
+                  </div>
+                  <div className="tmm-row-actions">
+                    <Button
+                      variant="danger"
+                      className="btn-sm"
+                      disabled={!!b || !f.deletable || protectedFile || !hReady}
+                      title={
+                        protectedFile
+                          ? `${machine.name}'s default model uses this file`
+                          : !hReady
+                            ? "The download helper isn't reachable"
+                            : !f.deletable
+                              ? "Only top-level files in the helper's model dir can be deleted"
+                              : undefined
+                      }
+                      onClick={() => setRemoteDelete({ machine, file: f })}
+                    >
+                      {b ? "Deleting…" : "Delete"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <div className="tmm">
       <div className="tmm-gpu imm-status">
@@ -451,31 +565,50 @@ export default function ImageModelManager() {
         </div>
       )}
 
-      {showJob && <JobProgress job={job} onCancel={cancel} onDismiss={() => setDismissedJob(job.id)} />}
-
-      {/* ── Installed ── */}
       <section className="tmm-section">
-        <h3 className="tmm-section-title">
-          Models <span className="image-models-count">{models.length}</span>
-        </h3>
-        {!data ? (
-          <p className="tmm-empty">Loading…</p>
-        ) : models.length === 0 ? (
-          <p className="tmm-empty">No checkpoints or diffusion models yet. Install one from Hugging Face below.</p>
-        ) : (
-          <div className="tmm-list">{models.map(renderFile)}</div>
-        )}
-      </section>
+        <h3 className="tmm-section-title">Installed</h3>
+        <MachineColumns>
+          {machines.map((machine) =>
+            machine.id === imageId ? (
+              <MachineColumn key={machine.id} machine={machine} selected count={models.length}>
+                  {showJob && <JobProgress job={job} onCancel={cancel} onDismiss={() => setDismissedJob(job.id)} />}
 
-      {components.length > 0 && (
-        <section className="tmm-section">
-          <h3 className="tmm-section-title">
-            Components <span className="image-models-count">{components.length}</span>
-          </h3>
-          <p className="tmm-hint">Text encoders, VAEs and other files that recipes like FLUX need next to the model.</p>
-          <div className="tmm-list">{components.map(renderFile)}</div>
-        </section>
-      )}
+                  {/* ── Installed ── */}
+                  <section className="tmm-section imm-col-section">
+                    <h3 className="tmm-section-title">
+                      Models <span className="image-models-count">{models.length}</span>
+                    </h3>
+                    {!data ? (
+                      <p className="tmm-empty">Loading…</p>
+                    ) : models.length === 0 ? (
+                      <p className="tmm-empty">No checkpoints or diffusion models yet. Install one from Hugging Face below.</p>
+                    ) : (
+                      <div className="tmm-list">{models.map(renderFile)}</div>
+                    )}
+                  </section>
+
+                  {components.length > 0 && (
+                    <section className="tmm-section imm-col-section">
+                      <h3 className="tmm-section-title">
+                        Components <span className="image-models-count">{components.length}</span>
+                      </h3>
+                      <p className="tmm-hint">Text encoders, VAEs and other files that recipes like FLUX need next to the model.</p>
+                      <div className="tmm-list">{components.map(renderFile)}</div>
+                    </section>
+                  )}
+              </MachineColumn>
+            ) : (
+              <MachineColumn
+                key={machine.id}
+                machine={machine}
+                count={other.remote[machine.id]?.data?.files.filter((f) => f.kind === "model").length}
+              >
+                {renderOther(machine)}
+              </MachineColumn>
+            )
+          )}
+        </MachineColumns>
+      </section>
 
       {/* ── Hugging Face ── */}
       <section className="tmm-section">
@@ -541,7 +674,6 @@ export default function ImageModelManager() {
                     {r.files.filter(fileShown).map((f) => {
                       const loadable = f.kind === "component" || !!f.recipe;
                       const tooBigForDisk = usableDisk != null && f.size > usableDisk;
-                      const isThisJob = jobActive && job.repo === r.id && job.path === f.path;
                       return (
                         <div key={f.path} className="imm-hf-file">
                           <span className="tmm-quant-tag imm-path" title={f.path}>
@@ -549,32 +681,44 @@ export default function ImageModelManager() {
                           </span>
                           <span className="tmm-quant-size">{formatBytes(f.size)}</span>
                           {f.kind === "model" ? <Fit level={f.fit} size={f.size} gpuBytes={gpuBytes} /> : <span />}
-                          <span className="tmm-quant-action">
-                            {f.installed ? (
-                              <span className="tmm-installed">Installed</span>
-                            ) : isThisJob ? (
-                              <span className="tmm-installed">Downloading…</span>
-                            ) : (
-                              <Button
-                                variant={f.fit === "nofit" ? "ghost" : "primary"}
-                                className="btn-sm"
-                                disabled={!loadable || !helperReady || jobActive || tooBigForDisk}
-                                title={
-                                  !loadable
-                                    ? "No sd-server recipe for this file"
-                                    : !helperReady
-                                      ? "The download helper isn't reachable"
-                                      : jobActive
-                                        ? "One download at a time"
-                                        : tooBigForDisk
-                                          ? "Not enough disk space on the sd-server host"
-                                          : `Download to ${f.category}/`
-                                }
-                                onClick={() => install(r, f)}
-                              >
-                                Install
-                              </Button>
-                            )}
+                          <span className="tmm-quant-action mcol-installs">
+                            {machines.map((machine) => {
+                              const here = machine.id === imageId;
+                              const rm = other.remote[machine.id];
+                              const mHelper = here ? helper : rm?.data?.helper;
+                              const mReady = here ? helperReady : !!mHelper?.ok && rm?.loaded && !rm.error;
+                              const mJob = here ? job : rm?.job;
+                              const mJobActive = !!mJob && ACTIVE.has(mJob.state);
+                              const mDisk = mHelper?.disk ? Math.max(0, mHelper.disk.free - mHelper.disk.reserve) : null;
+                              const mTooBig = mDisk != null && f.size > mDisk;
+                              const installed = here
+                                ? f.installed
+                                : !!f.category && !!rm?.data?.files.some((x) => x.path === installedId(f));
+                              const thisJob = mJobActive && mJob.repo === r.id && mJob.path === f.path;
+                              return (
+                                <InstallOn
+                                  key={machine.id}
+                                  machine={machine}
+                                  many={machines.length > 1}
+                                  installed={installed}
+                                  active={thisJob}
+                                  disabled={!loadable || !mReady || mJobActive || mTooBig}
+                                  title={
+                                    !loadable
+                                      ? "No sd-server recipe for this file"
+                                      : !mReady
+                                        ? `${machine.name}'s download helper isn't reachable`
+                                        : mJobActive
+                                          ? `One download at a time on ${machine.name}`
+                                          : mTooBig
+                                            ? `Not enough disk space on ${machine.name}`
+                                            : `Download to ${f.category}/ on ${machine.name}`
+                                  }
+                                  variant={f.fit === "nofit" ? "ghost" : "primary"}
+                                  onInstall={() => (here ? install(r, f) : installOn(machine, r, f))}
+                                />
+                              );
+                            })}
                           </span>
                           <span className="imm-hf-detail">
                             {f.kind === "component" ? (
@@ -587,7 +731,7 @@ export default function ImageModelManager() {
                             ) : (
                               <span className="imm-wont">won't load: {f.reason}</span>
                             )}
-                            {tooBigForDisk && <span className="imm-wont"> · not enough disk space</span>}
+                            {tooBigForDisk && <span className="imm-wont"> · not enough disk space on the selected machine</span>}
                           </span>
                         </div>
                       );
@@ -608,7 +752,19 @@ export default function ImageModelManager() {
           setDeleteTarget(null);
         }}
         title="Delete image model file"
-        message={`Delete ${deleteTarget?.id}${deleteTarget?.size ? ` (${formatBytes(deleteTarget.size)})` : ""} from the sd-server host? It will need to be downloaded again to use it.`}
+        message={`Delete ${deleteTarget?.id}${deleteTarget?.size ? ` (${formatBytes(deleteTarget.size)})` : ""} from ${machines.find((m) => m.id === imageId)?.name || "the sd-server host"}? It will need to be downloaded again to use it.`}
+        confirmText="Delete"
+      />
+
+      <ConfirmModal
+        isOpen={!!remoteDelete}
+        onClose={() => setRemoteDelete(null)}
+        onConfirm={() => {
+          deleteOnOther(remoteDelete);
+          setRemoteDelete(null);
+        }}
+        title={`Delete image model file on ${remoteDelete?.machine.name}`}
+        message={`Delete ${remoteDelete?.file.id}${remoteDelete?.file.size ? ` (${formatBytes(remoteDelete.file.size)})` : ""} from ${remoteDelete?.machine.name}? It will need to be downloaded again to use it there.`}
         confirmText="Delete"
       />
     </div>

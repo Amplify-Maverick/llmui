@@ -27,20 +27,34 @@ async function call(method, path, body, { pin = false } = {}) {
 
 const pinned = { pin: true };
 
+/** `path` aimed at `machine` (?machine=<id>), or unchanged without one. */
+const at = (path, machine) =>
+  machine ? `${path}${path.includes("?") ? "&" : "?"}machine=${encodeURIComponent(machine)}` : path;
+/** Writes aimed at an explicit machine carry it in the URL instead of the pin. */
+const target = (machine) => (machine ? {} : pinned);
+
 export const llamaApi = {
   /**
    * { models: [...], gpu: { name, total, margin, budget, source } }.
    * `machine`: list that machine's models instead, with each model's size on
    * disk as `diskSize` (read-only, System page).
    */
-  list: (machine, { sizes = true } = {}) =>
-    call("GET", machine ? `/models?machine=${encodeURIComponent(machine)}${sizes ? "&sizes=1" : ""}` : "/models"),
-  /** sidecars: ["mmproj"] to include image support, [] for text only. */
-  install: (model, sidecars) => call("POST", "/models", sidecars ? { model, sidecars } : { model }, pinned),
-  remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`, undefined, pinned),
+  list: (machine, { sizes = true } = {}) => call("GET", at(machine && sizes ? "/models?sizes=1" : "/models", machine)),
+  /**
+   * sidecars: ["mmproj"] to include image support, [] for text only.
+   * `machine` (install / remove only): that machine, even if it isn't selected.
+   */
+  install: (model, sidecars, machine) =>
+    call("POST", at("/models", machine), sidecars ? { model, sidecars } : { model }, target(machine)),
+  remove: (model, machine) => call("DELETE", at(`/models?model=${encodeURIComponent(model)}`, machine), undefined, target(machine)),
   /** Remove only a sidecar file (e.g. "mmproj") and keep the model. */
-  removeSidecar: (model, sidecar) =>
-    call("DELETE", `/models?model=${encodeURIComponent(model)}&sidecar=${encodeURIComponent(sidecar)}`, undefined, pinned),
+  removeSidecar: (model, sidecar, machine) =>
+    call(
+      "DELETE",
+      at(`/models?model=${encodeURIComponent(model)}&sidecar=${encodeURIComponent(sidecar)}`, machine),
+      undefined,
+      target(machine)
+    ),
   load: (model) => call("POST", "/models/load", { model }, pinned),
   unload: (model) => call("POST", "/models/unload", { model }, pinned),
   props: (model) => call("GET", `/props?model=${encodeURIComponent(model)}`),
@@ -48,10 +62,11 @@ export const llamaApi = {
   repoFiles: (repo) => call("GET", `/hf/files?repo=${encodeURIComponent(repo)}`),
 
   /**
-   * Subscribe to router events ({ type, model, data }). Reconnects after a
-   * drop until the returned function is called.
+   * Subscribe to router events ({ type, model, data }) of the machine chat
+   * goes to, or of `machine`. Reconnects after a drop until the returned
+   * function is called.
    */
-  subscribe(onEvent, onConnectionChange = () => {}) {
+  subscribe(onEvent, onConnectionChange = () => {}, machine) {
     let stopped = false;
     let controller;
 
@@ -59,7 +74,7 @@ export const llamaApi = {
       while (!stopped) {
         controller = new AbortController();
         try {
-          const response = await fetch(`${BASE}/events`, {
+          const response = await fetch(`${BASE}${at("/events", machine)}`, {
             headers: { ...(await authHeaders()), Accept: "text/event-stream" },
             signal: controller.signal,
           });

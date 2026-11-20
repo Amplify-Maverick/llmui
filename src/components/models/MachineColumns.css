@@ -1,0 +1,74 @@
+.mcol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.mcol {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.mcol.is-selected {
+  border-color: var(--color-primary-border);
+}
+
+.mcol-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mcol-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.mcol-dot.is-up { background: var(--color-primary); }
+.mcol-dot.is-down { background: var(--color-danger); }
+
+.mcol-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.mcol-tag {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.mcol-tag.is-selected {
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-bg);
+}
+
+.mcol-gpu {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+/* Search results: one install button per machine. */
+.mcol-installs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}

@@ -126,31 +126,37 @@ test("normalizeHelperGpu maps sd-fetch fields and keeps nulls", () => {
   );
 });
 
-test("machineFromQuery: only a GET of the listing path can name a machine", () => {
+test("machineFromQuery: only listed requests can name a machine; others are refused", () => {
   const run = (mw, req) => {
     let status = null;
     let nexted = false;
     const res = { status: (s) => ((status = s), { json: () => {} }) };
-    mw(req, res, () => (nexted = true));
+    mw({ baseUrl: "", ...req }, res, () => (nexted = true));
     return { status, nexted };
   };
-  const mw = b.machineFromQuery("/models");
+  const mw = b.machineFromQuery([
+    ["GET", "/models"],
+    ["DELETE", /^\/files\/[^/]+$/],
+  ]);
 
-  const req = { method: "GET", path: "/models", query: { machine: "workstation" } };
-  assert.deepEqual(run(mw, req), { status: null, nexted: true });
+  const req = { method: "GET", path: "/models", query: { machine: "workstation" }, baseUrl: "" };
+  let status = null;
+  let nexted = false;
+  mw(req, { status: (s) => ((status = s), { json: () => {} }) }, () => (nexted = true));
+  assert.deepEqual({ status, nexted }, { status: null, nexted: true });
   assert.equal(req.machine.id, "workstation");
   assert.equal(req.machineFromQuery, true);
 
-  for (const other of [
-    { method: "POST", path: "/models", query: { machine: "workstation" } },
-    { method: "GET", path: "/models/sse", query: { machine: "workstation" } },
-    { method: "GET", path: "/models", query: {} },
-  ]) {
-    assert.deepEqual(run(mw, other), { status: null, nexted: true });
-    assert.equal(other.machine, undefined);
+  assert.deepEqual(run(mw, { method: "DELETE", path: "/files/x", query: { machine: "workstation" } }), { status: null, nexted: true });
+  // No ?machine: untouched, routed as usual.
+  assert.deepEqual(run(mw, { method: "POST", path: "/models/load", query: {} }), { status: null, nexted: true });
+  // Naming a machine on anything else is refused, not ignored.
+  for (const [method, path] of [["POST", "/models/load"], ["POST", "/models"], ["GET", "/models/sse"], ["DELETE", "/files/a/b"]]) {
+    assert.deepEqual(run(mw, { method, path, query: { machine: "workstation" } }), { status: 400, nexted: false }, `${method} ${path}`);
   }
-
   assert.deepEqual(run(mw, { method: "GET", path: "/models", query: { machine: "nope" } }), { status: 404, nexted: false });
+  // The string form is GET-only.
+  assert.deepEqual(run(b.machineFromQuery("/models"), { method: "POST", path: "/models", query: { machine: "workstation" } }), { status: 400, nexted: false });
 });
 
 test("only the default machine starts with a default image model", async () => {

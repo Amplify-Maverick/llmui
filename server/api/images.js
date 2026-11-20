@@ -33,7 +33,22 @@ import { routeTo, machineFromQuery, publicMachine } from "../backends.js";
 const router = Router();
 const toImageMachine = routeTo("image");
 
-router.use("/models", machineFromQuery("/"), toImageMachine, imageModelsRouter);
+// Generation, status and history can't be aimed at a machine: refuse ?machine=
+// there instead of ignoring it.
+router.use((req, res, next) =>
+  req.query.machine && !/^\/(models|options)(\/|$)/.test(req.path) ? machineFromQuery([])(req, res, next) : next()
+);
+
+// Per-machine reads, installs and deletes (Models page columns, System page).
+// Setup / default stay on the machine images go to.
+const modelTargets = machineFromQuery([
+  ["GET", "/"],
+  ["GET", "/install/current"],
+  ["POST", "/install"],
+  ["POST", /^\/install\/[0-9a-f]{1,32}\/cancel$/],
+  ["DELETE", /^\/files\/[^/]+\/[^/]+$/],
+]);
+router.use("/models", modelTargets, toImageMachine, imageModelsRouter);
 
 // ── status / options ───────────────────────────────────────────────────
 
@@ -51,7 +66,7 @@ router.get("/status", toImageMachine, async (req, res) => {
 const names = (list) => (list || []).map((x) => (typeof x === "string" ? x : x.name)).filter(Boolean);
 
 // ?machine=<id>: another machine's options, read-only (greyed picker entries).
-router.get("/options", machineFromQuery("/options"), toImageMachine, async (req, res) => {
+router.get("/options", machineFromQuery([["GET", "/options"]]), toImageMachine, async (req, res) => {
   const cfg = getSdConfig(req.machine);
   try {
     const [files, samplers, schedulers] = await Promise.all([

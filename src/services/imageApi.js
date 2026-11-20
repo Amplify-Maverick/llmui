@@ -8,6 +8,10 @@ import { pinHeader, checkMachineChanged } from "./machinePin.js";
 
 const BASE = "/api/images";
 
+/** `path` aimed at `machine` (?machine=<id>), or unchanged without one. */
+const at = (path, machine) =>
+  machine ? `${path}${path.includes("?") ? "&" : "?"}machine=${encodeURIComponent(machine)}` : path;
+
 /** `pin`: send the machine the UI shows, so the server refuses if images moved elsewhere. */
 async function getJson(path, { pin = false, ...init } = {}) {
   const response = await fetch(`${BASE}${path}`, {
@@ -34,7 +38,7 @@ class ImageAPI {
 
   /** { checkpoints, modelDefaults, samplers, schedulers, defaults }; `machine`: that machine's, read-only. */
   options(machine) {
-    return getJson(machine ? `/options?machine=${encodeURIComponent(machine)}` : "/options");
+    return getJson(at("/options", machine));
   }
 
   // ── Model management (Models → Image) ────────────────────────────────
@@ -44,7 +48,7 @@ class ImageAPI {
    * `machine`: list that machine's files instead (read-only, System page).
    */
   models(machine) {
-    return getJson(machine ? `/models?machine=${encodeURIComponent(machine)}` : "/models");
+    return getJson(at("/models", machine));
   }
 
   /** { repos: [{ id, sha, files: [...] }], gpuBytes } */
@@ -52,26 +56,32 @@ class ImageAPI {
     return getJson(`/models/hf/search?q=${encodeURIComponent(q)}`);
   }
 
-  /** Start a download on the sd-server host. Resolves with the helper job. */
-  install({ repo, path, revision, category, recipe }) {
-    return getJson("/models/install", {
-      pin: true,
+  /**
+   * Start a download on the sd-server host. Resolves with the helper job.
+   * `machine` (install / job / cancel / delete): that machine, even if it isn't selected.
+   */
+  install({ repo, path, revision, category, recipe }, machine) {
+    return getJson(at("/models/install", machine), {
+      pin: !machine,
       method: "POST",
       body: JSON.stringify({ repo, path, revision, category, recipe }),
     });
   }
 
   /** { job } — the latest download job, or null */
-  currentInstall() {
-    return getJson("/models/install/current");
+  currentInstall(machine) {
+    return getJson(at("/models/install/current", machine));
   }
 
-  cancelInstall(id) {
-    return getJson(`/models/install/${encodeURIComponent(id)}/cancel`, { method: "POST", pin: true });
+  cancelInstall(id, machine) {
+    return getJson(at(`/models/install/${encodeURIComponent(id)}/cancel`, machine), { method: "POST", pin: !machine });
   }
 
-  deleteFile(category, name) {
-    return getJson(`/models/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE", pin: true });
+  deleteFile(category, name, machine) {
+    return getJson(at(`/models/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, machine), {
+      method: "DELETE",
+      pin: !machine,
+    });
   }
 
   /** Save a model's recipe + component files; makeDefault also sets it as the machine's default. */

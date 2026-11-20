@@ -41,9 +41,9 @@ export default function ModelManager() {
           {machine && (
             <span
               className={`model-manager-machine ${fallingBack ? "is-fallback" : ""}`}
-              title={fallingBack ? "The selected machine is unreachable; showing the default machine" : "Change the machine on the System page"}
+              title={fallingBack ? "The selected machine is unreachable; the default machine has the full controls" : "Load, unload and recipes act on this machine; change it on the System page"}
             >
-              on <strong>{machine.name}</strong>
+              selected: <strong>{machine.name}</strong>
               <span className="model-manager-machine-gpu">{machine.gpuLabel}</span>
             </span>
           )}

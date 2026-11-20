@@ -236,14 +236,25 @@ export function machinesSnapshot() {
 export { publicMachine };
 
 /**
- * Express middleware for read-only listings: a GET of exactly `subPath` may
- * name a machine with ?machine=<id> (the System page lists every machine's
- * models). Sets req.machine and req.machineFromQuery; routeTo then keeps it.
- * Nothing else (writes, events, other paths) can be routed this way.
+ * Express middleware: requests matching one of `rules` ([method, path], path a
+ * string or RegExp, relative to the mount point) may name their machine with
+ * ?machine=<id> instead of going where `kind` requests go. Used for listings
+ * and for install / delete from the Models page's per-machine columns. Any
+ * other request naming a machine is refused (400) rather than silently sent
+ * to the selected machine, so nothing that uses a GPU (load, unload,
+ * generate) can be aimed at a machine that isn't selected.
+ * Sets req.machine and req.machineFromQuery; routeTo then keeps it.
  */
-export function machineFromQuery(subPath) {
+export function machineFromQuery(rules) {
+  const list = typeof rules === "string" ? [["GET", rules]] : rules;
   return (req, res, next) => {
-    if (req.method !== "GET" || req.path !== subPath || !req.query.machine) return next();
+    if (!req.query.machine) return next();
+    const allowed = list.some(
+      ([method, p]) => req.method === method && (p instanceof RegExp ? p.test(req.path) : req.path === p)
+    );
+    if (!allowed) {
+      return res.status(400).json({ error: `${req.method} ${req.baseUrl}${req.path} can't target a machine; select it on the System page` });
+    }
     const machine = getMachine(String(req.query.machine));
     if (!machine) return res.status(404).json({ error: `Unknown machine "${req.query.machine}"` });
     req.machine = machine;
