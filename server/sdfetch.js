@@ -71,15 +71,17 @@ export async function fetchHelper(machine, p, { method = "GET", body, timeout = 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
- * One GPU from sd-fetch's GET /v1/gpu ({ index, name, vendor, temp_c, util_pct,
+ * One GPU from sd-fetch's GET /v1/gpu ({ index, name, vendor, state, temp_c, util_pct,
  * vram_used_mib, vram_total_mib, power_w }, any of them null) in the shape the
- * UI uses. Missing values stay null.
+ * UI uses. Missing values stay null. state is "asleep" for an AMD card that has
+ * runtime-suspended (only VRAM is read then), else "active".
  */
 export function normalizeHelperGpu(g, i = 0) {
   return {
     index: Number.isInteger(g?.index) ? g.index : i,
     name: typeof g?.name === "string" && g.name ? g.name : null,
     vendor: g?.vendor || null,
+    state: g?.state === "asleep" ? "asleep" : "active",
     temperature: num(g?.temp_c),
     utilization: num(g?.util_pct),
     memoryUsed: num(g?.vram_used_mib),

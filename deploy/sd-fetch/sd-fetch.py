@@ -35,8 +35,9 @@ API (JSON; every request needs the bearer token):
   GET    /v1/downloads/current         most recent job, or null
   GET    /v1/downloads/<id>            job: {id, state, bytes_done, bytes_total, filename, error, ...}
   POST   /v1/downloads/<id>/cancel     cancel; the partial file is deleted
-  GET    /v1/gpu                       {source, error, gpus: [{index, name, vendor, temp_c, util_pct,
-                                        vram_used_mib, vram_total_mib, power_w}]}; null = unknown
+  GET    /v1/gpu                       {source, error, gpus: [{index, name, vendor, state, temp_c, util_pct,
+                                        vram_used_mib, vram_total_mib, power_w}]}; null = unknown;
+                                        state "asleep" = AMD card runtime-suspended (only VRAM read)
 
 Only https://huggingface.co/<repo>/resolve/<revision>/<path> is fetched
 (redirects may go to Hugging Face's CDN hosts, without the HF token). Only
@@ -598,11 +599,12 @@ AMD_NAMES = {
 }
 
 
-def _gpu(index, name, vendor, temp_c=None, util_pct=None, used=None, total=None, power_w=None):
+def _gpu(index, name, vendor, temp_c=None, util_pct=None, used=None, total=None, power_w=None, state="active"):
     return {
         "index": index,
         "name": name,
         "vendor": vendor,
+        "state": state,
         "temp_c": temp_c,
         "util_pct": util_pct,
         "vram_used_mib": used,
@@ -671,7 +673,14 @@ def _read(path):
 
 
 def amd_gpus(drm_root="/sys/class/drm"):
-    """amdgpu cards from sysfs: cardN/device/{mem_info_vram_*, gpu_busy_percent, hwmon/*}."""
+    """amdgpu cards from sysfs: cardN/device/{mem_info_vram_*, gpu_busy_percent, hwmon/*}.
+
+    An idle card may runtime-suspend (device/power/runtime_status "suspended");
+    its hwmon sensors and gpu_busy_percent then fail with EBUSY. Such a card is
+    reported with state "asleep" and only VRAM (which still reads); its sensors
+    are not touched, so polling never wakes it. Any one sensor that fails or is
+    missing is null on its own.
+    """
     gpus = []
     try:
         cards = sorted((c for c in os.listdir(drm_root) if re.match(r"^card\d+$", c)), key=lambda c: int(c[4:]))
@@ -682,18 +691,6 @@ def amd_gpus(drm_root="/sys/class/drm"):
         total = _read(os.path.join(dev, "mem_info_vram_total"))
         if total is None:
             continue  # not an amdgpu device (or no VRAM info)
-        hwmon = None
-        try:
-            hw = sorted(os.listdir(os.path.join(dev, "hwmon")))
-            hwmon = os.path.join(dev, "hwmon", hw[0]) if hw else None
-        except OSError:
-            pass
-        power = None
-        if hwmon:
-            for name in ("power1_average", "power1_input"):
-                power = _number(_read(os.path.join(hwmon, name)), scale=1e6)
-                if power is not None:
-                    break
         name = _read(os.path.join(dev, "product_name"))
         if not name:
             pci = None
@@ -701,15 +698,32 @@ def amd_gpus(drm_root="/sys/class/drm"):
                 if line.startswith("PCI_ID="):
                     pci = line[7:].upper()
             name = AMD_NAMES.get(pci, "AMD GPU %s" % pci if pci else "AMD GPU")
+        asleep = _read(os.path.join(dev, "power", "runtime_status")) == "suspended"
+        temp = util = power = None
+        if not asleep:
+            hwmon = None
+            try:
+                hw = sorted(os.listdir(os.path.join(dev, "hwmon")))
+                hwmon = os.path.join(dev, "hwmon", hw[0]) if hw else None
+            except OSError:
+                pass
+            if hwmon:
+                temp = _number(_read(os.path.join(hwmon, "temp1_input")), scale=1000, digits=0)
+                for fname in ("power1_average", "power1_input"):
+                    power = _number(_read(os.path.join(hwmon, fname)), scale=1e6)
+                    if power is not None:
+                        break
+            util = _number(_read(os.path.join(dev, "gpu_busy_percent")), digits=0)
         gpus.append(_gpu(
             int(card[4:]),
             name,
             "amd",
-            temp_c=_number(_read(os.path.join(hwmon, "temp1_input")) if hwmon else None, scale=1000, digits=0),
-            util_pct=_number(_read(os.path.join(dev, "gpu_busy_percent")), digits=0),
+            temp_c=temp,
+            util_pct=util,
             used=_number(_read(os.path.join(dev, "mem_info_vram_used")), scale=MiB, digits=0),
             total=_number(total, scale=MiB, digits=0),
             power_w=power,
+            state="asleep" if asleep else "active",
         ))
     return gpus
 

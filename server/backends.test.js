@@ -118,11 +118,11 @@ test("parseKeyFile accepts a bare key or LLAMA_API_KEY=", () => {
 test("normalizeHelperGpu maps sd-fetch fields and keeps nulls", () => {
   assert.deepEqual(
     normalizeHelperGpu({ index: 0, name: "RTX 3070", vendor: "nvidia", temp_c: 55, util_pct: 12, vram_used_mib: 900, vram_total_mib: 8192, power_w: 31.5 }),
-    { index: 0, name: "RTX 3070", vendor: "nvidia", temperature: 55, utilization: 12, memoryUsed: 900, memoryTotal: 8192, powerDraw: 31.5 }
+    { index: 0, name: "RTX 3070", vendor: "nvidia", state: "active", temperature: 55, utilization: 12, memoryUsed: 900, memoryTotal: 8192, powerDraw: 31.5 }
   );
   assert.deepEqual(
     normalizeHelperGpu({ name: "", temp_c: null, util_pct: "7", power_w: NaN }, 2),
-    { index: 2, name: null, vendor: null, temperature: null, utilization: null, memoryUsed: null, memoryTotal: null, powerDraw: null }
+    { index: 2, name: null, vendor: null, state: "active", temperature: null, utilization: null, memoryUsed: null, memoryTotal: null, powerDraw: null }
   );
 });
 

@@ -44,15 +44,20 @@ URL from `fetchUrl` in `~/.llmui/sd_config.workstation.json`.
 
 ## GPU stats
 
-`GET /v1/gpu` answers `{source, error, gpus: [{index, name, vendor, temp_c,
-util_pct, vram_used_mib, vram_total_mib, power_w}]}`, cached for 1 s. A value
-it can't read is `null`. `SD_FETCH_GPU` picks the source:
+`GET /v1/gpu` answers `{source, error, gpus: [{index, name, vendor, state,
+temp_c, util_pct, vram_used_mib, vram_total_mib, power_w}]}`, cached for 1 s. A value
+it can't read is `null`. `state` is `"asleep"` for an amdgpu card whose
+`device/power/runtime_status` is `suspended` (idle, powered down): its sensors
+would fail with EBUSY, so only VRAM is read and the card is never woken.
+Otherwise `state` is `"active"`. `SD_FETCH_GPU` picks the source:
 
 - `auto` (default): nvidia-smi if it is installed, else amdgpu sysfs.
 - `nvidia`: `nvidia-smi --query-gpu=... --format=csv,noheader,nounits`.
-- `amd`: `/sys/class/drm/cardN/device/` `mem_info_vram_used`/`_total`,
+- `amd`: `/sys/class/drm/cardN/device/` (real cards only, not `cardN-DP-1`
+  connectors) `mem_info_vram_used`/`_total`,
   `gpu_busy_percent`, `hwmon/*/temp1_input`, and `power1_average` (or
-  `power1_input`).
+  `power1_input`; the RX 580 only has the latter). A sensor that is missing or
+  fails (e.g. EBUSY) is `null` on its own.
 - `none`: disabled.
 
 `SD_FETCH_GPU_NAME` overrides the reported name.

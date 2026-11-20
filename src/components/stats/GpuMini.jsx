@@ -23,25 +23,34 @@ export default function GpuMini({ kind = "chat" }) {
     <>
       {gpus.map((gpu) => {
         const pct = vramPct(gpu);
+        const asleep = gpu.state === "asleep";
         return (
           <div key={gpu.index} className="gpu-mini">
             <span className="gpu-mini-label" title={gpu.name || ""}>
-              <span className="gpu-mini-live" />
+              <span className={asleep ? "gpu-mini-live gpu-mini-live-asleep" : "gpu-mini-live"} />
               {label}
               {gpu.name && <span className="gpu-mini-gpuname">{gpu.name}</span>}
             </span>
 
             <span className="gpu-mini-separator">│</span>
 
-            <span className="gpu-mini-metric">
-              <span className="gpu-mini-metric-label">GPU</span>
-              <span style={{ color: gpu.utilization == null ? muted : utilizationColor(gpu.utilization), fontWeight: 600 }}>
-                {fmt(gpu.utilization, "%")}
+            {asleep ? (
+              <span className="gpu-mini-metric gpu-mini-asleep" title="Runtime-suspended; sensors aren't read so polling doesn't wake it">
+                Asleep (idle, powered down)
               </span>
-              <span className="gpu-mini-bar-track">
-                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(gpu.utilization ?? 0, 100)}%`, background: utilizationColor(gpu.utilization ?? 0) }} />
-              </span>
-            </span>
+            ) : (
+              <>
+                <span className="gpu-mini-metric">
+                  <span className="gpu-mini-metric-label">GPU</span>
+                  <span style={{ color: gpu.utilization == null ? muted : utilizationColor(gpu.utilization), fontWeight: 600 }}>
+                    {fmt(gpu.utilization, "%")}
+                  </span>
+                  <span className="gpu-mini-bar-track">
+                    <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(gpu.utilization ?? 0, 100)}%`, background: utilizationColor(gpu.utilization ?? 0) }} />
+                  </span>
+                </span>
+              </>
+            )}
 
             <span className="gpu-mini-separator">│</span>
 
@@ -55,23 +64,27 @@ export default function GpuMini({ kind = "chat" }) {
               </span>
             </span>
 
-            <span className="gpu-mini-separator">│</span>
+            {!asleep && (
+              <>
+                <span className="gpu-mini-separator">│</span>
 
-            <span className="gpu-mini-metric">
-              <span className="gpu-mini-metric-label">Temp</span>
-              <span style={{ color: gpu.temperature == null ? muted : tempColor(gpu.temperature), fontWeight: 600 }}>
-                {fmt(gpu.temperature, "°C")}
-              </span>
-            </span>
+                <span className="gpu-mini-metric">
+                  <span className="gpu-mini-metric-label">Temp</span>
+                  <span style={{ color: gpu.temperature == null ? muted : tempColor(gpu.temperature), fontWeight: 600 }}>
+                    {fmt(gpu.temperature, "°C")}
+                  </span>
+                </span>
 
-            <span className="gpu-mini-separator">│</span>
+                <span className="gpu-mini-separator">│</span>
 
-            <span className="gpu-mini-metric">
-              <span className="gpu-mini-metric-label">Power</span>
-              <span style={{ color: gpu.powerDraw == null ? muted : "#c4b5fd", fontWeight: 600 }}>
-                {fmt(gpu.powerDraw, "W")}
-              </span>
-            </span>
+                <span className="gpu-mini-metric">
+                  <span className="gpu-mini-metric-label">Power</span>
+                  <span style={{ color: gpu.powerDraw == null ? muted : "#c4b5fd", fontWeight: 600 }}>
+                    {fmt(gpu.powerDraw, "W")}
+                  </span>
+                </span>
+              </>
+            )}
           </div>
         );
       })}

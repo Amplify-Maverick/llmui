@@ -113,3 +113,15 @@
   margin-top: 4px;
   font-size: 12px;
 }
+
+.gpu-live-dot-asleep {
+  background: var(--color-text-muted);
+  animation: none;
+}
+
+.gpu-asleep-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-top: 6px;
+}

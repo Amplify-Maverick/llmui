@@ -1,5 +1,6 @@
 """Unit tests for sd-fetch's validators: python3 -m unittest deploy/sd-fetch/test_sd_fetch.py"""
 import importlib.util
+import errno
 import json
 import os
 import shutil
@@ -8,6 +9,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location("sd_fetch", os.path.join(os.path.dirname(__file__), "sd-fetch.py"))
 sf = importlib.util.module_from_spec(_spec)
@@ -70,7 +72,7 @@ class NvidiaCsv(unittest.TestCase):
             "1, Some GPU, [N/A], [Not Supported], 10, 8192, [N/A]\n\n"
         )
         self.assertEqual(rows[0], {
-            "index": 0, "name": "NVIDIA GeForce RTX 3070", "vendor": "nvidia", "temp_c": 54,
+            "index": 0, "name": "NVIDIA GeForce RTX 3070", "vendor": "nvidia", "state": "active", "temp_c": 54,
             "util_pct": 37, "vram_used_mib": 6120, "vram_total_mib": 8192, "power_w": 112.5,
         })
         self.assertEqual((rows[1]["temp_c"], rows[1]["util_pct"], rows[1]["power_w"]), (None, None, None))
@@ -97,10 +99,11 @@ class AmdSysfs(unittest.TestCase):
             "uevent": "DRIVER=amdgpu\nPCI_ID=1002:67DF",
             "hwmon/hwmon3/temp1_input": "61000",
             "hwmon/hwmon3/power1_average": "93123000",
+            "power/runtime_status": "active",
         })
         os.makedirs(os.path.join(self.root, "card0-DP-1"))  # connectors are skipped
         self.assertEqual(sf.amd_gpus(self.root), [{
-            "index": 0, "name": "Radeon RX 470/480/570/580", "vendor": "amd", "temp_c": 61,
+            "index": 0, "name": "Radeon RX 470/480/570/580", "vendor": "amd", "state": "active", "temp_c": 61,
             "util_pct": 42, "vram_used_mib": 3584, "vram_total_mib": 8192, "power_w": 93.1,
         }])
 
@@ -114,6 +117,58 @@ class AmdSysfs(unittest.TestCase):
         self.assertEqual((g["name"], g["vram_total_mib"], g["power_w"]), ("Radeon Test", 4096, 50.0))
         self.assertEqual((g["temp_c"], g["util_pct"], g["vram_used_mib"]), (None, None, None))
         self.assertEqual(sf.amd_gpus(os.path.join(self.root, "nope")), [])
+
+    RX580 = {
+        "mem_info_vram_total": str(8 * 1024 ** 3),
+        "mem_info_vram_used": str(256 * 1024 ** 2),
+        "uevent": "DRIVER=amdgpu\nPCI_ID=1002:67DF",
+        "gpu_busy_percent": "100",
+        "hwmon/hwmon0/temp1_input": "42000",
+        "hwmon/hwmon0/power1_input": "143301000",  # RX 580: no power1_average
+    }
+
+    def test_active_rx580_uses_power1_input(self):
+        self.card(0, dict(self.RX580, **{"power/runtime_status": "active"}))
+        g = sf.amd_gpus(self.root)[0]
+        self.assertEqual((g["state"], g["temp_c"], g["util_pct"], g["power_w"], g["vram_used_mib"]),
+                         ("active", 42, 100, 143.3, 256))
+
+    def test_asleep_reads_only_vram(self):
+        self.card(0, dict(self.RX580, **{"power/runtime_status": "suspended"}))
+        os.makedirs(os.path.join(self.root, "card0-DP-1", "device"))
+        opened = []
+        real_open = open
+
+        def spy(path, *a, **kw):
+            opened.append(path)
+            return real_open(path, *a, **kw)
+
+        with mock.patch("builtins.open", spy):
+            gpus = sf.amd_gpus(self.root)
+        self.assertEqual(len(gpus), 1)
+        g = gpus[0]
+        self.assertEqual((g["state"], g["temp_c"], g["util_pct"], g["power_w"]), ("asleep", None, None, None))
+        self.assertEqual((g["vram_used_mib"], g["vram_total_mib"]), (256, 8192))
+        touched = [p for p in opened if "hwmon" in p or "gpu_busy_percent" in p]
+        self.assertEqual(touched, [], "sensors must not be read while the card is asleep")
+
+    def test_ebusy_sensor_is_null_alone(self):
+        self.card(0, dict(self.RX580, **{"power/runtime_status": "active"}))
+        real_open = open
+
+        def busy_temp(path, *a, **kw):
+            if path.endswith("temp1_input") or path.endswith("gpu_busy_percent"):
+                raise OSError(errno.EBUSY, "Device or resource busy", path)
+            return real_open(path, *a, **kw)
+
+        with mock.patch("builtins.open", busy_temp):
+            g = sf.amd_gpus(self.root)[0]
+        self.assertEqual((g["state"], g["temp_c"], g["util_pct"], g["power_w"], g["vram_used_mib"]),
+                         ("active", None, None, 143.3, 256))
+
+    def test_no_runtime_status_is_active(self):
+        self.card(0, self.RX580)
+        self.assertEqual(sf.amd_gpus(self.root)[0]["state"], "active")
 
 
 class InitEnv(unittest.TestCase):

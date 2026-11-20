@@ -35,35 +35,49 @@ export default function GpuStats({ machineId }) {
     <div>
       {gpus.map((gpu) => {
         const pct = vramPct(gpu);
+        const asleep = gpu.state === "asleep";
+        const vramMetric = (
+          <Metric
+            label="VRAM"
+            value={fmt(pct, "%")}
+            color={vramColor(pct ?? 0)}
+            pct={pct}
+            sub={`${fmt(gpu.memoryUsed)} / ${fmt(gpu.memoryTotal)} MiB`}
+          />
+        );
         return (
           <div key={gpu.index} className="gpu-card">
             <div className="gpu-name">
-              <span className="gpu-live-dot" title="Live" />
+              <span className={asleep ? "gpu-live-dot gpu-live-dot-asleep" : "gpu-live-dot"} title={asleep ? "Asleep" : "Live"} />
               {gpu.name || `GPU ${gpu.index}`}
               {timestamp && <span className="gpu-timestamp">{new Date(timestamp).toLocaleTimeString()}</span>}
             </div>
-            <div className="gpu-metrics-grid">
-              <Metric
-                label="Utilization"
-                value={fmt(gpu.utilization, "%")}
-                color={utilizationColor(gpu.utilization ?? 0)}
-                pct={gpu.utilization}
-              />
-              <Metric
-                label="VRAM"
-                value={fmt(pct, "%")}
-                color={vramColor(pct ?? 0)}
-                pct={pct}
-                sub={`${fmt(gpu.memoryUsed)} / ${fmt(gpu.memoryTotal)} MiB`}
-              />
-              <Metric
-                label="Temperature"
-                value={fmt(gpu.temperature, "°C")}
-                color={tempColor(gpu.temperature ?? 0)}
-                pct={gpu.temperature}
-              />
-              <Metric label="Power" value={fmt(gpu.powerDraw, " W")} color="#c4b5fd" pct={null} />
-            </div>
+            {asleep ? (
+              <div className="gpu-metrics-grid">
+                <div className="gpu-metric-box gpu-asleep" title="The card has runtime-suspended; its sensors aren't read so polling doesn't wake it.">
+                  <div className="gpu-metric-label">Status</div>
+                  <div className="gpu-asleep-text">Asleep (idle, powered down)</div>
+                </div>
+                {vramMetric}
+              </div>
+            ) : (
+              <div className="gpu-metrics-grid">
+                <Metric
+                  label="Utilization"
+                  value={fmt(gpu.utilization, "%")}
+                  color={utilizationColor(gpu.utilization ?? 0)}
+                  pct={gpu.utilization}
+                />
+                {vramMetric}
+                <Metric
+                  label="Temperature"
+                  value={fmt(gpu.temperature, "°C")}
+                  color={tempColor(gpu.temperature ?? 0)}
+                  pct={gpu.temperature}
+                />
+                <Metric label="Power" value={fmt(gpu.powerDraw, " W")} color="#c4b5fd" pct={null} />
+              </div>
+            )}
           </div>
         );
       })}

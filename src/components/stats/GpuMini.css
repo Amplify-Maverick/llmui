@@ -74,3 +74,13 @@
   font-weight: 400;
   margin-left: 4px;
 }
+
+.gpu-mini-live-asleep {
+  background: var(--color-text-muted);
+  animation: none;
+}
+
+.gpu-mini-asleep {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
