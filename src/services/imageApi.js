@@ -167,6 +167,11 @@ class ImageAPI {
     return getJson(`/generations/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  /** The stored record of one image ("llmui.image/v1": prompt, machine, model, recipe, settings, timings, size). */
+  getImageMeta(generationId, imageId) {
+    return getJson(`/generations/${encodeURIComponent(generationId)}/images/${encodeURIComponent(imageId)}/meta`);
+  }
+
   /** URL of a stored image; fetch it with auth headers (see AuthImage). */
   getImageUrl(generationId, imageId) {
     return `${BASE}/generations/${encodeURIComponent(generationId)}/images/${encodeURIComponent(imageId)}`;

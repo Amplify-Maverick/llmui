@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useImageStore } from "../../stores/imageStore.js";
 import { authHeaders } from "../../services/auth.js";
 import { progressLabel } from "./GenerationSettings.jsx";
+import { openInHistory } from "../../stores/imageViewerStore.js";
 import "./ImageDisplay.css";
 
 export default function ImageDisplay() {
@@ -17,6 +18,7 @@ export default function ImageDisplay() {
     progressTotalSteps,
     lastTimings,
     getImageUrl,
+    generations,
   } = useImageStore();
 
   const [activeIndex, setActiveIndex] = useState(0);
@@ -130,6 +132,8 @@ export default function ImageDisplay() {
             src={blobUrl}
             alt={selectedGeneration?.prompt || "Generated image"}
             className={`image-display-img ${imageLoaded ? "loaded" : ""}`}
+            onClick={() => openInHistory(generations, activeImage.generationId, activeImage.id, currentImages)}
+            title="Open preview"
             onLoad={() => setImageLoaded(true)}
             onError={() => setImageLoaded(false)}
           />

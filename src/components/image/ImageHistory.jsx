@@ -1,5 +1,6 @@
 import { useImageStore } from "../../stores/imageStore.js";
 import AuthImage from "./AuthImage.jsx";
+import { openInHistory } from "../../stores/imageViewerStore.js";
 import "./ImageHistory.css";
 
 export default function ImageHistory() {
@@ -17,6 +18,12 @@ export default function ImageHistory() {
 
   const totalPages = Math.ceil(generationsTotal / 20);
 
+  // Select it (loads its settings into the form) and open the preview.
+  const open = (gen) => {
+    selectGeneration(gen.id);
+    if (gen.first_image_id) openInHistory(generations, gen.id, gen.first_image_id);
+  };
+
   if (generations.length === 0 && !isLoadingHistory) {
     return (
       <div className="img-history-empty">
@@ -29,10 +36,18 @@ export default function ImageHistory() {
     <div className="img-history">
       <div className="img-history-scroll">
         {generations.map((gen) => (
-          <button
+          // A div, not a <button>: it holds the delete button, and buttons can't nest.
+          <div
             key={gen.id}
+            role="button"
+            tabIndex={0}
             className={`img-history-thumb ${gen.id === currentGenerationId ? "active" : ""}`}
-            onClick={() => selectGeneration(gen.id)}
+            onClick={() => open(gen)}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+              e.preventDefault();
+              open(gen);
+            }}
             title={gen.prompt?.slice(0, 80) || "Generation"}
           >
             {gen.first_image_id ? (
@@ -54,7 +69,7 @@ export default function ImageHistory() {
             >
               ×
             </button>
-          </button>
+          </div>
         ))}
       </div>
 

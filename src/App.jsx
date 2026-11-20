@@ -12,6 +12,7 @@ import KeyboardShortcutsPanel, {
   useKeyboardShortcuts,
 } from "./components/shared/KeyboardShortcuts.jsx";
 import SetupWizard from "./components/setup/SetupWizard.jsx";
+import ImageViewer from "./components/image/ImageViewer.jsx";
 import { MachineNotice, MachineChip } from "./components/shared/MachineStatus.jsx";
 import { useMachinesStore } from "./stores/machinesStore.js";
 import "./App.css";
@@ -156,6 +157,8 @@ export default function App() {
         isOpen={showShortcuts}
         onClose={() => setShowShortcuts(false)}
       />
+
+      <ImageViewer />
     </div>
   );
 }

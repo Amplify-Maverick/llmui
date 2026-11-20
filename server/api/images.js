@@ -28,7 +28,7 @@ import {
   resolveModelSetup,
 } from "../sd.js";
 import imageModelsRouter from "./imageModels.js";
-import { routeTo, machineFromQuery, publicMachine } from "../backends.js";
+import { routeTo, machineFromQuery, publicMachine, getMachine } from "../backends.js";
 
 const router = Router();
 const toImageMachine = routeTo("image");
@@ -149,19 +149,22 @@ function parseParams(body = {}, cfg) {
   return [p, null];
 }
 
-function saveGeneration(machine, p, result) {
+export function saveGeneration(machine, p, setup, result, timings) {
   const db = getDb();
   const generationId = nanoid();
   const now = Date.now();
   const imageIds = [];
   db.transaction(() => {
     db.prepare(`
-      INSERT INTO image_generations (id, prompt, negative_prompt, model, width, height, steps, cfg_scale, sampler, scheduler, seed, batch_count, workflow_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO image_generations (id, prompt, negative_prompt, model, width, height, steps, cfg_scale, sampler, scheduler, seed, batch_count, workflow_json,
+        machine_id, machine_name, recipe, components_json, total_ms, generate_ms, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       generationId, p.prompt, p.negativePrompt, p.checkpoint, p.width, p.height, p.steps,
       p.cfgScale, p.sampler, p.scheduler, p.seed, p.batchCount,
       JSON.stringify({ backend: "sd-server", machine: machine.id, api: result.api, generation_info: result.generationInfo }),
+      machine.id, machine.name, setup.recipe || null, JSON.stringify(setup.models || {}),
+      timings.totalMs ?? null, timings.generateMs ?? null,
       now,
     );
     const insert = db.prepare(`
@@ -170,7 +173,8 @@ function saveGeneration(machine, p, result) {
     `);
     result.images.forEach((buf, i) => {
       const imageId = nanoid();
-      insert.run(imageId, generationId, `sd_${generationId}_${i}.png`, buf, p.width, p.height, i, now);
+      const dims = pngSize(buf);
+      insert.run(imageId, generationId, `sd_${generationId}_${i}.png`, buf, dims?.width ?? p.width, dims?.height ?? p.height, i, now);
       imageIds.push(imageId);
     });
   })();
@@ -255,7 +259,8 @@ router.post("/txt2img", toImageMachine, async (req, res) => {
     });
     checkAborted();
 
-    const { generationId, imageIds } = saveGeneration(machine, p, result);
+    const timings = { totalMs: Date.now() - t0, generateMs: result.elapsedMs ?? Date.now() - tGen };
+    const { generationId, imageIds } = saveGeneration(machine, p, setup, result, timings);
     send("complete", {
       machine: machine.id,
       generationId,
@@ -263,7 +268,7 @@ router.post("/txt2img", toImageMachine, async (req, res) => {
       seed: p.seed,
       imageCount: imageIds.length,
       api: result.api,
-      timings: { totalMs: Date.now() - t0, generateMs: result.elapsedMs ?? Date.now() - tGen },
+      timings,
     });
   } catch (err) {
     if (err.code !== "cancelled") console.error("Image generation failed:", err.message);
@@ -293,12 +298,14 @@ router.get("/generations", (req, res) => {
     SELECT g.id, g.prompt, g.negative_prompt, g.model, g.width, g.height, g.steps, g.cfg_scale,
       g.sampler, g.scheduler, g.seed, g.batch_count, g.created_at,
       (SELECT COUNT(*) FROM generated_images gi WHERE gi.generation_id = g.id) AS image_count,
-      (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position LIMIT 1) AS first_image_id
+      (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position LIMIT 1) AS first_image_id,
+      (SELECT json_group_array(id) FROM (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position)) AS image_ids
     FROM image_generations g
     ORDER BY g.created_at DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset);
 
+  for (const g of generations) g.image_ids = JSON.parse(g.image_ids || "[]");
   const total = db.prepare("SELECT COUNT(*) AS count FROM image_generations").get().count;
   res.json({ generations, total, page, limit });
 });
@@ -322,6 +329,20 @@ router.delete("/generations/:id", (req, res) => {
   res.json({ success: true });
 });
 
+// Everything known about one stored image, for the preview (and other clients,
+// e.g. iOS). Fields that were never recorded are null, never inferred.
+router.get("/generations/:genId/images/:imageId/meta", (req, res) => {
+  const row = getDb().prepare(`
+    SELECT g.*, gi.id AS image_id, gi.generation_id, gi.filename, gi.width AS stored_width, gi.height AS stored_height, gi.position,
+      gi.created_at AS image_created_at, length(gi.image_data) AS file_size, substr(gi.image_data, 1, 32) AS head,
+      (SELECT COUNT(*) FROM generated_images x WHERE x.generation_id = g.id) AS image_count
+    FROM generated_images gi JOIN image_generations g ON g.id = gi.generation_id
+    WHERE gi.id = ? AND gi.generation_id = ?
+  `).get(req.params.imageId, req.params.genId);
+  if (!row || row.file_size == null) return res.status(404).json({ error: "Image not found" });
+  res.json(imageMeta(row));
+});
+
 router.get("/generations/:genId/images/:imageId", (req, res) => {
   const db = getDb();
   const img = db.prepare(
@@ -337,5 +358,61 @@ router.get("/generations/:genId/images/:imageId", (req, res) => {
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   res.send(img.image_data);
 });
+
+// ── metadata helpers ───────────────────────────────────────────────────
+
+/** Pixel size from a PNG header, or null if the bytes aren't a PNG. */
+export function pngSize(buf) {
+  if (!buf || buf.length < 24) return null;
+  if (buf.readUInt32BE(0) !== 0x89504e47 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+const jsonOr = (text, fallback) => {
+  try {
+    return text ? JSON.parse(text) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * The stored-image record, "llmui.image/v1". Only recorded values: a field
+ * the generation didn't record is null.
+ */
+export function imageMeta(row) {
+  const ext = row.filename?.split(".").pop()?.toLowerCase();
+  const px = pngSize(row.head);
+  const machineName = row.machine_name || (row.machine_id && getMachine(row.machine_id)?.name) || null;
+  return {
+    schema: "llmui.image/v1",
+    id: row.image_id,
+    generationId: row.generation_id,
+    position: row.position,
+    imageCount: row.image_count,
+    createdAt: row.image_created_at ?? row.created_at,
+    mimeType: ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png",
+    fileSize: row.file_size,
+    width: px?.width ?? row.stored_width ?? null,
+    height: px?.height ?? row.stored_height ?? null,
+    prompt: row.prompt ?? null,
+    negativePrompt: row.negative_prompt || null,
+    model: row.model || null,
+    recipe: row.recipe || null,
+    components: row.components_json ? jsonOr(row.components_json, null) : null,
+    machine: row.machine_id ? { id: row.machine_id, name: machineName } : null,
+    settings: {
+      seed: row.seed ?? null,
+      steps: row.steps ?? null,
+      cfgScale: row.cfg_scale ?? null,
+      sampler: row.sampler || null,
+      scheduler: row.scheduler || null,
+      width: row.width ?? null,
+      height: row.height ?? null,
+      batchCount: row.batch_count ?? null,
+    },
+    timings: row.total_ms == null && row.generate_ms == null ? null : { totalMs: row.total_ms ?? null, generateMs: row.generate_ms ?? null },
+  };
+}
 
 export default router;

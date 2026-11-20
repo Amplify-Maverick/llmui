@@ -118,6 +118,30 @@ const MIGRATIONS = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_generations_created ON image_generations(created_at DESC)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_generated_images_gen ON generated_images(generation_id)');
     }
+  },
+  {
+    version: 5,
+    description: 'Record machine, recipe and timings with each image generation',
+    up: (db) => {
+      const existing = new Set(db.prepare("PRAGMA table_info(image_generations)").all().map((c) => c.name));
+      for (const [name, type] of [
+        ['machine_id', 'TEXT'],
+        ['machine_name', 'TEXT'],
+        ['recipe', 'TEXT'],
+        ['components_json', 'TEXT'],
+        ['total_ms', 'INTEGER'],
+        ['generate_ms', 'INTEGER'],
+      ]) {
+        if (!existing.has(name)) db.exec(`ALTER TABLE image_generations ADD COLUMN ${name} ${type}`);
+      }
+      // Only what was recorded: the machine id some rows kept in workflow_json.
+      // Rows without it stay NULL (shown as "unknown"); nothing is inferred.
+      db.exec(`
+        UPDATE image_generations
+        SET machine_id = json_extract(workflow_json, '$.machine')
+        WHERE machine_id IS NULL AND json_valid(workflow_json) AND json_extract(workflow_json, '$.machine') IS NOT NULL
+      `);
+    }
   }
 ];
 
