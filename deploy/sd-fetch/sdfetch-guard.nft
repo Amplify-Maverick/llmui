@@ -1,0 +1,16 @@
+#!/usr/sbin/nft -f
+# Port 8083 (sd-fetch) only from loopback and the LLMUI host.
+# Install: /etc/sd/sdfetch-guard.nft (loaded by sd-fetch.service's ExecStartPre).
+# Re-running replaces the table, so it is safe to load repeatedly.
+
+table inet sdfetch_guard
+delete table inet sdfetch_guard
+
+table inet sdfetch_guard {
+	chain input {
+		type filter hook input priority -10; policy accept;
+		tcp dport 8083 iifname "lo" accept
+		tcp dport 8083 ip saddr 100.101.246.7 accept
+		tcp dport 8083 counter drop
+	}
+}

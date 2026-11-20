@@ -24,9 +24,50 @@ class ImageAPI {
     }
   }
 
-  /** { checkpoints, samplers, schedulers, defaults } */
+  /** { checkpoints, modelDefaults, samplers, schedulers, defaults } */
   options() {
     return getJson("/options");
+  }
+
+  // ── Model management (Models → Image) ────────────────────────────────
+
+  /** { files, recipes, default, gpuBytes, sdError, helper } */
+  models() {
+    return getJson("/models");
+  }
+
+  /** { repos: [{ id, sha, files: [...] }], gpuBytes } */
+  searchHF(q) {
+    return getJson(`/models/hf/search?q=${encodeURIComponent(q)}`);
+  }
+
+  /** Start a download on the sd-server host. Resolves with the helper job. */
+  install({ repo, path, revision, category, recipe }) {
+    return getJson("/models/install", {
+      method: "POST",
+      body: JSON.stringify({ repo, path, revision, category, recipe }),
+    });
+  }
+
+  /** { job } — the latest download job, or null */
+  currentInstall() {
+    return getJson("/models/install/current");
+  }
+
+  cancelInstall(id) {
+    return getJson(`/models/install/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  }
+
+  deleteFile(category, name) {
+    return getJson(`/models/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  /** Save a model's recipe + component files; makeDefault also sets it as the default in sd_config.json. */
+  saveSetup({ model, recipe, components, makeDefault }) {
+    return getJson("/models/setup", {
+      method: "PUT",
+      body: JSON.stringify({ model, recipe, components, makeDefault }),
+    });
   }
 
   /**

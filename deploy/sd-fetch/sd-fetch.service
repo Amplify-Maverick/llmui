@@ -1,0 +1,38 @@
+# sd-fetch: Hugging Face model downloader for sd-server (see sd-fetch.py).
+# Install: /etc/systemd/system/sd-fetch.service
+[Unit]
+Description=sd-fetch (Hugging Face downloads into sd-server's model dir)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=llama
+Group=llama
+EnvironmentFile=/etc/sd/fetch.env
+# Load the port-8083 guard before the port opens; "+" runs it as root.
+# If nft fails, the service doesn't start (fail closed).
+ExecStartPre=+/usr/sbin/nft -f /etc/sd/sdfetch-guard.nft
+ExecStart=/usr/bin/python3 -I /opt/sd-fetch/sd-fetch.py
+Restart=on-failure
+RestartSec=5
+
+# Hardening: it only needs to write the model dir.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sd/models
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

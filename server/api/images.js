@@ -3,7 +3,8 @@
  * Mounted at /api/images behind requireAuth.
  *
  *  - GET  /status        sd-server reachability, model state, whether a job runs
- *  - GET  /options       checkpoints, samplers, schedulers, defaults from sd_config.json
+ *  - GET  /options       configured models (+ per-model defaults), samplers, schedulers, defaults
+ *  - /models/...         search, install, delete and set up models (see imageModels.js)
  *  - POST /txt2img       one job, streamed as SSE: stage / progress / complete / error
  *  - /generations...     history, stored in SQLite (image_generations, generated_images)
  */
@@ -23,9 +24,13 @@ import {
   loadSdModel,
   unloadSdModel,
   txt2img,
+  resolveModelSetup,
 } from "../sd.js";
+import imageModelsRouter from "./imageModels.js";
 
 const router = Router();
+
+router.use("/models", imageModelsRouter);
 
 // ── status / options ───────────────────────────────────────────────────
 
@@ -49,11 +54,22 @@ router.get("/options", async (req, res) => {
       sdFetch("/sdapi/v1/samplers").catch(() => []),
       sdFetch("/sdapi/v1/schedulers").catch(() => []),
     ]);
-    const checkpoints = (files.files || [])
-      .filter((f) => f.category === "checkpoints")
-      .map((f) => f.id);
+    // Models with a saved setup (recipe + any components) whose files are all present.
+    const present = new Set((files.files || []).map((f) => f.id));
+    const checkpoints = [];
+    const modelDefaults = {};
+    for (const f of files.files || []) {
+      if (f.category !== "checkpoints" && f.category !== "diffusion_models") continue;
+      const setup = resolveModelSetup(f.id);
+      if (!setup || !Object.values(setup.models).every((id) => present.has(id))) continue;
+      checkpoints.push(f.id);
+      modelDefaults[f.id] = f.id === cfg.model
+        ? { steps: cfg.steps, width: cfg.width, height: cfg.height, cfgScale: cfg.cfg, sampler: cfg.sampler }
+        : cfg.models?.[f.id]?.defaults || {};
+    }
     res.json({
       checkpoints,
+      modelDefaults,
       samplers: names(samplers).filter((s) => s !== "default"),
       schedulers: names(schedulers),
       defaults: {
@@ -91,12 +107,12 @@ function parseParams(body = {}) {
     batchCount: int(body.batchCount, 1),
   };
   if (!p.prompt) return [null, "prompt is required"];
-  if (typeof p.checkpoint !== "string" || !/^[\w@./-]+$/.test(p.checkpoint) || p.checkpoint.includes("..")) {
+  if (typeof p.checkpoint !== "string" || !/^[\w@./+-]+$/.test(p.checkpoint) || p.checkpoint.includes("..")) {
     return [null, "invalid checkpoint"];
   }
   for (const [k, lo, hi] of [["width", 64, 2048], ["height", 64, 2048]]) {
-    if (!Number.isInteger(p[k]) || p[k] < lo || p[k] > hi || p[k] % 64) {
-      return [null, `${k} must be a multiple of 64 between ${lo} and ${hi}`];
+    if (!Number.isInteger(p[k]) || p[k] < lo || p[k] > hi || p[k] % 8) {
+      return [null, `${k} must be a multiple of 8 between ${lo} and ${hi}`];
     }
   }
   if (!Number.isInteger(p.steps) || p.steps < 1 || p.steps > 150) return [null, "steps must be 1-150"];
@@ -143,6 +159,10 @@ function saveGeneration(p, result) {
 router.post("/txt2img", async (req, res) => {
   const [p, invalid] = parseParams(req.body);
   if (invalid) return res.status(400).json({ error: invalid });
+  const setup = resolveModelSetup(p.checkpoint);
+  if (!setup) {
+    return res.status(400).json({ error: `${p.checkpoint} has no recipe set; configure it under Models → Image` });
+  }
 
   const busy = acquireImageLock();
   if (busy) return res.status(409).json({ error: busy, code: "gpu_busy" });
@@ -179,7 +199,7 @@ router.post("/txt2img", async (req, res) => {
     sdLoaded = true; // from here on, always try to unload
     const keepalive = setInterval(() => send("stage", { stage: "loading_model", message: `Loading ${p.checkpoint}…` }), 5000);
     try {
-      await loadSdModel({ model: p.checkpoint, signal: controller.signal });
+      await loadSdModel({ ...setup, signal: controller.signal });
     } finally {
       clearInterval(keepalive);
     }

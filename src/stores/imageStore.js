@@ -10,6 +10,7 @@ export const useImageStore = create((set, get) => ({
 
   // Available models/options from sd-server
   checkpoints: [],
+  modelDefaults: {}, // checkpoint id → { width, height, steps, cfgScale, sampler } from its recipe
   samplers: [],
   schedulers: [],
 
@@ -69,6 +70,7 @@ export const useImageStore = create((set, get) => ({
       set((state) => {
         const update = {
           checkpoints: opts.checkpoints || [],
+          modelDefaults: opts.modelDefaults || {},
           samplers: opts.samplers || [],
           schedulers: opts.schedulers || [],
         };
@@ -76,8 +78,15 @@ export const useImageStore = create((set, get) => ({
         if (!state._defaultsApplied && opts.defaults) {
           update.params = { ...state.params, ...opts.defaults };
           update._defaultsApplied = true;
-        } else if (!state.params.checkpoint && update.checkpoints.length > 0) {
-          update.params = { ...state.params, checkpoint: update.checkpoints[0] };
+        } else if (
+          update.checkpoints.length > 0 &&
+          (!state.params.checkpoint || !update.checkpoints.includes(state.params.checkpoint))
+        ) {
+          // None picked yet, or the picked one was deleted / lost its setup.
+          const pick = opts.defaults?.checkpoint && update.checkpoints.includes(opts.defaults.checkpoint)
+            ? opts.defaults.checkpoint
+            : update.checkpoints[0];
+          update.params = { ...state.params, checkpoint: pick, ...(update.modelDefaults[pick] || {}) };
         }
         return update;
       });
@@ -94,7 +103,10 @@ export const useImageStore = create((set, get) => ({
 
   updateParam: (key, value) => {
     set((state) => ({
-      params: { ...state.params, [key]: value },
+      // Switching model also switches to its recipe's size/steps/CFG/sampler.
+      params: key === "checkpoint" && state.modelDefaults[value]
+        ? { ...state.params, ...state.modelDefaults[value], checkpoint: value }
+        : { ...state.params, [key]: value },
     }));
   },
 

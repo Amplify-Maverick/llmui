@@ -11,7 +11,7 @@
     "preview": "npx vite preview",
     "tui": "npx tsx tui/index.jsx",
     "gpu-stats": "node scripts/gpu-stats-server.js",
-    "test": "node --test server/tools/*.test.js server/api/*.test.js src/utils/*.test.js",
+    "test": "node --test server/*.test.js server/tools/*.test.js server/api/*.test.js src/utils/*.test.js",
     "postinstall": "node -e \"console.log('\\n✓ Installation complete! Run: npm run dev\\n')\""
   },
   "dependencies": {

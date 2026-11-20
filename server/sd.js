@@ -20,14 +20,23 @@ const CONFIG_FILE = path.join(os.homedir(), ".llmui", "sd_config.json");
 
 export const DEFAULT_SD_CONFIG = {
   url: "http://100.118.190.15:8082",
-  // sd-server recipe id and file id (from /sdcpp/v1/recipes and /sdcpp/v1/model-files)
+  // sd-fetch download helper on the sd-server host (deploy/sd-fetch). Its
+  // bearer token is read from ~/.llmui/sd-fetch.token, never from here.
+  fetchUrl: "http://100.118.190.15:8083",
+  // VRAM of the GPU sd-server runs on, for the "too big" marks.
+  gpuMemoryGiB: 8,
+  // Default model: sd-server recipe id and file id (from /sdcpp/v1/recipes
+  // and /sdcpp/v1/model-files), plus any other slots the recipe needs.
   recipe: "sd1-checkpoint",
   model: "checkpoints/sd15.safetensors",
+  components: {},
   steps: 20,
   width: 512,
   height: 512,
   cfg: 7,
   sampler: "euler_a",
+  // Per-model setups, keyed by file id: { recipe, slot, components, defaults, source }.
+  models: {},
 };
 
 let config = { ...DEFAULT_SD_CONFIG };
@@ -50,6 +59,36 @@ export async function loadSdConfig() {
 }
 
 export const getSdConfig = () => config;
+
+let writeChain = Promise.resolve();
+
+/** Merge `patch` into sd_config.json (atomic write; writes are serialized). */
+export function saveSdConfig(patch) {
+  config = { ...config, ...patch };
+  const snapshot = JSON.stringify(config, null, 2) + "\n";
+  writeChain = writeChain.then(async () => {
+    const tmp = `${CONFIG_FILE}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, snapshot, { mode: 0o600 });
+    await fs.rename(tmp, CONFIG_FILE);
+  });
+  return writeChain.then(() => config);
+}
+
+/**
+ * How to load a model file: { recipe, models: { slot: fileId, ... } }, or
+ * null if it has no saved setup. The default model's setup lives in the
+ * top-level recipe/components keys.
+ */
+export function resolveModelSetup(fileId) {
+  const entry = config.models?.[fileId];
+  if (entry?.recipe) {
+    return { recipe: entry.recipe, models: { ...(entry.components || {}), [entry.slot || "model"]: fileId } };
+  }
+  if (fileId === config.model) {
+    return { recipe: config.recipe, models: { ...(config.components || {}), [config.slot || "model"]: fileId } };
+  }
+  return null;
+}
 
 // ------------------------------------------------------------
 // GPU lock
@@ -195,15 +234,29 @@ export async function unloadChatModels({ timeoutMs = 90000, onWait } = {}) {
 // SD model load / unload
 // ------------------------------------------------------------
 
+/** Rescan sd-server's model dir (new or deleted files). Best-effort. */
+export async function refreshSdCatalog() {
+  try {
+    await sdFetch("/sdcpp/v1/models/refresh", { method: "POST", body: {}, timeout: 30000 });
+    return true;
+  } catch (err) {
+    console.warn("sd-server catalog refresh failed:", err.message);
+    return false;
+  }
+}
+
 export function sdStatus() {
   return sdFetch("/sdcpp/v1/models/status", { timeout: 10000 });
 }
 
-/** Load the configured (or given) model. Waits for completion, as sd-server does. */
-export async function loadSdModel({ recipe = config.recipe, model = config.model, signal } = {}) {
+/**
+ * Load a model setup ({ recipe, models: { slot: fileId } }, see
+ * resolveModelSetup). Waits for completion, as sd-server does.
+ */
+export async function loadSdModel({ recipe, models, signal }) {
   const status = await sdFetch("/sdcpp/v1/models/load", {
     method: "POST",
-    body: { recipe, models: { model } },
+    body: { recipe, models },
     timeout: 10 * 60 * 1000,
     signal,
   });

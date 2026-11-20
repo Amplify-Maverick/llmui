@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useImageStore } from "../../stores/imageStore.js";
 import TextModelManager from "./TextModelManager.jsx";
+import ImageModelManager from "./ImageModelManager.jsx";
 import Button from "../shared/Button.jsx";
 import "./ModelManager.css";
 
@@ -9,14 +10,13 @@ export default function ModelManager() {
   const { isLoading, error, fetchModels, clearError } = useModelsStore();
 
   const {
-    checkpoints,
-    serverUrl,
     connectionError,
     isConnected: sdConnected,
     fetchAll: fetchImageModels,
   } = useImageStore();
 
   const [subTab, setSubTab] = useState("text"); // "text" | "image"
+  const [imageKey, setImageKey] = useState(0); // bump to reload the image tab
 
   // Fetch image models when switching to image sub-tab
   useEffect(() => {
@@ -55,7 +55,13 @@ export default function ModelManager() {
           )}
           {subTab === "image" && (
             <>
-              <Button variant="ghost" onClick={fetchImageModels}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  fetchImageModels();
+                  setImageKey((k) => k + 1);
+                }}
+              >
                 Refresh
               </Button>
             </>
@@ -93,33 +99,7 @@ export default function ModelManager() {
               </Button>
             </div>
           ) : (
-            <div className="image-models-sections">
-              <div className="image-models-section">
-                <h3 className="image-models-section-title">
-                  Checkpoints
-                  <span className="image-models-count">{checkpoints.length}</span>
-                </h3>
-                {checkpoints.length === 0 ? (
-                  <p className="image-models-none">
-                    No checkpoints found. Place .safetensors or .gguf files in
-                    checkpoints/ under sd-server's --model-dir.
-                  </p>
-                ) : (
-                  <div className="image-models-list">
-                    {checkpoints.map((name) => (
-                      <div key={name} className="image-model-item">
-                        <div className="image-model-icon">🖼️</div>
-                        <div className="image-model-name">{name}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="image-models-none">
-                  Served by {serverUrl || "sd-server"}. The SD model is loaded only for
-                  the length of each image job, after chat models are unloaded.
-                </p>
-              </div>
-            </div>
+            <ImageModelManager key={imageKey} />
           )}
         </>
       )}

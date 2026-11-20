@@ -1,0 +1,124 @@
+/* Image models (sd-server): extends the tmm-* styles from TextModelManager.css */
+
+.imm-status {
+  flex-wrap: wrap;
+}
+.imm-status .tmm-dot:not(:first-child) {
+  margin-left: 8px;
+}
+
+.imm-file {
+  display: flex;
+  flex-direction: column;
+}
+.imm-file:has(.imm-setup) > .tmm-row {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.imm-strong {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+.imm-warn {
+  color: var(--color-warning);
+}
+.imm-wont {
+  color: var(--color-danger);
+}
+
+.imm-tag {
+  font-size: 11px;
+  color: var(--color-warning);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* Setup panel under an installed model */
+.imm-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--color-bg);
+}
+.imm-setup .tmm-hint {
+  margin: 0;
+}
+.imm-field {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.imm-select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.imm-setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Hugging Face file rows */
+.imm-hf-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 92px 110px;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border-separator);
+  font-size: 13px;
+}
+.imm-hf-file:first-child {
+  border-top: none;
+}
+.imm-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imm-hf-detail {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.imm-hf-detail code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .imm-field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .imm-hf-file {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .imm-path {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .imm-hf-file .tmm-quant-action {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
