@@ -4,13 +4,21 @@
  */
 
 import { authHeaders } from "./auth.js";
+import { pinHeader, checkMachineChanged } from "./machinePin.js";
 
 const BASE = "/api/images";
 
-async function getJson(path, init = {}) {
-  const response = await fetch(`${BASE}${path}`, { ...init, headers: await authHeaders() });
+/** `pin`: send the machine the UI shows, so the server refuses if images moved elsewhere. */
+async function getJson(path, { pin = false, ...init } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ...(await authHeaders()), ...(pin ? pinHeader("image") : {}) },
+  });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    checkMachineChanged(response.status, data);
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
   return data;
 }
 
@@ -44,6 +52,7 @@ class ImageAPI {
   /** Start a download on the sd-server host. Resolves with the helper job. */
   install({ repo, path, revision, category, recipe }) {
     return getJson("/models/install", {
+      pin: true,
       method: "POST",
       body: JSON.stringify({ repo, path, revision, category, recipe }),
     });
@@ -55,16 +64,17 @@ class ImageAPI {
   }
 
   cancelInstall(id) {
-    return getJson(`/models/install/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+    return getJson(`/models/install/${encodeURIComponent(id)}/cancel`, { method: "POST", pin: true });
   }
 
   deleteFile(category, name) {
-    return getJson(`/models/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE" });
+    return getJson(`/models/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE", pin: true });
   }
 
-  /** Save a model's recipe + component files; makeDefault also sets it as the default in sd_config.json. */
+  /** Save a model's recipe + component files; makeDefault also sets it as the machine's default. */
   saveSetup({ model, recipe, components, makeDefault }) {
     return getJson("/models/setup", {
+      pin: true,
       method: "PUT",
       body: JSON.stringify({ model, recipe, components, makeDefault }),
     });

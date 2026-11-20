@@ -4,7 +4,10 @@ sd-fetch: download Hugging Face model files into sd-server's --model-dir.
 
 Runs on the sd-server host as the same user as sd-server (llama). Python 3
 standard library only. LLMUI is the only client; it sends a shared bearer
-token, and an nft table (sdfetch-guard.nft) only lets that host reach the port.
+token, and the port is reachable from that host only (an nft table,
+sdfetch-guard.nft, or a socket unit's IPAddressAllow; see README.md).
+
+It also reports the host's GPU stats (GET /v1/gpu) for LLMUI's System page.
 
 Environment (systemd reads /etc/sd/fetch.env):
   SD_FETCH_TOKEN       required, >= 32 chars; clients send "Authorization: Bearer <token>"
@@ -13,6 +16,15 @@ Environment (systemd reads /etc/sd/fetch.env):
   SD_FETCH_BIND        default 100.118.190.15
   SD_FETCH_PORT        default 8083
   SD_FETCH_RESERVE_GB  default 10; a download must leave this much disk free
+  SD_FETCH_GPU         auto (default) | nvidia | amd | none: where GPU stats come from
+  SD_FETCH_GPU_NAME    optional; overrides the GPU name in /v1/gpu
+
+Socket activation: if systemd passes a listening socket (LISTEN_FDS=1), it is
+used instead of binding SD_FETCH_BIND:SD_FETCH_PORT.
+
+  sd-fetch.py --init-env /etc/sd/fetch.env
+      Puts a new random SD_FETCH_TOKEN into that file if its SD_FETCH_TOKEN= line
+      is empty (never replaces an existing token) and exits. Prints nothing secret.
 
 API (JSON; every request needs the bearer token):
   GET    /v1/health                    {ok, model_dir, categories, busy}
@@ -23,6 +35,8 @@ API (JSON; every request needs the bearer token):
   GET    /v1/downloads/current         most recent job, or null
   GET    /v1/downloads/<id>            job: {id, state, bytes_done, bytes_total, filename, error, ...}
   POST   /v1/downloads/<id>/cancel     cancel; the partial file is deleted
+  GET    /v1/gpu                       {source, error, gpus: [{index, name, vendor, temp_c, util_pct,
+                                        vram_used_mib, vram_total_mib, power_w}]}; null = unknown
 
 Only https://huggingface.co/<repo>/resolve/<revision>/<path> is fetched
 (redirects may go to Hugging Face's CDN hosts, without the HF token). Only
@@ -42,13 +56,14 @@ import shutil
 import socket
 import ssl
 import stat
+import subprocess
 import sys
 import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1"
+VERSION = "2"
 
 # Category folders sd-server's --model-dir scans for model weights (see
 # stable-diffusion.cpp examples/server/api.md, "Slot IDs | Search directories",
@@ -185,6 +200,8 @@ class Config(object):
         self.bind = env.get("SD_FETCH_BIND", "100.118.190.15")
         self.port = int(env.get("SD_FETCH_PORT", "8083"))
         self.reserve = int(float(env.get("SD_FETCH_RESERVE_GB", "10")) * GiB)
+        self.gpu = env.get("SD_FETCH_GPU", "auto").strip().lower() or "auto"
+        self.gpu_name = env.get("SD_FETCH_GPU_NAME", "").strip()
 
     def check(self):
         if len(self.token) < 32:
@@ -562,6 +579,215 @@ def delete_file(cfg, category, name, downloader):
 
 
 # ----------------------------------------------------------------------
+# GPU stats (GET /v1/gpu)
+# ----------------------------------------------------------------------
+
+MiB = 1024 ** 2
+GPU_CACHE_SECONDS = 1.0
+NVIDIA_QUERY = "index,name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw"
+# PCI device ids -> marketing names, for amdgpu cards without product_name.
+AMD_NAMES = {
+    "1002:67DF": "Radeon RX 470/480/570/580",
+    "1002:6FDF": "Radeon RX 580 2048SP",
+    "1002:67EF": "Radeon RX 460/560",
+    "1002:731F": "Radeon RX 5600/5700",
+    "1002:73BF": "Radeon RX 6800/6900",
+    "1002:73DF": "Radeon RX 6700",
+    "1002:73FF": "Radeon RX 6600",
+    "1002:744C": "Radeon RX 7900",
+}
+
+
+def _gpu(index, name, vendor, temp_c=None, util_pct=None, used=None, total=None, power_w=None):
+    return {
+        "index": index,
+        "name": name,
+        "vendor": vendor,
+        "temp_c": temp_c,
+        "util_pct": util_pct,
+        "vram_used_mib": used,
+        "vram_total_mib": total,
+        "power_w": power_w,
+    }
+
+
+def _number(text, scale=1.0, digits=1):
+    """float(text) / scale rounded, or None for '', '[N/A]', '[Not Supported]', junk."""
+    try:
+        v = float(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+    if v != v:  # NaN
+        return None
+    v = v / scale
+    return int(v) if digits == 0 else round(v, digits)
+
+
+def parse_nvidia_csv(text):
+    """Rows of `nvidia-smi --query-gpu=NVIDIA_QUERY --format=csv,noheader,nounits`."""
+    gpus = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        cols = [c.strip() for c in line.split(",")]
+        if len(cols) < 7:
+            continue
+        index = _number(cols[0], digits=0)
+        gpus.append(_gpu(
+            index if index is not None else len(gpus),
+            cols[1] or None,
+            "nvidia",
+            temp_c=_number(cols[2], digits=0),
+            util_pct=_number(cols[3], digits=0),
+            used=_number(cols[4], digits=0),
+            total=_number(cols[5], digits=0),
+            power_w=_number(cols[6]),
+        ))
+    return gpus
+
+
+def nvidia_smi_path():
+    return shutil.which("nvidia-smi") or next(
+        (p for p in ("/usr/bin/nvidia-smi", "/opt/bin/nvidia-smi") if os.access(p, os.X_OK)), None)
+
+
+def nvidia_gpus(exe):
+    out = subprocess.run(
+        [exe, "--query-gpu=" + NVIDIA_QUERY, "--format=csv,noheader,nounits"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5, check=False,
+    )
+    if out.returncode != 0:
+        msg = out.stderr.decode("utf-8", "replace").strip() or out.stdout.decode("utf-8", "replace").strip()
+        raise RuntimeError("nvidia-smi exited %d: %s" % (out.returncode, msg[:200]))
+    return parse_nvidia_csv(out.stdout.decode("utf-8", "replace"))
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except (OSError, ValueError):
+        return None
+
+
+def amd_gpus(drm_root="/sys/class/drm"):
+    """amdgpu cards from sysfs: cardN/device/{mem_info_vram_*, gpu_busy_percent, hwmon/*}."""
+    gpus = []
+    try:
+        cards = sorted((c for c in os.listdir(drm_root) if re.match(r"^card\d+$", c)), key=lambda c: int(c[4:]))
+    except OSError:
+        return gpus
+    for card in cards:
+        dev = os.path.join(drm_root, card, "device")
+        total = _read(os.path.join(dev, "mem_info_vram_total"))
+        if total is None:
+            continue  # not an amdgpu device (or no VRAM info)
+        hwmon = None
+        try:
+            hw = sorted(os.listdir(os.path.join(dev, "hwmon")))
+            hwmon = os.path.join(dev, "hwmon", hw[0]) if hw else None
+        except OSError:
+            pass
+        power = None
+        if hwmon:
+            for name in ("power1_average", "power1_input"):
+                power = _number(_read(os.path.join(hwmon, name)), scale=1e6)
+                if power is not None:
+                    break
+        name = _read(os.path.join(dev, "product_name"))
+        if not name:
+            pci = None
+            for line in (_read(os.path.join(dev, "uevent")) or "").splitlines():
+                if line.startswith("PCI_ID="):
+                    pci = line[7:].upper()
+            name = AMD_NAMES.get(pci, "AMD GPU %s" % pci if pci else "AMD GPU")
+        gpus.append(_gpu(
+            int(card[4:]),
+            name,
+            "amd",
+            temp_c=_number(_read(os.path.join(hwmon, "temp1_input")) if hwmon else None, scale=1000, digits=0),
+            util_pct=_number(_read(os.path.join(dev, "gpu_busy_percent")), digits=0),
+            used=_number(_read(os.path.join(dev, "mem_info_vram_used")), scale=MiB, digits=0),
+            total=_number(total, scale=MiB, digits=0),
+            power_w=power,
+        ))
+    return gpus
+
+
+class GpuStats(object):
+    """GET /v1/gpu, cached for GPU_CACHE_SECONDS so pollers can't fork-storm nvidia-smi."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.lock = threading.Lock()
+        self.at = 0.0
+        self.data = None
+
+    def _collect(self):
+        mode = self.cfg.gpu
+        if mode == "none":
+            return {"source": None, "error": "GPU stats disabled (SD_FETCH_GPU=none)", "gpus": []}
+        errors = []
+        if mode in ("auto", "nvidia"):
+            exe = nvidia_smi_path()
+            if exe:
+                try:
+                    gpus = nvidia_gpus(exe)
+                    if gpus:
+                        return {"source": "nvidia-smi", "error": None, "gpus": gpus}
+                    errors.append("nvidia-smi reported no GPUs")
+                except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+                    errors.append(str(e))
+            elif mode == "nvidia":
+                errors.append("nvidia-smi not found")
+        if mode in ("auto", "amd"):
+            gpus = amd_gpus()
+            if gpus:
+                return {"source": "amdgpu-sysfs", "error": None, "gpus": gpus}
+            if mode == "amd":
+                errors.append("no amdgpu device in /sys/class/drm")
+        return {"source": None, "error": "; ".join(errors) or "no supported GPU found", "gpus": []}
+
+    def get(self):
+        with self.lock:
+            if self.data is None or time.time() - self.at >= GPU_CACHE_SECONDS:
+                try:
+                    data = self._collect()
+                except Exception as e:  # never let stats break the helper
+                    data = {"source": None, "error": "%s: %s" % (type(e).__name__, e), "gpus": []}
+                if self.cfg.gpu_name:
+                    for g in data["gpus"]:
+                        g["name"] = self.cfg.gpu_name
+                self.data, self.at = data, time.time()
+            return self.data
+
+
+# ----------------------------------------------------------------------
+# --init-env
+# ----------------------------------------------------------------------
+
+TOKEN_LINE_RE = re.compile(r"^SD_FETCH_TOKEN=[ \t]*$", re.M)
+
+
+def init_env_token(path):
+    """Fill an empty SD_FETCH_TOKEN= line with a new token. Returns True if written."""
+    with open(path) as f:
+        text = f.read()
+    if not TOKEN_LINE_RE.search(text):
+        return False
+    text = TOKEN_LINE_RE.sub("SD_FETCH_TOKEN=" + secrets.token_hex(32), text, count=1)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    st = os.stat(path)
+    os.chown(tmp, st.st_uid, st.st_gid)
+    os.chmod(tmp, stat.S_IMODE(st.st_mode))
+    os.replace(tmp, path)
+    return True
+
+
+# ----------------------------------------------------------------------
 # HTTP
 # ----------------------------------------------------------------------
 
@@ -571,7 +797,8 @@ def log(msg):
     sys.stderr.flush()
 
 
-def make_handler(cfg, downloader):
+def make_handler(cfg, downloader, gpu_stats=None):
+    gpu_stats = gpu_stats or GpuStats(cfg)
     expected = ("Bearer " + cfg.token).encode()
 
     class Handler(BaseHTTPRequestHandler):
@@ -649,6 +876,8 @@ def make_handler(cfg, downloader):
                 return 200, {"files": list_files(cfg), "disk": disk_usage(cfg)}
             if method == "DELETE" and len(p) == 3 and p[0] == "files":
                 return 200, delete_file(cfg, p[1], p[2], downloader)
+            if method == "GET" and p == ["gpu"]:
+                return 200, gpu_stats.get()
             if method == "POST" and p == ["downloads"]:
                 return 202, downloader.start(self._body()).to_dict()
             if method == "GET" and p == ["downloads", "current"]:
@@ -687,14 +916,47 @@ class Server(ThreadingHTTPServer):
         ThreadingHTTPServer.server_bind(self)
 
 
-def main():
+SD_LISTEN_FDS_START = 3
+
+
+def systemd_socket():
+    """The listening socket systemd passed us (socket activation), or None."""
+    if os.environ.get("LISTEN_PID") != str(os.getpid()):
+        return None
+    if os.environ.get("LISTEN_FDS") != "1":
+        raise SystemExit("socket activation: expected exactly one socket, got LISTEN_FDS=%r"
+                         % os.environ.get("LISTEN_FDS"))
+    for k in ("LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"):
+        os.environ.pop(k, None)
+    return socket.socket(fileno=SD_LISTEN_FDS_START)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--init-env"] and len(argv) == 2:
+        wrote = init_env_token(argv[1])
+        print("SD_FETCH_TOKEN generated in %s" % argv[1] if wrote else
+              "SD_FETCH_TOKEN already set in %s; left unchanged" % argv[1])
+        return
+    if argv:
+        raise SystemExit("usage: sd-fetch.py [--init-env /etc/sd/fetch.env]")
     cfg = Config(os.environ)
     cfg.check()
     os.umask(0o022)
     downloader = Downloader(cfg)
-    httpd = Server((cfg.bind, cfg.port), make_handler(cfg, downloader))
-    log("sd-fetch %s listening on %s:%d, model dir %s, reserve %.0f GiB, HF token %s"
-        % (VERSION, cfg.bind, cfg.port, cfg.model_dir, cfg.reserve / GiB, "set" if cfg.hf_token else "not set"))
+    handler = make_handler(cfg, downloader)
+    sock = systemd_socket()
+    if sock is not None:
+        httpd = Server(sock.getsockname()[:2], handler, bind_and_activate=False)
+        httpd.socket.close()
+        httpd.socket = sock
+        httpd.server_name, httpd.server_port = sock.getsockname()[:2]
+        where = "%s:%d (socket-activated)" % sock.getsockname()[:2]
+    else:
+        httpd = Server((cfg.bind, cfg.port), handler)
+        where = "%s:%d" % (cfg.bind, cfg.port)
+    log("sd-fetch %s listening on %s, model dir %s, reserve %.0f GiB, HF token %s, GPU stats %s"
+        % (VERSION, where, cfg.model_dir, cfg.reserve / GiB, "set" if cfg.hf_token else "not set", cfg.gpu))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -4,10 +4,12 @@ import GenerationSettings from "./GenerationSettings.jsx";
 import ImageDisplay from "./ImageDisplay.jsx";
 import ImageHistory from "./ImageHistory.jsx";
 import GpuMini from "../stats/GpuMini.jsx";
+import { useMachinesStore } from "../../stores/machinesStore.js";
 import "./ImageGenerationView.css";
 
 export default function ImageGenerationView() {
   const { isConnected, connectionError, serverUrl, fetchAll, loadHistory } = useImageStore();
+  const machineName = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.image)?.name);
 
   useEffect(() => {
     fetchAll();
@@ -24,11 +26,12 @@ export default function ImageGenerationView() {
             title={isConnected ? serverUrl || "" : connectionError || ""}
           >
             <span className="image-gen-status-dot" />
+            {machineName ? `${machineName} · ` : ""}
             {isConnected ? "sd-server connected" : "sd-server unreachable"}
           </span>
         </div>
         <div className="image-gen-header-gpu">
-          <GpuMini />
+          <GpuMini kind="image" />
         </div>
       </div>
 

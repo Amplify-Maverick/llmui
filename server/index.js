@@ -11,7 +11,7 @@ import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { nanoid } from "nanoid";
 import { getToolsSchema, executeTool } from "./tools/index.js";
-import { openaiRouter, streamOpenAITurn, toOpenAIMessage, combineTimings, OPENAI_BASE_URL } from "./openai.js";
+import { openaiRouter, streamOpenAITurn, toOpenAIMessage, combineTimings } from "./openai.js";
 
 // Database and API imports
 import { getDb, closeDb } from "./db/index.js";
@@ -25,7 +25,20 @@ import exportRouter from "./api/export.js";
 import setupRouter from "./api/setup.js";
 import imagesRouter from "./api/images.js";
 import llamaRouter from "./api/llama.js";
-import { loadSdConfig, chatGate } from "./sd.js";
+import { loadSdConfig, chatGate, sdStatus } from "./sd.js";
+import { llamaFetch, keyHint } from "./llama.js";
+import { fetchHelper, helperConfigured, normalizeHelperGpu } from "./sdfetch.js";
+import {
+  getMachine,
+  listMachines,
+  resolveMachine,
+  routeTo,
+  selectMachine,
+  probeMachine,
+  machinesSnapshot,
+  startMachineMonitor,
+  networkErrorText,
+} from "./backends.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -136,7 +149,8 @@ app.use(
       callback(null, !origin || allowedOrigins.includes(origin));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-LLMUI-Machine"],
+    exposedHeaders: ["X-LLMUI-Machine"],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
   })
 );
@@ -320,8 +334,8 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
 
 // POST /api/chat-with-tools - Chat with tool calling support (authenticated, streaming NDJSON)
 //
-// Runs the tool loop server-side against the OpenAI-compatible server
-// (OPENAI_BASE_URL): stream a turn, execute any tool calls, feed results back,
+// Runs the tool loop server-side against the machine chat is routed to
+// (req.machine, set by chatGate; see server/backends.js): stream a turn, execute any tool calls, feed results back,
 // repeat until the model answers without tools or MAX_TOOL_ITERATIONS is hit.
 // Body: { model, messages, options: { modelOptions }, enabledTools, enableThinking? }
 // Emits: {type:"content"|"tool_call"|"tool_result"|"done"|"error", ...}
@@ -369,6 +383,9 @@ app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
   const currentMessages = messages.map(toOpenAIMessage);
   let iterations = 0;
   const turnTimings = []; // llama.cpp timings per model turn
+  // Where turns go; switches to the default machine if the selected one
+  // turns out to be unreachable (see openaiFetch).
+  let machine = req.machine;
   const onContent = (text) => {
     res.write(JSON.stringify({ type: "content", content: text }) + "\n");
   };
@@ -382,7 +399,9 @@ app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
 
       iterations++;
 
-      const { content: assistantContent, toolCalls, timings } = await streamOpenAITurn({
+      const turn = await streamOpenAITurn({
+        machine,
+        res,
         model,
         messages: currentMessages,
         tools,
@@ -391,12 +410,14 @@ app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
         signal,
         onContent,
       });
+      const { content: assistantContent, toolCalls, timings } = turn;
+      machine = turn.machine;
 
       turnTimings.push(timings);
 
       // If no tool calls, we're done
       if (toolCalls.length === 0) {
-        res.write(JSON.stringify({ type: "done", iterations, timings: combineTimings(turnTimings) }) + "\n");
+        res.write(JSON.stringify({ type: "done", iterations, machine: machine.id, timings: combineTimings(turnTimings) }) + "\n");
         res.end();
         return;
       }
@@ -508,7 +529,7 @@ let gpuCache = { data: null, timestamp: 0 };
 let nvidiaSmiProcess = null;
 let nvidiaSmiBuffer = "";
 // Set once nvidia-smi is confirmed missing (ENOENT), so we stop respawning it
-// on every poll (GpuMini/GpuStats poll /api/gpu every 2s) on GPU-less machines.
+// on every /api/hardware request on GPU-less machines.
 let nvidiaSmiUnavailable = false;
 
 /**
@@ -610,43 +631,27 @@ function stopNvidiaSmiLoop() {
   }
 }
 
+// GET /api/gpu?machine=<id> - live GPU stats from a machine's sd-fetch helper
+// (GET /v1/gpu: nvidia-smi or amdgpu sysfs on that machine). Without ?machine,
+// the machine chat is currently routed to. Reading stats never routes any
+// work to a machine.
 app.get("/api/gpu", requireAuth, async (req, res) => {
-  // Proxy to remote GPU stats server if configured — but not when the
-  // Local/Remote switcher has explicitly selected "local", so switching to
-  // Local actually reports on this machine instead of a stale remote box.
-  if (remoteGpuUrl) {
-    try {
-      const response = await fetch(`${remoteGpuUrl}/api/gpu`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await response.json();
-      res.set("Cache-Control", "max-age=1");
-      return res.json(data);
-    } catch (err) {
-      return res.status(502).json({
-        ok: false,
-        error: `Cannot reach remote GPU stats server: ${err.message}`,
-      });
-    }
+  const machine = req.query.machine ? getMachine(String(req.query.machine)) : resolveMachine("chat").machine;
+  if (!machine) return res.status(404).json({ ok: false, error: "Unknown machine" });
+  res.set("Cache-Control", "no-store");
+  try {
+    const data = await fetchHelper(machine, "/v1/gpu", { timeout: 4000 });
+    res.json({
+      ok: true,
+      machine: machine.id,
+      source: data.source || null,
+      error: data.error || null,
+      gpus: (data.gpus || []).map(normalizeHelperGpu),
+      timestamp: Date.now(),
+    });
+  } catch (err) {
+    res.status(err.status === 503 ? 503 : 502).json({ ok: false, machine: machine.id, error: err.message });
   }
-
-  // Start the persistent process on first request (lazy initialization)
-  if (!nvidiaSmiProcess && !nvidiaSmiUnavailable) {
-    startNvidiaSmiLoop();
-    // Give it a moment to produce first output
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-  }
-
-  if (gpuCache.data) {
-    res.set("Cache-Control", "max-age=1");
-    return res.json(gpuCache.data);
-  }
-
-  // No data yet (nvidia-smi might not be available)
-  res.status(500).json({
-    ok: false,
-    error: nvidiaSmiUnavailable ? "No NVIDIA GPU detected on this machine" : "nvidia-smi not available or no data yet",
-  });
 });
 
 /**
@@ -762,6 +767,52 @@ app.get("/api/hardware", requireAuth, async (req, res) => {
 });
 
 // ============================================================
+// Machines (server/backends.js): status and the persisted choice
+// ============================================================
+app.get("/api/machines", requireAuth, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(machinesSnapshot());
+});
+
+// PUT /api/machines/selected { id } — where chat and images run from now on.
+// Only routes new requests; never loads or unloads a model anywhere.
+app.put("/api/machines/selected", requireAuth, async (req, res) => {
+  try {
+    const machine = selectMachine(String(req.body?.id || ""));
+    console.log(`Machine selected: ${machine.name}`);
+    await probeMachine(machine);
+    res.json(machinesSnapshot());
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/** One probe per service, for startMachineMonitor. Each resolves { ok, error, ... }. */
+const machineProbes = {
+  async llama(m, timeout) {
+    let r;
+    try {
+      r = await llamaFetch(m, "/models", { signal: AbortSignal.timeout(timeout) });
+    } catch (err) {
+      return { ok: false, error: networkErrorText(err) };
+    }
+    await r.body?.cancel().catch(() => {});
+    if (r.ok) return { ok: true, error: null };
+    return { ok: false, error: r.status === 401 ? `API key rejected (${keyHint(m)})` : `HTTP ${r.status}` };
+  },
+  async sd(m, timeout) {
+    const st = await sdStatus(m, { timeout });
+    return { ok: true, error: null, state: st.state || null };
+  },
+  async fetch(m, timeout) {
+    const cfg = await helperConfigured(m);
+    if (!cfg.configured) return { ok: null, error: cfg.reason };
+    const h = await fetchHelper(m, "/v1/health", { timeout });
+    return { ok: true, error: null, busy: !!h.busy, version: h.version || null };
+  },
+};
+
+// ============================================================
 // Setup wizard endpoints
 // /api/setup/status is unauthenticated (wizard checks before auth is known)
 // all other /api/setup/* routes require auth
@@ -791,10 +842,10 @@ app.use("/api/images", requireAuth, imagesRouter);
 // owns the GPU; see chatGate in server/sd.js.
 app.post("/openai/v1/chat/completions", requireAuth, chatGate("openai"));
 app.post("/api/llama/models/load", requireAuth, chatGate());
-// OpenAI-compatible model server (llama.cpp etc.) — the only model source.
+// OpenAI-compatible model server (llama.cpp router on the routed machine).
 // Authenticated streaming passthrough; the browser never talks to it directly.
 app.use("/openai/v1", requireAuth, openaiRouter);
-app.use("/api/llama", requireAuth, llamaRouter);
+app.use("/api/llama", requireAuth, routeTo("chat"), llamaRouter);
 
 // SPA fallback: client-side routes get index.html. Backend prefixes are
 // excluded so an unknown API path still 404s rather than returning the app, and
@@ -821,6 +872,7 @@ await getOrCreateToken();
 await loadGpuConfig();
 
 await loadSdConfig();
+startMachineMonitor(machineProbes);
 
 // Initialize database and run migration if needed
 console.log("Initializing database...");
@@ -860,5 +912,8 @@ app.listen(PORT, HOST, () => {
       : `No frontend build at ${DIST_DIR} (run \`npm run build\`); API only`
   );
   console.log(`Data directory: ${STORAGE_DIR}`);
-  console.log(`OpenAI-compatible URL: ${OPENAI_BASE_URL}`);
+  for (const m of listMachines()) {
+    console.log(`Machine ${m.name}${m.isDefault ? " (default)" : ""}: router ${m.openaiUrl}`);
+  }
+  console.log(`Selected machine: ${resolveMachine("chat").machine.name}`);
 });

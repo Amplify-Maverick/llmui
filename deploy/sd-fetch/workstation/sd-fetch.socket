@@ -1,0 +1,21 @@
+# sd-fetch on the workstation (Arch, RTX 3070): listening socket.
+# Install: /etc/systemd/system/sd-fetch.socket; enable this unit, not the service.
+#
+# No nft here, so the IP allow-list lives on this socket unit. On a socket unit,
+# IPAddressDeny/IPAddressAllow apply to the listening socket and the
+# connections it accepts, but not to sockets the service opens itself, so the
+# helper can still download from Hugging Face. (The same lines on the service
+# would block those downloads.) ufw also allows only the LLMUI box on 8083.
+[Unit]
+Description=sd-fetch socket (LLMUI box and loopback only)
+After=tailscaled.service
+
+[Socket]
+ListenStream=100.126.189.91:8083
+# Bind even if the Tailscale address isn't up yet.
+FreeBind=yes
+IPAddressDeny=any
+IPAddressAllow=localhost 100.126.189.91 100.101.246.7
+
+[Install]
+WantedBy=sockets.target

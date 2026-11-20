@@ -1,0 +1,42 @@
+# sd-fetch on the workstation (Arch, RTX 3070): Hugging Face downloads into
+# sd-server's model dir, and GPU stats (nvidia-smi) for LLMUI.
+# Install: /etc/systemd/system/sd-fetch.service. Started by sd-fetch.socket.
+[Unit]
+Description=sd-fetch (Hugging Face downloads into sd-server's model dir, GPU stats)
+Requires=sd-fetch.socket
+After=sd-fetch.socket network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=llama
+Group=llama
+EnvironmentFile=/etc/sd/fetch.env
+ExecStart=/usr/bin/python3 -I /opt/sd-fetch/sd-fetch.py
+Restart=on-failure
+RestartSec=5
+
+# No IPAddressDeny here: it would block outbound downloads too. Who may
+# connect is enforced on sd-fetch.socket.
+
+# Hardening: it only needs to write the model dir and run nvidia-smi.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sd/models
+ProtectHome=yes
+PrivateTmp=yes
+# nvidia-smi needs the NVIDIA control and GPU device nodes (so no
+# PrivateDevices); every other device stays closed.
+DevicePolicy=closed
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia0 rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+# MemoryDenyWriteExecute is left off: NVIDIA's userspace libraries (loaded by
+# nvidia-smi) aren't guaranteed to work under it.
+SystemCallArchitectures=native
+UMask=0022

@@ -1,11 +1,13 @@
 /**
  * llama.cpp router management, proxied with the server-side API key.
- * Mounted at /api/llama behind requireAuth; the browser never talks to the
- * model server (or Hugging Face) directly.
+ * Mounted at /api/llama behind requireAuth and routeTo("chat"), so every
+ * upstream call goes to req.machine (server/backends.js). The browser never
+ * talks to the model server (or Hugging Face) directly.
  */
 
 import express from "express";
-import { llamaFetch, upstreamError } from "../llama.js";
+import { llamaFetch, upstreamError, keyHint } from "../llama.js";
+import { publicMachine } from "../backends.js";
 
 const router = express.Router();
 
@@ -50,23 +52,23 @@ export function gpuBytes(snapshot) {
   return d ? (d.model || 0) + (d.context || 0) + (d.compute || 0) : null;
 }
 
-async function upstreamJson(res, response) {
+async function upstreamJson(req, res, response) {
   if (!response.ok) {
     return res.status(response.status === 401 ? 502 : response.status).json({
       error: response.status === 401
-        ? "Model server rejected the API key (check LLAMA_API_KEY in ~/.llmui/llama.env)"
+        ? `${req.machine.name}'s model server rejected the API key (${keyHint(req.machine)})`
         : await upstreamError(response),
     });
   }
   res.json(await response.json().catch(() => ({ success: true })));
 }
 
-async function listModels() {
-  const response = await llamaFetch("/models", { signal: AbortSignal.timeout(10000) });
+async function listModels(machine) {
+  const response = await llamaFetch(machine, "/models", { signal: AbortSignal.timeout(10000) });
   if (!response.ok) {
     const err = new Error(
       response.status === 401
-        ? "Model server rejected the API key (check LLAMA_API_KEY in ~/.llmui/llama.env)"
+        ? `${machine.name}'s model server rejected the API key (${keyHint(machine)})`
         : await upstreamError(response)
     );
     err.status = response.status === 401 ? 502 : response.status;
@@ -127,7 +129,7 @@ async function mmprojFileSize(id) {
 // plus the GPU size and memory margin used for fit estimates.
 router.get("/models", async (req, res) => {
   try {
-    const listed = await listModels();
+    const listed = await listModels(req.machine);
     const gpu = gpuInfo(listed);
     const models = await Promise.all(
       listed.map(async (m) =>
@@ -135,11 +137,14 @@ router.get("/models", async (req, res) => {
       )
     );
     res.json({
+      machine: publicMachine(req.machine),
       models,
       gpu: { ...gpu, margin: MEMORY_MARGIN_BYTES, budget: gpu.total - MEMORY_MARGIN_BYTES },
     });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.status ? err.message : `Model server unreachable: ${err.message}` });
+    res.status(err.status || 502).json({
+      error: err.status ? err.message : `${req.machine.name}'s model server unreachable: ${err.cause?.code || err.message}`,
+    });
   }
 });
 
@@ -151,8 +156,8 @@ function requireModelId(value, res) {
   return true;
 }
 
-const postJson = (path, body) =>
-  llamaFetch(path, {
+const postJson = (machine, path, body) =>
+  llamaFetch(machine, path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -166,11 +171,11 @@ router.get("/props", async (req, res) => {
   const { model } = req.query;
   if (!requireModelId(model, res)) return;
   try {
-    const m = (await listModels()).find((x) => x.id === model);
+    const m = (await listModels(req.machine)).find((x) => x.id === model);
     if (!m) return res.status(404).json({ error: "Unknown model" });
     if (m.status !== "loaded") return res.json({ model, contextLength: m.contextLength, loaded: false });
-    const response = await llamaFetch(`/props?model=${encodeURIComponent(model)}`, { signal: AbortSignal.timeout(10000) });
-    if (!response.ok) return upstreamJson(res, response);
+    const response = await llamaFetch(req.machine, `/props?model=${encodeURIComponent(model)}`, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return upstreamJson(req, res, response);
     const props = await response.json();
     res.json({
       model,
@@ -193,9 +198,9 @@ router.post("/models", async (req, res) => {
     return res.status(400).json({ error: "Invalid sidecars (allowed: mmproj)" });
   }
   try {
-    await upstreamJson(res, await postJson("/models", sidecars === undefined ? { model } : { model, sidecars }));
+    await upstreamJson(req, res, await postJson(req.machine, "/models", sidecars === undefined ? { model } : { model, sidecars }));
   } catch (err) {
-    res.status(502).json({ error: `Model server unreachable: ${err.message}` });
+    res.status(502).json({ error: `${req.machine.name}'s model server unreachable: ${err.cause?.code || err.message}` });
   }
 });
 
@@ -209,12 +214,12 @@ router.delete("/models", async (req, res) => {
   }
   const qs = `model=${encodeURIComponent(model)}${sidecar ? `&sidecar=${sidecar}` : ""}`;
   try {
-    await upstreamJson(res, await llamaFetch(`/models?${qs}`, {
+    await upstreamJson(req, res, await llamaFetch(req.machine, `/models?${qs}`, {
       method: "DELETE",
       signal: AbortSignal.timeout(30000),
     }));
   } catch (err) {
-    res.status(502).json({ error: `Model server unreachable: ${err.message}` });
+    res.status(502).json({ error: `${req.machine.name}'s model server unreachable: ${err.cause?.code || err.message}` });
   }
 });
 
@@ -224,9 +229,9 @@ for (const action of ["load", "unload"]) {
     const { model } = req.body || {};
     if (!requireModelId(model, res)) return;
     try {
-      await upstreamJson(res, await postJson(`/models/${action}`, { model }));
+      await upstreamJson(req, res, await postJson(req.machine, `/models/${action}`, { model }));
     } catch (err) {
-      res.status(502).json({ error: `Model server unreachable: ${err.message}` });
+      res.status(502).json({ error: `${req.machine.name}'s model server unreachable: ${err.cause?.code || err.message}` });
     }
   });
 }
@@ -282,14 +287,14 @@ router.get("/events", async (req, res) => {
 
   let upstream;
   try {
-    upstream = await llamaFetch("/models/sse", {
+    upstream = await llamaFetch(req.machine, "/models/sse", {
       headers: { Accept: "text/event-stream" },
       signal: controller.signal,
     });
   } catch (err) {
-    return res.status(502).json({ error: `Model server unreachable: ${err.message}` });
+    return res.status(502).json({ error: `${req.machine.name}'s model server unreachable: ${err.cause?.code || err.message}` });
   }
-  if (!upstream.ok) return upstreamJson(res, upstream);
+  if (!upstream.ok) return upstreamJson(req, res, upstream);
 
   res.status(200);
   res.setHeader("Content-Type", "text/event-stream");

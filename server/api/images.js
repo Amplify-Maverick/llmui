@@ -1,6 +1,7 @@
 /**
  * Image generation via stable-diffusion.cpp's sd-server (see server/sd.js).
- * Mounted at /api/images behind requireAuth.
+ * Mounted at /api/images behind requireAuth. Everything except history goes
+ * to the machine images are routed to (req.machine, see server/backends.js).
  *
  *  - GET  /status        sd-server reachability, model state, whether a job runs
  *  - GET  /options       configured models (+ per-model defaults), samplers, schedulers, defaults
@@ -27,32 +28,35 @@ import {
   resolveModelSetup,
 } from "../sd.js";
 import imageModelsRouter from "./imageModels.js";
+import { routeTo, publicMachine } from "../backends.js";
 
 const router = Router();
+const toImageMachine = routeTo("image");
 
-router.use("/models", imageModelsRouter);
+router.use("/models", toImageMachine, imageModelsRouter);
 
 // ── status / options ───────────────────────────────────────────────────
 
-router.get("/status", async (req, res) => {
-  const { url } = getSdConfig();
+router.get("/status", toImageMachine, async (req, res) => {
+  const { url } = getSdConfig(req.machine);
+  const common = { url, machine: publicMachine(req.machine), busy: isImageJobActive(req.machine) };
   try {
-    const status = await sdStatus();
-    res.json({ ok: true, url, state: status.state, busy: isImageJobActive() });
+    const status = await sdStatus(req.machine);
+    res.json({ ok: true, ...common, state: status.state });
   } catch (err) {
-    res.json({ ok: false, url, error: err.message, busy: isImageJobActive() });
+    res.json({ ok: false, ...common, error: err.message });
   }
 });
 
 const names = (list) => (list || []).map((x) => (typeof x === "string" ? x : x.name)).filter(Boolean);
 
-router.get("/options", async (req, res) => {
-  const cfg = getSdConfig();
+router.get("/options", toImageMachine, async (req, res) => {
+  const cfg = getSdConfig(req.machine);
   try {
     const [files, samplers, schedulers] = await Promise.all([
-      sdFetch("/sdcpp/v1/model-files"),
-      sdFetch("/sdapi/v1/samplers").catch(() => []),
-      sdFetch("/sdapi/v1/schedulers").catch(() => []),
+      sdFetch(req.machine, "/sdcpp/v1/model-files"),
+      sdFetch(req.machine, "/sdapi/v1/samplers").catch(() => []),
+      sdFetch(req.machine, "/sdapi/v1/schedulers").catch(() => []),
     ]);
     // Models with a saved setup (recipe + any components) whose files are all present.
     const present = new Set((files.files || []).map((f) => f.id));
@@ -60,7 +64,7 @@ router.get("/options", async (req, res) => {
     const modelDefaults = {};
     for (const f of files.files || []) {
       if (f.category !== "checkpoints" && f.category !== "diffusion_models") continue;
-      const setup = resolveModelSetup(f.id);
+      const setup = resolveModelSetup(req.machine, f.id);
       if (!setup || !Object.values(setup.models).every((id) => present.has(id))) continue;
       checkpoints.push(f.id);
       modelDefaults[f.id] = f.id === cfg.model
@@ -68,6 +72,7 @@ router.get("/options", async (req, res) => {
         : cfg.models?.[f.id]?.defaults || {};
     }
     res.json({
+      machine: publicMachine(req.machine),
       checkpoints,
       modelDefaults,
       samplers: names(samplers).filter((s) => s !== "default"),
@@ -90,9 +95,8 @@ router.get("/options", async (req, res) => {
 
 const int = (v, d) => (v === undefined || v === null || v === "" ? d : Number(v));
 
-/** Validate and fill the request with sd_config.json defaults. Returns [params, error]. */
-function parseParams(body = {}) {
-  const cfg = getSdConfig();
+/** Validate and fill the request with the machine's sd config defaults. Returns [params, error]. */
+function parseParams(body = {}, cfg) {
   const p = {
     prompt: typeof body.prompt === "string" ? body.prompt.trim() : "",
     negativePrompt: typeof body.negativePrompt === "string" ? body.negativePrompt : "",
@@ -128,7 +132,7 @@ function parseParams(body = {}) {
   return [p, null];
 }
 
-function saveGeneration(p, result) {
+function saveGeneration(machine, p, result) {
   const db = getDb();
   const generationId = nanoid();
   const now = Date.now();
@@ -140,7 +144,7 @@ function saveGeneration(p, result) {
     `).run(
       generationId, p.prompt, p.negativePrompt, p.checkpoint, p.width, p.height, p.steps,
       p.cfgScale, p.sampler, p.scheduler, p.seed, p.batchCount,
-      JSON.stringify({ backend: "sd-server", api: result.api, generation_info: result.generationInfo }),
+      JSON.stringify({ backend: "sd-server", machine: machine.id, api: result.api, generation_info: result.generationInfo }),
       now,
     );
     const insert = db.prepare(`
@@ -156,15 +160,17 @@ function saveGeneration(p, result) {
   return { generationId, imageIds };
 }
 
-router.post("/txt2img", async (req, res) => {
-  const [p, invalid] = parseParams(req.body);
+router.post("/txt2img", toImageMachine, async (req, res) => {
+  // Fixed for the whole job: switching machines mid-job doesn't move it.
+  const machine = req.machine;
+  const [p, invalid] = parseParams(req.body, getSdConfig(machine));
   if (invalid) return res.status(400).json({ error: invalid });
-  const setup = resolveModelSetup(p.checkpoint);
+  const setup = resolveModelSetup(machine, p.checkpoint);
   if (!setup) {
-    return res.status(400).json({ error: `${p.checkpoint} has no recipe set; configure it under Models → Image` });
+    return res.status(400).json({ error: `${p.checkpoint} has no recipe set on ${machine.name}; configure it under Models → Image` });
   }
 
-  const busy = acquireImageLock();
+  const busy = acquireImageLock(machine);
   if (busy) return res.status(409).json({ error: busy, code: "gpu_busy" });
 
   const controller = new AbortController();
@@ -186,8 +192,9 @@ router.post("/txt2img", async (req, res) => {
 
   let sdLoaded = false;
   try {
-    send("stage", { stage: "freeing_gpu", message: "Unloading chat models…" });
-    await unloadChatModels({
+    // Only this machine's chat models; other machines are never touched.
+    send("stage", { stage: "freeing_gpu", message: `Unloading chat models on ${machine.name}…` });
+    await unloadChatModels(machine, {
       onWait: (models) => send("stage", {
         stage: "freeing_gpu",
         message: `Waiting for ${models.map((m) => `${m.id} (${m.status})`).join(", ")} to unload…`,
@@ -199,21 +206,22 @@ router.post("/txt2img", async (req, res) => {
     sdLoaded = true; // from here on, always try to unload
     const keepalive = setInterval(() => send("stage", { stage: "loading_model", message: `Loading ${p.checkpoint}…` }), 5000);
     try {
-      await loadSdModel({ ...setup, signal: controller.signal });
+      await loadSdModel(machine, { ...setup, signal: controller.signal });
     } finally {
       clearInterval(keepalive);
     }
     checkAborted();
 
     const tGen = Date.now();
-    const result = await txt2img(p, {
+    const result = await txt2img(machine, p, {
       signal: controller.signal,
       onProgress: (pr) => send("progress", pr),
     });
     checkAborted();
 
-    const { generationId, imageIds } = saveGeneration(p, result);
+    const { generationId, imageIds } = saveGeneration(machine, p, result);
     send("complete", {
+      machine: machine.id,
       generationId,
       imageIds,
       seed: p.seed,
@@ -227,12 +235,12 @@ router.post("/txt2img", async (req, res) => {
   } finally {
     if (sdLoaded) {
       try {
-        await unloadSdModel();
+        await unloadSdModel(machine);
       } catch (err) {
         console.error("Failed to unload SD model:", err.message);
       }
     }
-    releaseImageLock();
+    releaseImageLock(machine);
     if (!res.writableEnded) res.end();
   }
 });

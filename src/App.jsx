@@ -12,6 +12,8 @@ import KeyboardShortcutsPanel, {
   useKeyboardShortcuts,
 } from "./components/shared/KeyboardShortcuts.jsx";
 import SetupWizard from "./components/setup/SetupWizard.jsx";
+import { MachineNotice, MachineChip } from "./components/shared/MachineStatus.jsx";
+import { useMachinesStore } from "./stores/machinesStore.js";
 import "./App.css";
 
 export default function App() {
@@ -38,6 +40,12 @@ export default function App() {
     loadSettings();
     loadConversations();
   }, [setupComplete, loadSettings, loadConversations]);
+
+  // Machine status (online/offline, where chat and images go), every ~10 s.
+  useEffect(() => {
+    if (!setupComplete) return undefined;
+    return useMachinesStore.getState().startPolling();
+  }, [setupComplete]);
 
   // Apply theme to document, including the browser chrome color (Safari's
   // status bar / toolbar default to white and ignore page CSS entirely
@@ -121,9 +129,13 @@ export default function App() {
             ?
           </button>
         </nav>
-        {/* Keeps the 3-column header grid balanced so the tabs stay centered */}
-        <div className="app-header-right" />
+        {/* Also keeps the 3-column header grid balanced so the tabs stay centered */}
+        <div className="app-header-right">
+          <MachineChip onClick={() => setActiveTab("stats")} />
+        </div>
       </header>
+
+      <MachineNotice onOpenSystem={activeTab === "stats" ? null : () => setActiveTab("stats")} />
 
       <main className="app-main">
         {activeTab === "chat" && (

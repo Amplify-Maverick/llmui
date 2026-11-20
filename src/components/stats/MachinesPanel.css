@@ -1,0 +1,308 @@
+.machines-panel {
+  margin-bottom: 28px;
+}
+
+.machines-loading {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.machines-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.machines-head .system-stats-section-title {
+  margin-bottom: 4px;
+}
+
+.machines-hint {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.machines-error {
+  color: var(--color-danger);
+  font-size: 12.5px;
+  margin: 0 0 12px;
+}
+
+/* Segmented switch */
+.machine-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+.machine-switch-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.machine-switch-opt:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+
+.machine-switch-opt.active {
+  color: var(--color-text-primary);
+  background: var(--color-surface-raised);
+  border-color: var(--color-primary-border);
+}
+
+.machine-switch-opt:disabled {
+  cursor: progress;
+}
+
+.machine-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.machine-dot.is-up {
+  background: var(--color-primary);
+  box-shadow: 0 0 6px var(--color-primary);
+}
+
+.machine-dot.is-down {
+  background: var(--color-danger);
+}
+
+.machine-tag {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.machine-tag.is-active {
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-bg);
+}
+
+/* Cards */
+.machines-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 14px;
+}
+
+.machine-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  min-width: 0;
+}
+
+.machine-card.is-selected {
+  border-color: var(--color-primary-border);
+}
+
+.machine-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.machine-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.machine-online {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.machine-online.is-up {
+  color: var(--color-primary);
+}
+
+.machine-online.is-down {
+  color: var(--color-danger);
+}
+
+.machine-card-gpu {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.machine-svcs {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.machine-svc {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 12.5px;
+}
+
+.machine-svc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  align-self: center;
+}
+
+.machine-svc-dot.is-up { background: var(--color-primary); }
+.machine-svc-dot.is-down { background: var(--color-danger); }
+.machine-svc-dot.is-off { background: var(--color-warning); }
+
+.machine-svc-label {
+  color: var(--color-text-secondary);
+}
+
+.machine-svc-state {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.machine-svc-state.is-up { color: var(--color-primary); }
+.machine-svc-state.is-down { color: var(--color-danger); }
+.machine-svc-state.is-off { color: var(--color-warning); }
+
+.machine-svc-error {
+  flex-basis: 100%;
+  padding-left: 14px;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.machine-checked {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* GpuStats nested in a machine card: no second card frame */
+.machine-card .gpu-card {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.machine-card .gpu-name {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.machine-card .gpu-metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.machine-card .gpu-error {
+  font-size: 12.5px;
+  padding: 12px;
+}
+
+/* App-wide fallback notice and header chip */
+.machine-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0 14px;
+  padding: 9px 14px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.machine-notice-reason {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.machine-notice button {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.machine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.machine-chip:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+}
+
+.machine-chip.is-fallback {
+  border-color: var(--color-warning);
+}
+
+@media (max-width: 768px) {
+  .machine-switch {
+    width: 100%;
+  }
+
+  .machine-switch-opt {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .machine-card-gpu {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}

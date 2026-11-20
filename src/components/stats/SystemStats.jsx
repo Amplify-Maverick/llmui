@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
+import { useMachinesStore } from "../../stores/machinesStore.js";
 import { formatBytes } from "../../utils/formatters.js";
 import { fetchHardwareInfo } from "../../services/hardwareApi.js";
 import StatCard from "./StatCard.jsx";
-import GpuStats from "./GpuStats.jsx";
+import MachinesPanel from "./MachinesPanel.jsx";
 import "./SystemStats.css";
 
 export default function SystemStats() {
   const { models, modelsLoaded, fetchModels } = useModelsStore();
   const [hardware, setHardware] = useState(null);
+  const chatMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.chat));
 
   useEffect(() => {
     fetchModels();
@@ -27,9 +29,11 @@ export default function SystemStats() {
     <div className="system-stats">
       <h2 className="system-stats-title">System Overview</h2>
 
+      <MachinesPanel />
+
       <div className="system-stats-grid">
         <StatCard
-          label="Served Models"
+          label={chatMachine ? `Models on ${chatMachine.name}` : "Served Models"}
           value={models.length}
           color="#6ee7b7"
         />
@@ -61,13 +65,11 @@ export default function SystemStats() {
         )}
       </div>
 
-      <GpuStats />
-
       {modelsLoaded && models.length === 0 && (
         <div className="system-stats-empty">
           <p>No models are being served.</p>
           <p className="system-stats-empty-hint">
-            Load a model on the OpenAI-compatible server (OPENAI_BASE_URL).
+            Install or load a model on {chatMachine?.name || "the selected machine"} under Models.
           </p>
         </div>
       )}

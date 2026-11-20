@@ -1,67 +1,77 @@
 /**
- * llama.cpp router-mode upstream: base URLs and the API key.
+ * llama.cpp router-mode upstreams: one per machine (server/backends.js).
  *
- * The key lives in ~/.llmui/llama.env as LLAMA_API_KEY (or the LLAMA_API_KEY
- * env var, which wins). It is only ever attached server-side, here — never
- * returned to the browser. The file is re-read whenever its mtime changes, so
- * editing it doesn't need a server restart.
+ * API keys are only ever attached server-side, here — never returned to the
+ * browser. The default machine's key is LLAMA_API_KEY (env var, which wins, or
+ * LLAMA_API_KEY=... in ~/.llmui/llama.env); other machines read their own key
+ * file (a bare key, or LLAMA_API_KEY=...). Files are re-read whenever their
+ * mtime changes, so editing them doesn't need a server restart.
  */
 
 import fs from "fs";
-import os from "os";
-import path from "path";
+import { defaultMachine } from "./backends.js";
 
-/** OpenAI-compatible base, including /v1 (chat completions etc.). */
-export const OPENAI_BASE_URL = (
-  process.env.OPENAI_BASE_URL || "http://100.118.190.15:8081/v1"
-).replace(/\/+$/, "");
+/** The default machine's OpenAI-compatible base, including /v1 (for logs). */
+export const OPENAI_BASE_URL = defaultMachine().openaiUrl;
 
-/** Router-management base (no /v1): /models, /models/load, /models/sse, ... */
-export const LLAMA_ROOT_URL = OPENAI_BASE_URL.replace(/\/v1$/, "");
+const keyCache = new Map(); // path → { mtimeMs, key }
+const warned = new Set();
 
-const ENV_FILE = path.join(os.homedir(), ".llmui", "llama.env");
-
-let cached = { mtimeMs: -1, key: "" };
-let warned = false;
-
-function parseEnvFile(text) {
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?LLAMA_API_KEY\s*=\s*(.*)\s*$/.exec(line);
+/** LLAMA_API_KEY=... if present, else the first non-comment line (a bare key). */
+export function parseKeyFile(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  for (const line of lines) {
+    const m = /^(?:export\s+)?LLAMA_API_KEY\s*=\s*(.*)$/.exec(line);
     if (m) return m[1].replace(/^(['"])(.*)\1$/, "$2").trim();
   }
-  return "";
+  const bare = lines.find((l) => !l.includes("="));
+  return bare || "";
 }
 
-export function getLlamaApiKey() {
-  if (process.env.LLAMA_API_KEY) return process.env.LLAMA_API_KEY;
+function readKeyFile(file) {
   try {
-    const { mtimeMs } = fs.statSync(ENV_FILE);
-    if (mtimeMs !== cached.mtimeMs) {
-      cached = { mtimeMs, key: parseEnvFile(fs.readFileSync(ENV_FILE, "utf-8")) };
-      warned = false;
-    }
+    const { mtimeMs } = fs.statSync(file);
+    const hit = keyCache.get(file);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.key;
+    const key = parseKeyFile(fs.readFileSync(file, "utf-8"));
+    keyCache.set(file, { mtimeMs, key });
+    warned.delete(file);
+    return key;
   } catch {
-    cached = { mtimeMs: -1, key: "" };
+    keyCache.delete(file);
+    return "";
   }
-  if (!cached.key && !warned) {
-    console.warn(`LLAMA_API_KEY is not set (checked env and ${ENV_FILE}); upstream requests will be unauthenticated.`);
-    warned = true;
-  }
-  return cached.key;
 }
 
-/** Headers for an upstream request, with the bearer key added. */
-export function llamaHeaders(extra = {}) {
-  const key = getLlamaApiKey();
+export function getLlamaApiKey(machine) {
+  if (machine.llamaKeyEnv && process.env[machine.llamaKeyEnv]) return process.env[machine.llamaKeyEnv];
+  const key = readKeyFile(machine.llamaKeyPath);
+  if (!key && !warned.has(machine.llamaKeyPath)) {
+    console.warn(`${machine.name}: no llama API key (checked ${machine.llamaKeyEnv ? `$${machine.llamaKeyEnv} and ` : ""}${machine.llamaKeyPath}); upstream requests will be unauthenticated.`);
+    warned.add(machine.llamaKeyPath);
+  }
+  return key;
+}
+
+/** Headers for an upstream request to `machine`, with its bearer key added. */
+export function llamaHeaders(machine, extra = {}) {
+  const key = getLlamaApiKey(machine);
   return key ? { ...extra, Authorization: `Bearer ${key}` } : { ...extra };
 }
 
-/** fetch() against the router root (no /v1), authenticated. */
-export function llamaFetch(upstreamPath, init = {}) {
-  return fetch(`${LLAMA_ROOT_URL}${upstreamPath}`, {
+/** fetch() against a machine's router root (no /v1), authenticated. */
+export function llamaFetch(machine, upstreamPath, init = {}) {
+  return fetch(`${machine.rootUrl}${upstreamPath}`, {
     ...init,
-    headers: llamaHeaders(init.headers),
+    headers: llamaHeaders(machine, init.headers),
   });
+}
+
+/** "Model server rejected the API key" hint naming the right key file. */
+export function keyHint(machine) {
+  return machine.llamaKeyEnv
+    ? `check ${machine.llamaKeyEnv} in ~/.llmui/${machine.llamaKeyFile}`
+    : `check ~/.llmui/${machine.llamaKeyFile}`;
 }
 
 /** Extract a readable message from a failed upstream response. */

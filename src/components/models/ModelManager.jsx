@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
 import { useImageStore } from "../../stores/imageStore.js";
+import { useMachinesStore } from "../../stores/machinesStore.js";
 import TextModelManager from "./TextModelManager.jsx";
 import ImageModelManager from "./ImageModelManager.jsx";
 import Button from "../shared/Button.jsx";
@@ -18,6 +19,13 @@ export default function ModelManager() {
   const [subTab, setSubTab] = useState("text"); // "text" | "image"
   const [imageKey, setImageKey] = useState(0); // bump to reload the image tab
 
+  // Everything on this page acts on the machine that kind of request goes to.
+  // The managers remount when it changes, so nothing from the other machine
+  // stays on screen (or gets acted on).
+  const machineId = useMachinesStore((s) => s.effective[subTab === "image" ? "image" : "chat"]);
+  const machine = useMachinesStore((s) => s.machines.find((m) => m.id === machineId));
+  const fallingBack = useMachinesStore((s) => !!s.fallback[subTab === "image" ? "image" : "chat"]);
+
   // Fetch image models when switching to image sub-tab
   useEffect(() => {
     if (subTab === "image") {
@@ -30,6 +38,15 @@ export default function ModelManager() {
       <div className="model-manager-header">
         <div className="model-manager-header-left">
           <h2 className="model-manager-title">Models</h2>
+          {machine && (
+            <span
+              className={`model-manager-machine ${fallingBack ? "is-fallback" : ""}`}
+              title={fallingBack ? "The selected machine is unreachable; showing the default machine" : "Change the machine on the System page"}
+            >
+              on <strong>{machine.name}</strong>
+              <span className="model-manager-machine-gpu">{machine.gpuLabel}</span>
+            </span>
+          )}
           <div className="model-manager-subtabs">
             <button
               className={`model-subtab ${subTab === "text" ? "active" : ""}`}
@@ -79,16 +96,16 @@ export default function ModelManager() {
       )}
 
       {/* ── Text Models (llama.cpp router) ────────── */}
-      {subTab === "text" && <TextModelManager />}
+      {subTab === "text" && <TextModelManager key={machineId || "none"} />}
 
       {/* ── Image Models (stable-diffusion.cpp sd-server) ───── */}
       {subTab === "image" && (
         <>
           {!sdConnected ? (
             <div className="model-manager-empty">
-              <h3>sd-server Not Reachable</h3>
+              <h3>{machine ? `${machine.name}'s sd-server is not reachable` : "sd-server not reachable"}</h3>
               <p>
-                {connectionError || "Check the url in ~/.llmui/sd_config.json on the LLMUI server."}
+                {connectionError || "Check that sd-server is running on that machine."}
               </p>
               <Button
                 variant="secondary"
@@ -99,7 +116,7 @@ export default function ModelManager() {
               </Button>
             </div>
           ) : (
-            <ImageModelManager key={imageKey} />
+            <ImageModelManager key={`${machineId}:${imageKey}`} />
           )}
         </>
       )}

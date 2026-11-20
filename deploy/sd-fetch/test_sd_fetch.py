@@ -1,7 +1,13 @@
 """Unit tests for sd-fetch's validators: python3 -m unittest deploy/sd-fetch/test_sd_fetch.py"""
 import importlib.util
+import json
 import os
+import shutil
+import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 
 _spec = importlib.util.spec_from_file_location("sd_fetch", os.path.join(os.path.dirname(__file__), "sd-fetch.py"))
 sf = importlib.util.module_from_spec(_spec)
@@ -55,6 +61,108 @@ class Validators(unittest.TestCase):
         GiB = sf.GiB
         self.assertTrue(sf.fits(20 * GiB, 10 * GiB, 10 * GiB))
         self.assertFalse(sf.fits(20 * GiB, 10 * GiB, 10 * GiB + 1))
+
+
+class NvidiaCsv(unittest.TestCase):
+    def test_parse(self):
+        rows = sf.parse_nvidia_csv(
+            "0, NVIDIA GeForce RTX 3070, 54, 37, 6120, 8192, 112.45\n"
+            "1, Some GPU, [N/A], [Not Supported], 10, 8192, [N/A]\n\n"
+        )
+        self.assertEqual(rows[0], {
+            "index": 0, "name": "NVIDIA GeForce RTX 3070", "vendor": "nvidia", "temp_c": 54,
+            "util_pct": 37, "vram_used_mib": 6120, "vram_total_mib": 8192, "power_w": 112.5,
+        })
+        self.assertEqual((rows[1]["temp_c"], rows[1]["util_pct"], rows[1]["power_w"]), (None, None, None))
+        self.assertEqual(sf.parse_nvidia_csv("garbage\n"), [])
+
+
+class AmdSysfs(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+
+    def card(self, n, files):
+        for rel, text in files.items():
+            path = os.path.join(self.root, "card%d" % n, "device", rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(text + "\n")
+
+    def test_full(self):
+        self.card(0, {
+            "mem_info_vram_total": str(8 * 1024 ** 3),
+            "mem_info_vram_used": str(3 * 1024 ** 3 + 512 * 1024 ** 2),
+            "gpu_busy_percent": "42",
+            "uevent": "DRIVER=amdgpu\nPCI_ID=1002:67DF",
+            "hwmon/hwmon3/temp1_input": "61000",
+            "hwmon/hwmon3/power1_average": "93123000",
+        })
+        os.makedirs(os.path.join(self.root, "card0-DP-1"))  # connectors are skipped
+        self.assertEqual(sf.amd_gpus(self.root), [{
+            "index": 0, "name": "Radeon RX 470/480/570/580", "vendor": "amd", "temp_c": 61,
+            "util_pct": 42, "vram_used_mib": 3584, "vram_total_mib": 8192, "power_w": 93.1,
+        }])
+
+    def test_missing_values_are_null(self):
+        self.card(1, {"mem_info_vram_total": str(4 * 1024 ** 3), "product_name": "Radeon Test",
+                      "hwmon/hwmon0/power1_input": "50000000"})
+        self.card(2, {"uevent": "DRIVER=i915"})  # no VRAM info: not amdgpu
+        gpus = sf.amd_gpus(self.root)
+        self.assertEqual(len(gpus), 1)
+        g = gpus[0]
+        self.assertEqual((g["name"], g["vram_total_mib"], g["power_w"]), ("Radeon Test", 4096, 50.0))
+        self.assertEqual((g["temp_c"], g["util_pct"], g["vram_used_mib"]), (None, None, None))
+        self.assertEqual(sf.amd_gpus(os.path.join(self.root, "nope")), [])
+
+
+class InitEnv(unittest.TestCase):
+    def test_fills_empty_token_once(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        path = os.path.join(d, "fetch.env")
+        with open(path, "w") as f:
+            f.write("# comment\nSD_FETCH_TOKEN=\nHF_TOKEN=\n")
+        os.chmod(path, 0o600)
+        self.assertTrue(sf.init_env_token(path))
+        text = open(path).read()
+        token = [l for l in text.splitlines() if l.startswith("SD_FETCH_TOKEN=")][0][15:]
+        self.assertRegex(token, r"^[0-9a-f]{64}$")
+        self.assertIn("HF_TOKEN=\n", text)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertFalse(sf.init_env_token(path))  # never rotates
+        self.assertEqual(open(path).read(), text)
+
+
+class GpuEndpoint(unittest.TestCase):
+    TOKEN = "t" * 40
+
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        cfg = sf.Config({"SD_FETCH_TOKEN": self.TOKEN, "SD_MODEL_DIR": d, "SD_FETCH_GPU": "none"})
+        self.httpd = sf.Server(("127.0.0.1", 0), sf.make_handler(cfg, sf.Downloader(cfg)))
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
+        self.url = "http://127.0.0.1:%d/v1/gpu" % self.httpd.server_address[1]
+
+    def get(self, token):
+        req = urllib.request.Request(self.url, headers={"Authorization": "Bearer " + token} if token else {})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read())
+
+    def test_requires_token(self):
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.get(None)
+        self.assertEqual(cm.exception.code, 401)
+
+    def test_disabled(self):
+        status, body = self.get(self.TOKEN)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["gpus"], [])
+        self.assertIsNone(body["source"])
+        self.assertIn("disabled", body["error"])
 
 
 if __name__ == "__main__":

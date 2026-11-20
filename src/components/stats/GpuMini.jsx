@@ -1,93 +1,75 @@
-import { useEffect, useState } from "react";
-import { fetchGpuStats } from "../../services/gpuApi.js";
+import { useMachinesStore } from "../../stores/machinesStore.js";
+import { useGpuStats, fmt, vramPct } from "../../hooks/useGpuStats.js";
 import { tempColor, utilizationColor, vramColor } from "../../utils/gpuColors.js";
 import "./GpuMini.css";
 
-const POLL_INTERVAL = 2000;
+const muted = "var(--color-text-muted)";
 
-export default function GpuMini() {
-  const [gpus, setGpus] = useState([]);
-  const [error, setError] = useState(null);
+/** One-line live GPU strip for the machine `kind` ("chat" | "image") runs on. */
+export default function GpuMini({ kind = "chat" }) {
+  const machineId = useMachinesStore((s) => s.effective[kind]);
+  const machine = useMachinesStore((s) => s.machines.find((m) => m.id === machineId));
+  const { gpus, error, loading } = useGpuStats(machineId);
+  const label = machine?.name || "GPU";
 
-  useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      const data = await fetchGpuStats();
-      if (!active) return;
-      if (data.ok) {
-        setGpus(data.gpus);
-        setError(null);
-      } else {
-        setError(data.error);
-      }
-    };
-    poll();
-    const id = setInterval(poll, POLL_INTERVAL);
-    return () => { active = false; clearInterval(id); };
-  }, []);
-
-  if (error) {
-    return <div className="gpu-mini-error">GPU unavailable</div>;
+  if (!machineId || (loading && gpus.length === 0)) {
+    return <div className="gpu-mini-error">Reading {label} GPU…</div>;
   }
-
   if (gpus.length === 0) {
-    return <div className="gpu-mini-error">Detecting GPU…</div>;
+    return <div className="gpu-mini-error" title={error || ""}>{label}: GPU stats unavailable</div>;
   }
 
   return (
     <>
       {gpus.map((gpu) => {
-        const vramPct = (gpu.memoryUsed / gpu.memoryTotal) * 100;
+        const pct = vramPct(gpu);
         return (
           <div key={gpu.index} className="gpu-mini">
-            <span className="gpu-mini-label">
+            <span className="gpu-mini-label" title={gpu.name || ""}>
               <span className="gpu-mini-live" />
-              {gpu.name}
+              {label}
+              {gpu.name && <span className="gpu-mini-gpuname">{gpu.name}</span>}
             </span>
 
             <span className="gpu-mini-separator">│</span>
 
-            {/* Utilization */}
             <span className="gpu-mini-metric">
               <span className="gpu-mini-metric-label">GPU</span>
-              <span style={{ color: utilizationColor(gpu.utilization), fontWeight: 600 }}>
-                {gpu.utilization}%
+              <span style={{ color: gpu.utilization == null ? muted : utilizationColor(gpu.utilization), fontWeight: 600 }}>
+                {fmt(gpu.utilization, "%")}
               </span>
               <span className="gpu-mini-bar-track">
-                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(gpu.utilization, 100)}%`, background: utilizationColor(gpu.utilization) }} />
+                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(gpu.utilization ?? 0, 100)}%`, background: utilizationColor(gpu.utilization ?? 0) }} />
               </span>
             </span>
 
             <span className="gpu-mini-separator">│</span>
 
-            {/* VRAM */}
             <span className="gpu-mini-metric">
               <span className="gpu-mini-metric-label">VRAM</span>
-              <span style={{ color: vramColor(vramPct), fontWeight: 600 }}>
-                {gpu.memoryUsed.toLocaleString()}/{gpu.memoryTotal.toLocaleString()} MiB
+              <span style={{ color: pct == null ? muted : vramColor(pct), fontWeight: 600 }}>
+                {fmt(gpu.memoryUsed)}/{fmt(gpu.memoryTotal)} MiB
               </span>
               <span className="gpu-mini-bar-track">
-                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(vramPct, 100)}%`, background: vramColor(vramPct) }} />
+                <span className="gpu-mini-bar-fill" style={{ width: `${Math.min(pct ?? 0, 100)}%`, background: vramColor(pct ?? 0) }} />
               </span>
             </span>
 
             <span className="gpu-mini-separator">│</span>
 
-            {/* Temperature */}
             <span className="gpu-mini-metric">
               <span className="gpu-mini-metric-label">Temp</span>
-              <span style={{ color: tempColor(gpu.temperature), fontWeight: 600 }}>
-                {gpu.temperature}°C
+              <span style={{ color: gpu.temperature == null ? muted : tempColor(gpu.temperature), fontWeight: 600 }}>
+                {fmt(gpu.temperature, "°C")}
               </span>
             </span>
 
             <span className="gpu-mini-separator">│</span>
 
-            {/* Power */}
             <span className="gpu-mini-metric">
               <span className="gpu-mini-metric-label">Power</span>
-              <span style={{ color: "#c4b5fd", fontWeight: 600 }}>
-                {gpu.powerDraw.toFixed(0)}W
+              <span style={{ color: gpu.powerDraw == null ? muted : "#c4b5fd", fontWeight: 600 }}>
+                {fmt(gpu.powerDraw, "W")}
               </span>
             </span>
           </div>

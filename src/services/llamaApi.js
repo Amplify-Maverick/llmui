@@ -5,32 +5,39 @@
  */
 
 import { authHeaders } from "./auth.js";
+import { pinHeader, checkMachineChanged } from "./machinePin.js";
 
 const BASE = "/api/llama";
 const GiB = 1024 ** 3;
 
-async function call(method, path, body) {
+/** `pin`: send the machine the UI shows, so the server refuses if chat moved elsewhere. */
+async function call(method, path, body, { pin = false } = {}) {
   const response = await fetch(`${BASE}${path}`, {
     method,
-    headers: await authHeaders(),
+    headers: { ...(await authHeaders()), ...(pin ? pinHeader("chat") : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    checkMachineChanged(response.status, data);
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
   return data;
 }
+
+const pinned = { pin: true };
 
 export const llamaApi = {
   /** { models: [...], gpu: { name, total, margin, budget, source } } */
   list: () => call("GET", "/models"),
   /** sidecars: ["mmproj"] to include image support, [] for text only. */
-  install: (model, sidecars) => call("POST", "/models", sidecars ? { model, sidecars } : { model }),
-  remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`),
+  install: (model, sidecars) => call("POST", "/models", sidecars ? { model, sidecars } : { model }, pinned),
+  remove: (model) => call("DELETE", `/models?model=${encodeURIComponent(model)}`, undefined, pinned),
   /** Remove only a sidecar file (e.g. "mmproj") and keep the model. */
   removeSidecar: (model, sidecar) =>
-    call("DELETE", `/models?model=${encodeURIComponent(model)}&sidecar=${encodeURIComponent(sidecar)}`),
-  load: (model) => call("POST", "/models/load", { model }),
-  unload: (model) => call("POST", "/models/unload", { model }),
+    call("DELETE", `/models?model=${encodeURIComponent(model)}&sidecar=${encodeURIComponent(sidecar)}`, undefined, pinned),
+  load: (model) => call("POST", "/models/load", { model }, pinned),
+  unload: (model) => call("POST", "/models/unload", { model }, pinned),
   props: (model) => call("GET", `/props?model=${encodeURIComponent(model)}`),
   searchHF: (q) => call("GET", `/hf/search?q=${encodeURIComponent(q)}`),
   repoFiles: (repo) => call("GET", `/hf/files?repo=${encodeURIComponent(repo)}`),

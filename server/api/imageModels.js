@@ -1,7 +1,8 @@
 /**
  * Image models: Hugging Face search, install/delete through the sd-fetch
  * helper, and per-model setups (recipe + component files) in sd_config.json.
- * Mounted at /api/images/models (behind requireAuth, via images.js).
+ * Mounted at /api/images/models (behind requireAuth and routeTo("image"), via
+ * images.js): everything acts on req.machine's sd-server, helper and config.
  *
  *  GET    /hf/search?q=            text-to-image repos with single-file checkpoints, mapped to recipes
  *  GET    /                        installed files, image recipes, default, helper status
@@ -22,6 +23,7 @@ import {
   isImageJobActive,
 } from "../sd.js";
 import { fetchHelper, helperConfigured, FetchHelperError } from "../sdfetch.js";
+import { publicMachine } from "../backends.js";
 import {
   GiB,
   describeRepo,
@@ -37,7 +39,7 @@ const router = Router();
 const MODEL_CATEGORIES = new Set(["checkpoints", "diffusion_models"]);
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
-const gpuBytes = () => (Number(getSdConfig().gpuMemoryGiB) || 8) * GiB;
+const gpuBytes = (machine) => (Number(getSdConfig(machine).gpuMemoryGiB) || 8) * GiB;
 
 const sendError = (res, err) =>
   res.status(err instanceof FetchHelperError ? err.status : err.status && err.status < 500 ? err.status : 502)
@@ -45,17 +47,19 @@ const sendError = (res, err) =>
 
 // ── sd-server catalog (recipes are cached briefly; files are not) ───────
 
-let recipeCache = { at: 0, recipes: null };
+const recipeCache = new Map(); // machine id → { at, recipes }
 
-async function liveRecipes({ fresh = false } = {}) {
-  if (!fresh && recipeCache.recipes && Date.now() - recipeCache.at < 60000) return recipeCache.recipes;
-  const data = await sdFetch("/sdcpp/v1/recipes");
-  recipeCache = { at: Date.now(), recipes: data.recipes || [] };
-  return recipeCache.recipes;
+async function liveRecipes(machine, { fresh = false } = {}) {
+  const hit = recipeCache.get(machine.id);
+  if (!fresh && hit && Date.now() - hit.at < 60000) return hit.recipes;
+  const data = await sdFetch(machine, "/sdcpp/v1/recipes");
+  const recipes = data.recipes || [];
+  recipeCache.set(machine.id, { at: Date.now(), recipes });
+  return recipes;
 }
 
-async function liveFiles() {
-  return (await sdFetch("/sdcpp/v1/model-files")).files || [];
+async function liveFiles(machine) {
+  return (await sdFetch(machine, "/sdcpp/v1/model-files")).files || [];
 }
 
 /** Image (not video) recipes, trimmed for the browser. */
@@ -130,26 +134,28 @@ async function mapLimit(items, limit, fn) {
 router.get("/hf/search", async (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 100);
   try {
-    const recipes = await liveRecipes().catch((err) => {
+    const m = req.machine;
+    const recipes = await liveRecipes(m).catch((err) => {
       throw Object.assign(new Error(`Can't read recipes from sd-server: ${err.message}`), { status: 502 });
     });
     // Installed = in sd-server's catalog or on the helper's disk (it may not have rescanned yet).
     const [catalog, onDisk] = await Promise.all([
-      liveFiles().catch(() => []),
-      fetchHelper("/v1/files").then((d) => d.files || []).catch(() => []),
+      liveFiles(m).catch(() => []),
+      fetchHelper(m, "/v1/files").then((d) => d.files || []).catch(() => []),
     ]);
     const installed = new Set([...catalog.map((f) => f.relative_path || f.id), ...onDisk.map((f) => f.path)]);
     const infos = await searchRepos(q);
     const repos = await mapLimit(infos, 8, async (info) => {
       try {
-        return describeRepo(info, await repoTree(info.id, info.sha), recipes, { gpuBytes: gpuBytes(), installed });
+        return describeRepo(info, await repoTree(info.id, info.sha), recipes, { gpuBytes: gpuBytes(m), installed });
       } catch (err) {
         console.warn(`HF file list for ${info.id} failed:`, err.message);
         return null;
       }
     });
     res.json({
-      gpuBytes: gpuBytes(),
+      machine: publicMachine(m),
+      gpuBytes: gpuBytes(m),
       // Only repos with at least one single-file checkpoint / diffusion model.
       repos: repos.filter((r) => r && r.files.some((f) => f.kind === "model")).slice(0, 25),
     });
@@ -161,15 +167,16 @@ router.get("/hf/search", async (req, res) => {
 // ── Installed files ─────────────────────────────────────────────────────
 
 router.get("/", async (req, res) => {
-  const cfg = getSdConfig();
-  const helper = { ...(await helperConfigured()), ok: false, error: null, disk: null, hfToken: null };
+  const m = req.machine;
+  const cfg = getSdConfig(m);
+  const helper = { ...(await helperConfigured(m)), ok: false, error: null, disk: null, hfToken: null };
 
-  await refreshSdCatalog();
+  await refreshSdCatalog(m);
   let recipes = [];
   let catalog = [];
   let sdError = null;
   try {
-    [recipes, catalog] = await Promise.all([liveRecipes({ fresh: true }), liveFiles()]);
+    [recipes, catalog] = await Promise.all([liveRecipes(m, { fresh: true }), liveFiles(m)]);
   } catch (err) {
     sdError = err.message;
   }
@@ -177,7 +184,7 @@ router.get("/", async (req, res) => {
   let helperFiles = [];
   if (helper.configured) {
     try {
-      const [files, health] = await Promise.all([fetchHelper("/v1/files"), fetchHelper("/v1/health")]);
+      const [files, health] = await Promise.all([fetchHelper(m, "/v1/files"), fetchHelper(m, "/v1/health")]);
       helperFiles = files.files || [];
       helper.disk = files.disk || null;
       helper.ok = true;
@@ -194,7 +201,7 @@ router.get("/", async (req, res) => {
   const seen = new Set();
   const files = [];
   const add = (id, category, name, relPath, h) => {
-    const setup = resolveModelSetup(id);
+    const setup = resolveModelSetup(m, id);
     files.push({
       id,
       category,
@@ -207,7 +214,7 @@ router.get("/", async (req, res) => {
       setup: setup ? { recipe: setup.recipe, components: { ...setup.models } } : null,
       isDefault: id === cfg.model,
       usedByDefault: Object.values(cfg.components || {}).includes(id),
-      fit: h?.size ? (h.size > gpuBytes() ? "nofit" : h.size > gpuBytes() - 1.5 * GiB ? "tight" : "fits") : "unknown",
+      fit: h?.size ? (h.size > gpuBytes(m) ? "nofit" : h.size > gpuBytes(m) - 1.5 * GiB ? "tight" : "fits") : "unknown",
     });
   };
   for (const f of catalog) {
@@ -221,10 +228,12 @@ router.get("/", async (req, res) => {
   files.sort((a, b) => (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === "model" ? -1 : 1));
 
   res.json({
+    machine: publicMachine(m),
+    configFile: `~/.llmui/${m.sdConfigFile}`,
     files,
     recipes: recipeSummaries(recipes),
     default: { model: cfg.model, recipe: cfg.recipe, components: cfg.components || {} },
-    gpuBytes: gpuBytes(),
+    gpuBytes: gpuBytes(m),
     sdError,
     helper,
   });
@@ -232,26 +241,27 @@ router.get("/", async (req, res) => {
 
 // ── Install / cancel / delete ───────────────────────────────────────────
 
-let refreshedJob = null;
+const refreshedJob = new Map(); // machine id → last completed job id we refreshed for
 
 router.post("/install", async (req, res) => {
+  const m = req.machine;
   const { repo, path: filePath, revision, category, recipe: recipeId } = req.body || {};
   if (typeof repo !== "string" || !REPO_RE.test(repo)) return res.status(400).json({ error: "invalid repo" });
   if (typeof filePath !== "string" || !filePath) return res.status(400).json({ error: "invalid path" });
   try {
     let recipe = null;
     if (recipeId) {
-      recipe = (await liveRecipes()).find((r) => r.id === recipeId);
+      recipe = (await liveRecipes(m)).find((r) => r.id === recipeId);
       if (!recipe) return res.status(400).json({ error: `sd-server has no recipe "${recipeId}"` });
       const slot = primarySlot(recipe);
       if (!(slot.categories || [slot.category]).includes(category)) {
         return res.status(400).json({ error: `${recipe.name} expects ${slot.categories.join("/")}/, not ${category}/` });
       }
     }
-    const job = await fetchHelper("/v1/downloads", { method: "POST", body: { repo, path: filePath, revision, category } });
+    const job = await fetchHelper(m, "/v1/downloads", { method: "POST", body: { repo, path: filePath, revision, category } });
     if (recipe) {
-      const cfg = getSdConfig();
-      await saveSdConfig({
+      const cfg = getSdConfig(m);
+      await saveSdConfig(m, {
         models: {
           ...cfg.models,
           [job.file_id]: {
@@ -264,7 +274,7 @@ router.post("/install", async (req, res) => {
         },
       });
     }
-    res.status(202).json(job);
+    res.status(202).json({ ...job, machine: m.id });
   } catch (err) {
     sendError(res, err);
   }
@@ -272,13 +282,14 @@ router.post("/install", async (req, res) => {
 
 router.get("/install/current", async (req, res) => {
   try {
-    const { job } = await fetchHelper("/v1/downloads/current");
+    const m = req.machine;
+    const { job } = await fetchHelper(m, "/v1/downloads/current");
     // Make sd-server see a finished download right away.
-    if (job?.state === "completed" && refreshedJob !== job.id) {
-      refreshedJob = job.id;
-      await refreshSdCatalog();
+    if (job?.state === "completed" && refreshedJob.get(m.id) !== job.id) {
+      refreshedJob.set(m.id, job.id);
+      await refreshSdCatalog(m);
     }
-    res.json({ job });
+    res.json({ job, machine: m.id });
   } catch (err) {
     sendError(res, err);
   }
@@ -287,7 +298,7 @@ router.get("/install/current", async (req, res) => {
 router.post("/install/:id/cancel", async (req, res) => {
   if (!/^[0-9a-f]{1,32}$/.test(req.params.id)) return res.status(400).json({ error: "invalid job id" });
   try {
-    res.json(await fetchHelper(`/v1/downloads/${req.params.id}/cancel`, { method: "POST", body: {} }));
+    res.json(await fetchHelper(req.machine, `/v1/downloads/${req.params.id}/cancel`, { method: "POST", body: {} }));
   } catch (err) {
     sendError(res, err);
   }
@@ -296,19 +307,20 @@ router.post("/install/:id/cancel", async (req, res) => {
 router.delete("/files/:category/:name", async (req, res) => {
   const { category, name } = req.params;
   const id = `${category}/${name}`;
-  const cfg = getSdConfig();
-  if (isImageJobActive()) return res.status(409).json({ error: "An image is being generated; try again when it finishes" });
+  const m = req.machine;
+  const cfg = getSdConfig(m);
+  if (isImageJobActive(m)) return res.status(409).json({ error: "An image is being generated; try again when it finishes" });
   if (id === cfg.model) return res.status(409).json({ error: "This is the default image model; make another model the default first" });
   if (Object.values(cfg.components || {}).includes(id)) {
     return res.status(409).json({ error: "The default image model uses this file; change the default first" });
   }
   try {
-    const result = await fetchHelper(`/v1/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const result = await fetchHelper(m, `/v1/files/${encodeURIComponent(category)}/${encodeURIComponent(name)}`, { method: "DELETE" });
     if (cfg.models?.[id]) {
       const { [id]: _, ...rest } = cfg.models;
-      await saveSdConfig({ models: rest });
+      await saveSdConfig(m, { models: rest });
     }
-    await refreshSdCatalog();
+    await refreshSdCatalog(m);
     res.json(result);
   } catch (err) {
     sendError(res, err);
@@ -322,13 +334,14 @@ router.put("/setup", async (req, res) => {
   if (typeof model !== "string" || typeof recipe !== "string") {
     return res.status(400).json({ error: "model and recipe are required" });
   }
+  const m = req.machine;
   try {
-    const [recipes, files] = await Promise.all([liveRecipes({ fresh: true }), liveFiles()]);
+    const [recipes, files] = await Promise.all([liveRecipes(m, { fresh: true }), liveFiles(m)]);
     const { error, setup } = validateSetup({ model, recipe, components: components || {} }, recipes, files);
     if (error) return res.status(400).json({ error });
     const r = recipes.find((x) => x.id === setup.recipe);
     const defaults = recipeDefaults(r);
-    const cfg = getSdConfig();
+    const cfg = getSdConfig(m);
     const patch = {
       models: { ...cfg.models, [model]: { ...cfg.models?.[model], ...setup, defaults } },
     };
@@ -345,7 +358,7 @@ router.put("/setup", async (req, res) => {
         ...(defaults.sampler ? { sampler: defaults.sampler } : {}),
       });
     }
-    await saveSdConfig(patch);
+    await saveSdConfig(m, patch);
     res.json({ ok: true, setup, defaults, isDefault: !!makeDefault });
   } catch (err) {
     sendError(res, err);

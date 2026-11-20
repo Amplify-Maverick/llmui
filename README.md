@@ -83,6 +83,17 @@ $env:OPENAI_BASE_URL="http://<host>:<port>/v1"
 npm run dev
 ```
 
+### Compute machines
+
+LLMUI knows two machines, defined in `server/backends.js`. Each runs a llama.cpp router, an sd-server and the sd-fetch helper (`deploy/sd-fetch`).
+
+| Machine | Router key | sd config | sd-fetch token |
+| --- | --- | --- | --- |
+| Jellyfin (default) | `LLAMA_API_KEY` in `~/.llmui/llama.env` | `~/.llmui/sd_config.json` | `~/.llmui/sd-fetch.token` |
+| Workstation | `~/.llmui/workstation-llama.key` | `~/.llmui/sd_config.workstation.json` | `~/.llmui/workstation-fetch.token` |
+
+Chat and images run on Jellyfin unless you select the Workstation on the System page. The choice is saved in `~/.llmui/machine.json`. Each machine is checked every 10 s. While the selected Workstation's router or sd-server is unreachable, those requests go to Jellyfin and the app shows a notice. Switching machines never loads or unloads a model. An image job still unloads chat models, but only on the machine it runs on. To override a machine's name or URLs, use `~/.llmui/machines.json`, e.g. `{"workstation": {"llamaUrl": "http://host:8081/v1"}}`. `OPENAI_BASE_URL` still sets Jellyfin's router.
+
 Or use the start script which checks port availability:
 ```powershell
 .\scripts\start.ps1

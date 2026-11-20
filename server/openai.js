@@ -8,14 +8,54 @@
  * - `streamOpenAITurn`: one model turn for the server-side tool loop, parsing
  *   SSE and accumulating streamed tool-call deltas.
  *
- * Upstream base URL comes from OPENAI_BASE_URL (must include the /v1 suffix).
- * Every upstream request carries the LLAMA_API_KEY bearer (see llama.js).
+ * Requests go to the machine chat is routed to (req.machine, set by chatGate
+ * or resolveMachine("chat"); see server/backends.js). Every upstream request
+ * carries that machine's API key (see llama.js).
  */
 
 import express from "express";
 import { OPENAI_BASE_URL, llamaHeaders, upstreamError } from "./llama.js";
+import {
+  defaultMachine,
+  resolveMachine,
+  markServiceDown,
+  isConnectError,
+  networkErrorText,
+} from "./backends.js";
+import { isImageJobActive, trackChat, imageBusyBody, IMAGE_BUSY_MESSAGE } from "./sd.js";
 
 export { OPENAI_BASE_URL };
+
+// ------------------------------------------------------------
+// Upstream fetch with fallback to the default machine
+// ------------------------------------------------------------
+
+const openaiRequest = (machine, upstreamPath, init) =>
+  fetch(`${machine.openaiUrl}${upstreamPath}`, { ...init, headers: llamaHeaders(machine, init.headers) });
+
+/**
+ * fetch() a path under a machine's /v1. If the machine isn't the default and
+ * can't be reached at all (no response), its router is marked down and the
+ * request is retried on the default machine, unless an image job holds that
+ * GPU (then it throws with status 409). `res`, if given, is counted as an
+ * in-flight chat on the fallback machine. Returns { response, machine }.
+ */
+export async function openaiFetch(machine, upstreamPath, init = {}, { res } = {}) {
+  try {
+    return { response: await openaiRequest(machine, upstreamPath, init), machine };
+  } catch (err) {
+    if (machine.isDefault || !isConnectError(err)) throw err;
+    const reason = networkErrorText(err);
+    markServiceDown(machine, "chat", reason);
+    const fallback = defaultMachine();
+    console.warn(`${machine.name} router unreachable (${reason}); retrying on ${fallback.name}`);
+    if (isImageJobActive(fallback)) {
+      throw Object.assign(new Error(IMAGE_BUSY_MESSAGE), { status: 409 });
+    }
+    if (res) trackChat(fallback, res);
+    return { response: await openaiRequest(fallback, upstreamPath, init), machine: fallback };
+  }
+}
 
 // ------------------------------------------------------------
 // SSE parsing
@@ -89,15 +129,18 @@ async function forward(req, res, upstreamPath, init = {}) {
   res.on("close", () => {
     if (!res.writableFinished) controller.abort();
   });
+  const target = req.machine || resolveMachine("chat").machine;
 
   try {
-    const response = await fetch(`${OPENAI_BASE_URL}${upstreamPath}`, {
-      ...init,
-      headers: llamaHeaders(init.headers),
-      signal: controller.signal,
-    });
+    const { response, machine } = await openaiFetch(
+      target,
+      upstreamPath,
+      { ...init, signal: controller.signal },
+      { res }
+    );
 
     res.status(response.status);
+    res.setHeader("X-LLMUI-Machine", machine.id);
     const contentType = response.headers.get("content-type");
     if (contentType) res.setHeader("Content-Type", contentType);
     if (contentType?.includes("text/event-stream")) {
@@ -115,10 +158,13 @@ async function forward(req, res, upstreamPath, init = {}) {
       if (!res.writableEnded) res.end();
       return;
     }
-    console.error(`Error proxying ${upstreamPath} to OpenAI-compatible server:`, err.message);
+    if (err.status === 409 && !res.headersSent) {
+      return res.status(409).json(imageBusyBody("openai"));
+    }
+    console.error(`Error proxying ${upstreamPath} to ${target.name}'s model server:`, err.message);
     if (!res.headersSent) {
       res.status(502).json({
-        error: { message: "Failed to connect to OpenAI-compatible server" },
+        error: { message: `Failed to connect to ${target.name}'s model server` },
       });
     } else if (!res.writableEnded) {
       res.end();
@@ -148,12 +194,16 @@ openaiRouter.post("/chat/completions", (req, res) =>
 /**
  * Run one streamed chat turn against the OpenAI-compatible server.
  * Calls onContent(text) for each content delta as it arrives.
- * Returns { content, toolCalls, timings } with tool calls in OpenAI format
+ * `machine` is where to send it (falls back like openaiFetch; `res` is the
+ * client response, counted as in flight on a fallback machine).
+ * Returns { content, toolCalls, timings, machine } with tool calls in OpenAI format
  * ({ id, type, function: { name, arguments: string } }) and llama.cpp's
  * server-measured `timings` (null if the server doesn't send them).
  * Throws an Error with the upstream message on a non-2xx response.
  */
 export async function streamOpenAITurn({
+  machine,
+  res,
   model,
   messages,
   tools,
@@ -172,12 +222,17 @@ export async function streamOpenAITurn({
   if (modelOptions.temperature != null) body.temperature = modelOptions.temperature;
   if (modelOptions.num_predict != null) body.max_tokens = modelOptions.num_predict;
 
-  const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: llamaHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
-    body: JSON.stringify(body),
-    signal,
-  });
+  const { response, machine: usedMachine } = await openaiFetch(
+    machine,
+    "/chat/completions",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body),
+      signal,
+    },
+    { res }
+  );
   if (!response.ok) {
     throw new Error(await upstreamError(response));
   }
@@ -217,7 +272,7 @@ export async function streamOpenAITurn({
     }
   }
 
-  return { content, toolCalls: calls.filter(Boolean), timings };
+  return { content, toolCalls: calls.filter(Boolean), timings, machine: usedMachine };
 }
 
 /**

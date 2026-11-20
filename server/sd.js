@@ -1,27 +1,30 @@
 /**
- * stable-diffusion.cpp sd-server client, and the GPU lock shared with chat.
+ * stable-diffusion.cpp sd-server clients (one per machine, server/backends.js),
+ * and the per-machine GPU lock shared with chat.
  *
  * The browser never talks to sd-server directly; everything goes through the
  * authenticated /api/images router (server/api/images.js).
  *
- * Config: ~/.llmui/sd_config.json, created with defaults on first start.
+ * Config: one file per machine (the default machine keeps
+ * ~/.llmui/sd_config.json; others use sd_config.<id>.json), created with
+ * defaults on first start. Model setups name files on that machine, so each
+ * machine has its own.
  *
- * The GPU (8 GB) can't hold a chat model and an SD model at once, so an image
- * job owns it: chat models are unloaded first, chat requests get 409 while the
- * job runs, and the SD model is unloaded again when the job ends.
+ * A machine's GPU (8 GB) can't hold a chat model and an SD model at once, so an
+ * image job owns that machine's GPU: its chat models are unloaded first, chat
+ * requests to that machine get 409 while the job runs, and the SD model is
+ * unloaded again when the job ends. Other machines are not touched.
  */
 
 import fs from "fs/promises";
-import os from "os";
 import path from "path";
 import { llamaFetch } from "./llama.js";
-
-const CONFIG_FILE = path.join(os.homedir(), ".llmui", "sd_config.json");
+import { listMachines, resolveMachine, defaultMachine } from "./backends.js";
 
 export const DEFAULT_SD_CONFIG = {
   url: "http://100.118.190.15:8082",
   // sd-fetch download helper on the sd-server host (deploy/sd-fetch). Its
-  // bearer token is read from ~/.llmui/sd-fetch.token, never from here.
+  // bearer token is read from the machine's token file, never from here.
   fetchUrl: "http://100.118.190.15:8083",
   // VRAM of the GPU sd-server runs on, for the "too big" marks.
   gpuMemoryGiB: 8,
@@ -39,47 +42,68 @@ export const DEFAULT_SD_CONFIG = {
   models: {},
 };
 
-let config = { ...DEFAULT_SD_CONFIG };
+/** Defaults for one machine: its URLs and VRAM. */
+export const machineDefaults = (machine) => ({
+  ...DEFAULT_SD_CONFIG,
+  url: machine.sdUrl,
+  fetchUrl: machine.fetchUrl,
+  gpuMemoryGiB: machine.gpuMemoryGiB,
+});
 
-/** Load ~/.llmui/sd_config.json, writing the defaults if it doesn't exist. */
-export async function loadSdConfig() {
+const configs = new Map(); // machine id → config
+
+async function loadOne(machine) {
+  const file = machine.sdConfigPath;
+  const defaults = machineDefaults(machine);
+  let config = { ...defaults };
   try {
-    config = { ...DEFAULT_SD_CONFIG, ...JSON.parse(await fs.readFile(CONFIG_FILE, "utf-8")) };
+    config = { ...defaults, ...JSON.parse(await fs.readFile(file, "utf-8")) };
   } catch (err) {
     if (err.code !== "ENOENT") {
-      console.error(`Error reading ${CONFIG_FILE} (using defaults):`, err.message);
-      return config;
+      console.error(`Error reading ${file} (using defaults):`, err.message);
+    } else {
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, JSON.stringify(defaults, null, 2) + "\n");
+      console.log(`Created ${file}`);
     }
-    await fs.mkdir(path.dirname(CONFIG_FILE), { recursive: true });
-    await fs.writeFile(CONFIG_FILE, JSON.stringify(DEFAULT_SD_CONFIG, null, 2) + "\n");
-    console.log(`Created ${CONFIG_FILE}`);
   }
   config.url = String(config.url).replace(/\/+$/, "");
+  configs.set(machine.id, config);
   return config;
 }
 
-export const getSdConfig = () => config;
+/** Load every machine's sd config, writing defaults for any that don't exist. */
+export async function loadSdConfig() {
+  for (const m of listMachines()) await loadOne(m);
+  return configs.get(defaultMachine().id);
+}
 
-let writeChain = Promise.resolve();
+export const getSdConfig = (machine) => configs.get(machine.id) || machineDefaults(machine);
 
-/** Merge `patch` into sd_config.json (atomic write; writes are serialized). */
-export function saveSdConfig(patch) {
-  config = { ...config, ...patch };
+const writeChains = new Map(); // machine id → Promise
+
+/** Merge `patch` into a machine's sd config file (atomic write; writes are serialized per file). */
+export function saveSdConfig(machine, patch) {
+  const config = { ...getSdConfig(machine), ...patch };
+  configs.set(machine.id, config);
   const snapshot = JSON.stringify(config, null, 2) + "\n";
-  writeChain = writeChain.then(async () => {
-    const tmp = `${CONFIG_FILE}.${process.pid}.tmp`;
+  const file = machine.sdConfigPath;
+  const chain = (writeChains.get(machine.id) || Promise.resolve()).then(async () => {
+    const tmp = `${file}.${process.pid}.tmp`;
     await fs.writeFile(tmp, snapshot, { mode: 0o600 });
-    await fs.rename(tmp, CONFIG_FILE);
+    await fs.rename(tmp, file);
   });
-  return writeChain.then(() => config);
+  writeChains.set(machine.id, chain.catch(() => {}));
+  return chain.then(() => config);
 }
 
 /**
- * How to load a model file: { recipe, models: { slot: fileId, ... } }, or
- * null if it has no saved setup. The default model's setup lives in the
+ * How to load a model file on a machine: { recipe, models: { slot: fileId, ... } },
+ * or null if it has no saved setup. The default model's setup lives in the
  * top-level recipe/components keys.
  */
-export function resolveModelSetup(fileId) {
+export function resolveModelSetup(machine, fileId) {
+  const config = getSdConfig(machine);
   const entry = config.models?.[fileId];
   if (entry?.recipe) {
     return { recipe: entry.recipe, models: { ...(entry.components || {}), [entry.slot || "model"]: fileId } };
@@ -91,45 +115,57 @@ export function resolveModelSetup(fileId) {
 }
 
 // ------------------------------------------------------------
-// GPU lock
+// GPU lock (per machine)
 // ------------------------------------------------------------
 
-let imageJob = null; // { started } while an image job owns the GPU
-let chatsInFlight = 0;
+const imageJobs = new Map(); // machine id → { started } while an image job owns that GPU
+const chatsInFlight = new Map(); // machine id → count
 
 export const IMAGE_BUSY_MESSAGE = "image generation in progress";
-export const isImageJobActive = () => imageJob !== null;
+export const isImageJobActive = (machine) => imageJobs.has(machine.id);
+
+export function imageBusyBody(shape) {
+  return shape === "openai"
+    ? { error: { message: IMAGE_BUSY_MESSAGE, code: "image_generation_in_progress", type: "conflict" } }
+    : { error: IMAGE_BUSY_MESSAGE, code: "image_generation_in_progress" };
+}
+
+/** Count a chat request as in flight on `machine` until `res` closes. */
+export function trackChat(machine, res) {
+  chatsInFlight.set(machine.id, (chatsInFlight.get(machine.id) || 0) + 1);
+  res.on("close", () => chatsInFlight.set(machine.id, chatsInFlight.get(machine.id) - 1));
+}
 
 /**
  * Express middleware for routes that use (and may autoload) a chat model.
- * Rejects with 409 during an image job; otherwise counts the request as in
- * flight until its response closes, so an image job won't start under it.
+ * Sets req.machine to the machine chat goes to. Rejects with 409 while an
+ * image job runs on that machine; otherwise counts the request as in flight
+ * until its response closes, so an image job won't start under it.
  * `shape` picks the error body the route's clients parse.
  */
 export function chatGate(shape = "string") {
   return (req, res, next) => {
-    if (imageJob) {
-      const body = shape === "openai"
-        ? { error: { message: IMAGE_BUSY_MESSAGE, code: "image_generation_in_progress", type: "conflict" } }
-        : { error: IMAGE_BUSY_MESSAGE, code: "image_generation_in_progress" };
-      return res.status(409).json(body);
+    if (!req.machine) {
+      const { machine, fallback } = resolveMachine("chat");
+      req.machine = machine;
+      req.machineFallback = fallback;
     }
-    chatsInFlight++;
-    res.on("close", () => chatsInFlight--);
+    if (isImageJobActive(req.machine)) return res.status(409).json(imageBusyBody(shape));
+    trackChat(req.machine, res);
     next();
   };
 }
 
-/** Take the GPU for an image job. Returns null, or the reason it can't. */
-export function acquireImageLock() {
-  if (imageJob) return IMAGE_BUSY_MESSAGE;
-  if (chatsInFlight > 0) return "a chat response is still streaming; try again when it finishes";
-  imageJob = { started: Date.now() };
+/** Take a machine's GPU for an image job. Returns null, or the reason it can't. */
+export function acquireImageLock(machine) {
+  if (imageJobs.has(machine.id)) return IMAGE_BUSY_MESSAGE;
+  if ((chatsInFlight.get(machine.id) || 0) > 0) return "a chat response is still streaming; try again when it finishes";
+  imageJobs.set(machine.id, { started: Date.now() });
   return null;
 }
 
-export function releaseImageLock() {
-  imageJob = null;
+export function releaseImageLock(machine) {
+  imageJobs.delete(machine.id);
 }
 
 // ------------------------------------------------------------
@@ -160,17 +196,18 @@ async function errorText(response) {
 }
 
 /** fetch() against sd-server, returning parsed JSON or throwing SdError with its error text. */
-export async function sdFetch(p, { method = "GET", body, timeout = 30000, signal } = {}) {
+export async function sdFetch(machine, p, { method = "GET", body, timeout = 30000, signal } = {}) {
+  const { url } = getSdConfig(machine);
   let response;
   try {
-    response = await fetch(`${config.url}${p}`, {
+    response = await fetch(`${url}${p}`, {
       method,
       headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
     });
   } catch (err) {
-    throw new SdError(`sd-server unreachable (${config.url}): ${err.message}`);
+    throw new SdError(`${machine.name} sd-server unreachable (${url}): ${err.cause?.code || err.message}`, { code: "unreachable" });
   }
   if (!response.ok) {
     const { message, code } = await errorText(response);
@@ -184,8 +221,8 @@ export async function sdFetch(p, { method = "GET", body, timeout = 30000, signal
 // ------------------------------------------------------------
 
 /** Router models whose status isn't "unloaded": loaded, loading, sleeping, ... */
-async function residentChatModels() {
-  const response = await llamaFetch("/models", { signal: AbortSignal.timeout(10000) });
+async function residentChatModels(machine) {
+  const response = await llamaFetch(machine, "/models", { signal: AbortSignal.timeout(10000) });
   if (!response.ok) {
     const { message } = await errorText(response);
     throw new SdError(`Model router GET /models → ${response.status}: ${message}`);
@@ -200,10 +237,10 @@ async function residentChatModels() {
  * Unload every chat model on the router and wait until GET /models shows none
  * resident. onWait(models) is called on each poll that still sees some.
  */
-export async function unloadChatModels({ timeoutMs = 90000, onWait } = {}) {
+export async function unloadChatModels(machine, { timeoutMs = 90000, onWait } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const resident = await residentChatModels();
+    const resident = await residentChatModels(machine);
     if (resident.length === 0) return;
     if (Date.now() > deadline) {
       throw new SdError(
@@ -216,7 +253,7 @@ export async function unloadChatModels({ timeoutMs = 90000, onWait } = {}) {
       // Re-sent on every poll until it's gone: a model that was still
       // loading may ignore the first request.
       if (m.status === "unloading") continue;
-      const r = await llamaFetch("/models/unload", {
+      const r = await llamaFetch(machine, "/models/unload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: m.id }),
@@ -235,26 +272,26 @@ export async function unloadChatModels({ timeoutMs = 90000, onWait } = {}) {
 // ------------------------------------------------------------
 
 /** Rescan sd-server's model dir (new or deleted files). Best-effort. */
-export async function refreshSdCatalog() {
+export async function refreshSdCatalog(machine) {
   try {
-    await sdFetch("/sdcpp/v1/models/refresh", { method: "POST", body: {}, timeout: 30000 });
+    await sdFetch(machine, "/sdcpp/v1/models/refresh", { method: "POST", body: {}, timeout: 30000 });
     return true;
   } catch (err) {
-    console.warn("sd-server catalog refresh failed:", err.message);
+    console.warn(`${machine.name} sd-server catalog refresh failed:`, err.message);
     return false;
   }
 }
 
-export function sdStatus() {
-  return sdFetch("/sdcpp/v1/models/status", { timeout: 10000 });
+export function sdStatus(machine, { timeout = 10000 } = {}) {
+  return sdFetch(machine, "/sdcpp/v1/models/status", { timeout });
 }
 
 /**
  * Load a model setup ({ recipe, models: { slot: fileId } }, see
  * resolveModelSetup). Waits for completion, as sd-server does.
  */
-export async function loadSdModel({ recipe, models, signal }) {
-  const status = await sdFetch("/sdcpp/v1/models/load", {
+export async function loadSdModel(machine, { recipe, models, signal }) {
+  const status = await sdFetch(machine, "/sdcpp/v1/models/load", {
     method: "POST",
     body: { recipe, models },
     timeout: 10 * 60 * 1000,
@@ -267,11 +304,11 @@ export async function loadSdModel({ recipe, models, signal }) {
 }
 
 /** Unload the SD model, retrying while sd-server says it's busy (jobs still finishing). */
-export async function unloadSdModel({ timeoutMs = 120000 } = {}) {
+export async function unloadSdModel(machine, { timeoutMs = 120000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      return await sdFetch("/sdcpp/v1/models/unload", { method: "POST", body: {}, timeout: 60000 });
+      return await sdFetch(machine, "/sdcpp/v1/models/unload", { method: "POST", body: {}, timeout: 60000 });
     } catch (err) {
       const busy = err.status === 409 || err.code === "model_busy" || err.code === "model_loading";
       if (!busy || Date.now() > deadline) throw err;
@@ -294,7 +331,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
  * onProgress({ stage, step, totalSteps, value }) — value is overall 0..1 when known.
  * signal aborts the job (cancelling it on sd-server and waiting for it to stop).
  */
-export async function txt2img(p, { onProgress, signal } = {}) {
+export async function txt2img(machine, p, { onProgress, signal } = {}) {
   const body = {
     prompt: p.prompt,
     negative_prompt: p.negativePrompt || "",
@@ -313,11 +350,11 @@ export async function txt2img(p, { onProgress, signal } = {}) {
 
   let submitted;
   try {
-    submitted = await sdFetch("/sdcpp/v1/img_gen", { method: "POST", body, timeout: 30000 });
+    submitted = await sdFetch(machine, "/sdcpp/v1/img_gen", { method: "POST", body, timeout: 30000 });
   } catch (err) {
     if (err.status === 404 || err.status === 405 || err.status === 501) {
       console.warn(`Native img_gen unavailable (${err.message}); falling back to /sdapi/v1/txt2img`);
-      return txt2imgSdapi(p, { onProgress, signal });
+      return txt2imgSdapi(machine, p, { onProgress, signal });
     }
     throw err;
   }
@@ -327,10 +364,10 @@ export async function txt2img(p, { onProgress, signal } = {}) {
   for (;;) {
     if (signal?.aborted && !cancelSent) {
       cancelSent = true;
-      await sdFetch(`/sdcpp/v1/jobs/${encodeURIComponent(submitted.id)}/cancel`, { method: "POST", body: {} })
+      await sdFetch(machine, `/sdcpp/v1/jobs/${encodeURIComponent(submitted.id)}/cancel`, { method: "POST", body: {} })
         .catch((err) => console.warn("sd-server cancel failed:", err.message));
     }
-    const job = await sdFetch(jobPath, { timeout: 15000 });
+    const job = await sdFetch(machine, jobPath, { timeout: 15000 });
     if (TERMINAL.has(job.status)) {
       if (job.status === "completed") {
         const items = job.result?.images || [];
@@ -359,7 +396,7 @@ export async function txt2img(p, { onProgress, signal } = {}) {
   }
 }
 
-async function txt2imgSdapi(p, { onProgress, signal } = {}) {
+async function txt2imgSdapi(machine, p, { onProgress, signal } = {}) {
   const idTask = `llmui-${Date.now()}`;
   let done = false;
   const poll = (async () => {
@@ -367,7 +404,7 @@ async function txt2imgSdapi(p, { onProgress, signal } = {}) {
       await sleep(700);
       if (done) break;
       try {
-        const pr = await sdFetch(`/sdapi/v1/progress?id_task=${idTask}&skip_current_image=true`, { timeout: 5000 });
+        const pr = await sdFetch(machine, `/sdapi/v1/progress?id_task=${idTask}&skip_current_image=true`, { timeout: 5000 });
         const st = pr.state || {};
         onProgress?.({
           stage: st.sampling_steps ? "sampling" : "working",
@@ -381,7 +418,7 @@ async function txt2imgSdapi(p, { onProgress, signal } = {}) {
     }
   })();
   try {
-    const res = await sdFetch("/sdapi/v1/txt2img", {
+    const res = await sdFetch(machine, "/sdapi/v1/txt2img", {
       method: "POST",
       body: {
         prompt: p.prompt,
