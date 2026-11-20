@@ -23,8 +23,9 @@ import searchRouter from "./api/search.js";
 import backupRouter from "./api/backup.js";
 import exportRouter from "./api/export.js";
 import setupRouter from "./api/setup.js";
-import comfyuiRouter from "./api/comfyui.js";
+import imagesRouter from "./api/images.js";
 import llamaRouter from "./api/llama.js";
+import { loadSdConfig, chatGate } from "./sd.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +43,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const DIST_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const DIST_INDEX = path.join(DIST_DIR, "index.html");
 // Path prefixes owned by the backend. Never answered with index.html.
-const BACKEND_PREFIXES = ["/api", "/openai", "/comfyui", "/storage", "/auth", "/health"];
+const BACKEND_PREFIXES = ["/api", "/openai", "/storage", "/auth", "/health"];
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
@@ -50,7 +51,6 @@ const TOKEN_FILE = path.join(STORAGE_DIR, "token");
 const GPU_CONFIG_FILE = path.join(STORAGE_DIR, "gpu_config.json");
 // Pre-OpenAI-migration installs kept remoteGpuUrl in this file; read it once as a fallback.
 const LEGACY_OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
-const COMFYUI_CONFIG_FILE = path.join(STORAGE_DIR, "comfyui_config.json");
 
 let authToken = null;
 
@@ -73,38 +73,6 @@ async function loadGpuConfig() {
 async function saveGpuConfig() {
   await ensureStorageDir();
   await fs.writeFile(GPU_CONFIG_FILE, JSON.stringify({ remoteGpuUrl }, null, 2));
-}
-
-// Default ComfyUI URL, overridable by env var or persisted config
-const DEFAULT_COMFYUI_URL = "http://localhost:8188";
-let comfyuiUrl = process.env.COMFYUI_URL || DEFAULT_COMFYUI_URL;
-let comfyModelsPath = "";
-
-async function loadComfyuiConfig() {
-  try {
-    const data = await fs.readFile(COMFYUI_CONFIG_FILE, "utf-8");
-    const config = JSON.parse(data);
-    if (config.comfyuiUrl) {
-      comfyuiUrl = config.comfyuiUrl;
-    }
-    if (config.comfyModelsPath) {
-      comfyModelsPath = config.comfyModelsPath;
-    }
-  } catch (err) {
-    if (err.code !== "ENOENT") {
-      console.error("Error loading ComfyUI config:", err);
-    }
-  }
-}
-
-async function saveComfyuiConfig(url, modelsPathOverride) {
-  await ensureStorageDir();
-  if (typeof url === "string") comfyuiUrl = url;
-  if (typeof modelsPathOverride === "string") comfyModelsPath = modelsPathOverride;
-  await fs.writeFile(
-    COMFYUI_CONFIG_FILE,
-    JSON.stringify({ comfyuiUrl, comfyModelsPath }, null, 2)
-  );
 }
 
 async function getOrCreateToken() {
@@ -365,7 +333,7 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
 //    instead of the tool result being logged/processed
 const MAX_TOOL_ITERATIONS = 5;
 
-app.post("/api/chat-with-tools", requireAuth, async (req, res) => {
+app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
   const {
     model,
     messages,
@@ -818,7 +786,11 @@ app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
 app.use("/api/export", requireAuth, exportRouter);
-app.use("/comfyui", requireAuth, comfyuiRouter);
+app.use("/api/images", requireAuth, imagesRouter);
+// Routes that use (or would autoload) a chat model get 409 while an image job
+// owns the GPU; see chatGate in server/sd.js.
+app.post("/openai/v1/chat/completions", requireAuth, chatGate("openai"));
+app.post("/api/llama/models/load", requireAuth, chatGate());
 // OpenAI-compatible model server (llama.cpp etc.) — the only model source.
 // Authenticated streaming passthrough; the browser never talks to it directly.
 app.use("/openai/v1", requireAuth, openaiRouter);
@@ -848,12 +820,7 @@ await ensureStorageDir();
 await getOrCreateToken();
 await loadGpuConfig();
 
-await loadComfyuiConfig();
-
-// Make ComfyUI URL and models path available to the router via app.set
-app.set("comfyuiUrl", comfyuiUrl);
-app.set("comfyModelsPath", comfyModelsPath);
-app.set("saveComfyuiConfig", saveComfyuiConfig);
+await loadSdConfig();
 
 // Initialize database and run migration if needed
 console.log("Initializing database...");

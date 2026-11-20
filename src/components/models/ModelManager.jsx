@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { useModelsStore } from "../../stores/modelsStore.js";
-import { useSettingsStore } from "../../stores/settingsStore.js";
 import { useImageStore } from "../../stores/imageStore.js";
 import TextModelManager from "./TextModelManager.jsx";
-import CivitaiModelBrowser from "./CivitaiModelBrowser.jsx";
 import Button from "../shared/Button.jsx";
 import "./ModelManager.css";
 
@@ -12,16 +10,13 @@ export default function ModelManager() {
 
   const {
     checkpoints,
-    loras,
-    isConnected: comfyConnected,
+    serverUrl,
+    connectionError,
+    isConnected: sdConnected,
     fetchAll: fetchImageModels,
-    checkConnection: checkComfyConnection,
   } = useImageStore();
 
-  const { comfyModelsPath } = useSettingsStore();
-
   const [subTab, setSubTab] = useState("text"); // "text" | "image"
-  const [showCivitaiBrowser, setShowCivitaiBrowser] = useState(false);
 
   // Fetch image models when switching to image sub-tab
   useEffect(() => {
@@ -46,7 +41,7 @@ export default function ModelManager() {
               className={`model-subtab ${subTab === "image" ? "active" : ""}`}
               onClick={() => setSubTab("image")}
             >
-              Image (ComfyUI)
+              Image (sd-server)
             </button>
           </div>
         </div>
@@ -62,9 +57,6 @@ export default function ModelManager() {
             <>
               <Button variant="ghost" onClick={fetchImageModels}>
                 Refresh
-              </Button>
-              <Button onClick={() => setShowCivitaiBrowser(true)}>
-                Download Model
               </Button>
             </>
           )}
@@ -83,19 +75,18 @@ export default function ModelManager() {
       {/* ── Text Models (llama.cpp router) ────────── */}
       {subTab === "text" && <TextModelManager />}
 
-      {/* ── Image Models (ComfyUI) ───────────────────────────── */}
+      {/* ── Image Models (stable-diffusion.cpp sd-server) ───── */}
       {subTab === "image" && (
         <>
-          {!comfyConnected ? (
+          {!sdConnected ? (
             <div className="model-manager-empty">
-              <h3>ComfyUI Not Connected</h3>
+              <h3>sd-server Not Reachable</h3>
               <p>
-                Configure the ComfyUI URL in Settings to manage image generation
-                models.
+                {connectionError || "Check the url in ~/.llmui/sd_config.json on the LLMUI server."}
               </p>
               <Button
                 variant="secondary"
-                onClick={checkComfyConnection}
+                onClick={fetchImageModels}
                 style={{ marginTop: 12 }}
               >
                 Retry Connection
@@ -103,7 +94,6 @@ export default function ModelManager() {
             </div>
           ) : (
             <div className="image-models-sections">
-              {/* Checkpoints */}
               <div className="image-models-section">
                 <h3 className="image-models-section-title">
                   Checkpoints
@@ -111,8 +101,8 @@ export default function ModelManager() {
                 </h3>
                 {checkpoints.length === 0 ? (
                   <p className="image-models-none">
-                    No checkpoints found. Place .safetensors files in your ComfyUI
-                    models/checkpoints directory.
+                    No checkpoints found. Place .safetensors or .gguf files in
+                    checkpoints/ under sd-server's --model-dir.
                   </p>
                 ) : (
                   <div className="image-models-list">
@@ -124,44 +114,15 @@ export default function ModelManager() {
                     ))}
                   </div>
                 )}
-              </div>
-
-              {/* LoRAs */}
-              <div className="image-models-section">
-                <h3 className="image-models-section-title">
-                  LoRAs
-                  <span className="image-models-count">{loras.length}</span>
-                </h3>
-                {loras.length === 0 ? (
-                  <p className="image-models-none">
-                    No LoRAs found. Place .safetensors files in your ComfyUI
-                    models/loras directory.
-                  </p>
-                ) : (
-                  <div className="image-models-list">
-                    {loras.map((name) => (
-                      <div key={name} className="image-model-item">
-                        <div className="image-model-icon">🎨</div>
-                        <div className="image-model-name">{name}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <p className="image-models-none">
+                  Served by {serverUrl || "sd-server"}. The SD model is loaded only for
+                  the length of each image job, after chat models are unloaded.
+                </p>
               </div>
             </div>
           )}
         </>
       )}
-
-      <CivitaiModelBrowser
-        isOpen={showCivitaiBrowser}
-        onClose={() => {
-          setShowCivitaiBrowser(false);
-          // Refresh image models after closing browser (in case new models were downloaded)
-          if (comfyConnected) fetchImageModels();
-        }}
-        modelsPath={comfyModelsPath}
-      />
     </div>
   );
 }

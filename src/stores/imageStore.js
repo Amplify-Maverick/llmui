@@ -1,14 +1,15 @@
 import { create } from "zustand";
-import { comfyApi } from "../services/comfyApi.js";
+import { imageApi } from "../services/imageApi.js";
 
 export const useImageStore = create((set, get) => ({
   // Connection
   isConnected: false,
   connectionError: null,
 
-  // Available models/options from ComfyUI
+  serverUrl: null,
+
+  // Available models/options from sd-server
   checkpoints: [],
-  loras: [],
   samplers: [],
   schedulers: [],
 
@@ -17,6 +18,9 @@ export const useImageStore = create((set, get) => ({
   progress: 0,
   progressStep: 0,
   progressTotalSteps: 0,
+  stage: null, // freeing_gpu | loading_model | queued | sampling | vae_decode | ...
+  stageMessage: "",
+  lastTimings: null, // { totalMs, generateMs } of the last finished job
   currentGenerationId: null,
   currentImages: [], // { id, generationId }
   error: null,
@@ -30,8 +34,8 @@ export const useImageStore = create((set, get) => ({
     height: 512,
     steps: 20,
     cfgScale: 7,
-    sampler: "euler",
-    scheduler: "normal",
+    sampler: "euler_a",
+    scheduler: "",
     seed: -1,
     batchCount: 1,
   },
@@ -45,60 +49,47 @@ export const useImageStore = create((set, get) => ({
 
   // Abort handle
   _abortHandle: null,
+  _defaultsApplied: false,
 
   // ── Actions ──────────────────────────────────────────────────────────
 
   checkConnection: async () => {
-    try {
-      const ok = await comfyApi.checkConnection();
-      set({ isConnected: ok, connectionError: ok ? null : "ComfyUI not reachable" });
-      return ok;
-    } catch (err) {
-      set({ isConnected: false, connectionError: err.message });
-      return false;
-    }
+    const status = await imageApi.status();
+    set({
+      isConnected: !!status.ok,
+      serverUrl: status.url || null,
+      connectionError: status.ok ? null : status.error || "sd-server not reachable",
+    });
+    return !!status.ok;
   },
 
-  fetchCheckpoints: async () => {
+  fetchOptions: async () => {
     try {
-      const models = await comfyApi.listCheckpoints();
+      const opts = await imageApi.options();
       set((state) => {
-        const update = { checkpoints: models };
-        // Auto-select first checkpoint if none selected
-        if (!state.params.checkpoint && models.length > 0) {
-          update.params = { ...state.params, checkpoint: models[0] };
+        const update = {
+          checkpoints: opts.checkpoints || [],
+          samplers: opts.samplers || [],
+          schedulers: opts.schedulers || [],
+        };
+        // First load: take the defaults from ~/.llmui/sd_config.json
+        if (!state._defaultsApplied && opts.defaults) {
+          update.params = { ...state.params, ...opts.defaults };
+          update._defaultsApplied = true;
+        } else if (!state.params.checkpoint && update.checkpoints.length > 0) {
+          update.params = { ...state.params, checkpoint: update.checkpoints[0] };
         }
         return update;
       });
     } catch (err) {
-      console.error("Failed to fetch checkpoints:", err);
-    }
-  },
-
-  fetchLoras: async () => {
-    try {
-      const models = await comfyApi.listLoras();
-      set({ loras: models });
-    } catch (err) {
-      console.error("Failed to fetch LoRAs:", err);
-    }
-  },
-
-  fetchSamplers: async () => {
-    try {
-      const data = await comfyApi.listSamplers();
-      set({ samplers: data.samplers || [], schedulers: data.schedulers || [] });
-    } catch (err) {
-      console.error("Failed to fetch samplers:", err);
+      console.error("Failed to fetch image options:", err);
+      set({ connectionError: err.message });
     }
   },
 
   fetchAll: async () => {
-    const { checkConnection, fetchCheckpoints, fetchLoras, fetchSamplers } = get();
-    const ok = await checkConnection();
-    if (ok) {
-      await Promise.all([fetchCheckpoints(), fetchLoras(), fetchSamplers()]);
-    }
+    const { checkConnection, fetchOptions } = get();
+    if (await checkConnection()) await fetchOptions();
   },
 
   updateParam: (key, value) => {
@@ -132,28 +123,35 @@ export const useImageStore = create((set, get) => ({
       progress: 0,
       progressStep: 0,
       progressTotalSteps: 0,
+      stage: "starting",
+      stageMessage: "Starting…",
       currentGenerationId: null,
       currentImages: [],
+      selectedGeneration: null,
       error: null,
     });
 
     try {
-      const handle = await comfyApi.txt2img(params, (event) => {
+      const handle = await imageApi.txt2img(params, (event) => {
         switch (event.type) {
-          case "queued":
-            // Generation queued
+          case "stage":
+            set({ stage: event.stage, stageMessage: event.message || "" });
             break;
           case "progress":
-            set({
-              progress: event.value,
+            set((state) => ({
+              stage: event.stage,
+              stageMessage: "",
+              progress: event.value ?? state.progress,
               progressStep: event.step,
               progressTotalSteps: event.totalSteps,
-            });
+            }));
             break;
           case "complete":
             set({
               isGenerating: false,
               progress: 1,
+              stage: null,
+              lastTimings: event.timings ? { ...event.timings, generationId: event.generationId } : null,
               currentGenerationId: event.generationId,
               currentImages: event.imageIds.map((id) => ({
                 id,
@@ -161,6 +159,10 @@ export const useImageStore = create((set, get) => ({
               })),
               _abortHandle: null,
             });
+            // Show its seed/steps/size without overwriting the form (seed stays -1).
+            imageApi.getGeneration(event.generationId)
+              .then((gen) => set({ selectedGeneration: gen }))
+              .catch(() => {});
             // Refresh history
             get().loadHistory();
             break;
@@ -169,6 +171,7 @@ export const useImageStore = create((set, get) => ({
               isGenerating: false,
               error: event.error,
               progress: 0,
+              stage: null,
               _abortHandle: null,
             });
             break;
@@ -181,6 +184,7 @@ export const useImageStore = create((set, get) => ({
         isGenerating: false,
         error: err.message,
         progress: 0,
+        stage: null,
       });
     }
   },
@@ -192,6 +196,7 @@ export const useImageStore = create((set, get) => ({
       set({
         isGenerating: false,
         progress: 0,
+        stage: null,
         _abortHandle: null,
       });
     }
@@ -202,7 +207,7 @@ export const useImageStore = create((set, get) => ({
   loadHistory: async (page = 1) => {
     set({ isLoadingHistory: true });
     try {
-      const data = await comfyApi.listGenerations(page, 20);
+      const data = await imageApi.listGenerations(page, 20);
       set({
         generations: data.generations || [],
         generationsTotal: data.total || 0,
@@ -221,7 +226,7 @@ export const useImageStore = create((set, get) => ({
       return;
     }
     try {
-      const gen = await comfyApi.getGeneration(id);
+      const gen = await imageApi.getGeneration(id);
       set({
         selectedGeneration: gen,
         currentGenerationId: id,
@@ -238,8 +243,8 @@ export const useImageStore = create((set, get) => ({
           height: gen.height || 512,
           steps: gen.steps || 20,
           cfgScale: gen.cfg_scale || 7,
-          sampler: gen.sampler || "euler",
-          scheduler: gen.scheduler || "normal",
+          sampler: gen.sampler || "euler_a",
+          scheduler: gen.scheduler || "",
           seed: gen.seed ?? -1,
           batchCount: gen.batch_count || 1,
         },
@@ -251,7 +256,7 @@ export const useImageStore = create((set, get) => ({
 
   deleteGeneration: async (id) => {
     try {
-      await comfyApi.deleteGeneration(id);
+      await imageApi.deleteGeneration(id);
       const { currentGenerationId } = get();
       if (currentGenerationId === id) {
         set({ currentGenerationId: null, currentImages: [], selectedGeneration: null });
@@ -263,7 +268,7 @@ export const useImageStore = create((set, get) => ({
   },
 
   getImageUrl: (generationId, imageId) => {
-    return comfyApi.getImageUrl(generationId, imageId);
+    return imageApi.getImageUrl(generationId, imageId);
   },
 
   clearError: () => set({ error: null }),

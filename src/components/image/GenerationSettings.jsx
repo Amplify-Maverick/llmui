@@ -1,6 +1,7 @@
 import { useImageStore } from "../../stores/imageStore.js";
 import "./GenerationSettings.css";
 
+// SD 1.5 is trained at 512×512; larger sizes need an SDXL-class checkpoint.
 const RESOLUTION_PRESETS = [
   { label: "512×512", w: 512, h: 512 },
   { label: "512×768", w: 512, h: 768 },
@@ -22,6 +23,8 @@ export default function GenerationSettings() {
     progress,
     progressStep,
     progressTotalSteps,
+    stage,
+    stageMessage,
     error,
     updateParam,
     updateParams,
@@ -106,8 +109,8 @@ export default function GenerationSettings() {
             onChange={(e) => updateParam("scheduler", e.target.value)}
             disabled={isGenerating}
           >
-            {schedulers.length === 0 && <option value={params.scheduler}>{params.scheduler}</option>}
-            {schedulers.map((s) => (
+            <option value="">default</option>
+            {schedulers.filter((s) => s !== "default").map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
@@ -172,7 +175,10 @@ export default function GenerationSettings() {
             type="number"
             className="gen-input"
             value={params.seed}
-            onChange={(e) => updateParam("seed", parseInt(e.target.value) || -1)}
+            onChange={(e) => {
+            const v = parseInt(e.target.value, 10);
+            updateParam("seed", Number.isNaN(v) ? -1 : v);
+          }}
             disabled={isGenerating}
           />
           <button
@@ -222,11 +228,7 @@ export default function GenerationSettings() {
               style={{ width: `${Math.round(progress * 100)}%` }}
             />
           </div>
-          <span className="gen-progress-text">
-            {progressStep > 0
-              ? `Step ${progressStep}/${progressTotalSteps}`
-              : "Queued..."}
-          </span>
+          <span className="gen-progress-text">{progressLabel({ stage, stageMessage, progressStep, progressTotalSteps })}</span>
           <button className="gen-btn gen-btn-cancel" onClick={cancelGeneration}>
             Cancel
           </button>
@@ -242,4 +244,21 @@ export default function GenerationSettings() {
       )}
     </div>
   );
+}
+
+const STAGE_LABELS = {
+  starting: "Starting…",
+  freeing_gpu: "Unloading chat models…",
+  loading_model: "Loading SD model…",
+  queued: "Queued…",
+  waiting: "Waiting for the GPU…",
+  preparing: "Preparing…",
+  conditioning: "Encoding prompt…",
+  vae_decode: "Decoding image…",
+  encoding: "Encoding PNG…",
+};
+
+export function progressLabel({ stage, stageMessage, progressStep, progressTotalSteps }) {
+  if (stage === "sampling" && progressTotalSteps) return `Step ${progressStep}/${progressTotalSteps}`;
+  return stageMessage || STAGE_LABELS[stage] || "Working…";
 }

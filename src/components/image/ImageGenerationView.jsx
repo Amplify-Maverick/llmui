@@ -7,7 +7,7 @@ import GpuMini from "../stats/GpuMini.jsx";
 import "./ImageGenerationView.css";
 
 export default function ImageGenerationView() {
-  const { isConnected, fetchAll, loadHistory } = useImageStore();
+  const { isConnected, connectionError, serverUrl, fetchAll, loadHistory } = useImageStore();
 
   useEffect(() => {
     fetchAll();
@@ -19,9 +19,12 @@ export default function ImageGenerationView() {
       <div className="image-gen-header">
         <div className="image-gen-header-left">
           <span className="image-gen-header-title">Image Generation</span>
-          <span className={`image-gen-status ${isConnected ? "connected" : "disconnected"}`}>
+          <span
+            className={`image-gen-status ${isConnected ? "connected" : "disconnected"}`}
+            title={isConnected ? serverUrl || "" : connectionError || ""}
+          >
             <span className="image-gen-status-dot" />
-            {isConnected ? "ComfyUI Connected" : "ComfyUI Disconnected"}
+            {isConnected ? "sd-server connected" : "sd-server unreachable"}
           </span>
         </div>
         <div className="image-gen-header-gpu">

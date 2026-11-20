@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useImageStore } from "../../stores/imageStore.js";
 import { authHeaders } from "../../services/auth.js";
+import { progressLabel } from "./GenerationSettings.jsx";
 import "./ImageDisplay.css";
 
 export default function ImageDisplay() {
@@ -10,6 +11,11 @@ export default function ImageDisplay() {
     selectedGeneration,
     isGenerating,
     progress,
+    stage,
+    stageMessage,
+    progressStep,
+    progressTotalSteps,
+    lastTimings,
     getImageUrl,
   } = useImageStore();
 
@@ -89,8 +95,10 @@ export default function ImageDisplay() {
       <div className="image-display-empty">
         <div className="image-display-generating">
           <div className="image-display-spinner" />
-          <p>Generating image...</p>
-          <p className="image-display-pct">{Math.round(progress * 100)}%</p>
+          <p>{progressLabel({ stage, stageMessage, progressStep, progressTotalSteps })}</p>
+          {stage === "sampling" && (
+            <p className="image-display-pct">{Math.round(progress * 100)}%</p>
+          )}
         </div>
       </div>
     );
@@ -175,6 +183,12 @@ export default function ImageDisplay() {
           <span className="image-display-info-item">
             <strong>Size:</strong> {selectedGeneration.width}×{selectedGeneration.height}
           </span>
+          {lastTimings?.generationId === selectedGeneration.id && (
+            <span className="image-display-info-item">
+              <strong>Time:</strong> {(lastTimings.totalMs / 1000).toFixed(1)}s
+              {" "}({(lastTimings.generateMs / 1000).toFixed(1)}s generating)
+            </span>
+          )}
         </div>
       )}
     </div>
