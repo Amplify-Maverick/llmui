@@ -39,9 +39,12 @@ class ImageAPI {
 
   // ── Model management (Models → Image) ────────────────────────────────
 
-  /** { files, recipes, default, gpuBytes, sdError, helper } */
-  models() {
-    return getJson("/models");
+  /**
+   * { files, recipes, default, gpuBytes, sdError, helper }.
+   * `machine`: list that machine's files instead (read-only, System page).
+   */
+  models(machine) {
+    return getJson(machine ? `/models?machine=${encodeURIComponent(machine)}` : "/models");
   }
 
   /** { repos: [{ id, sha, files: [...] }], gpuBytes } */

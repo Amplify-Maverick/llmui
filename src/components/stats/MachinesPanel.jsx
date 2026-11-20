@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMachinesStore } from "../../stores/machinesStore.js";
 import GpuStats from "./GpuStats.jsx";
+import MachineModels from "./MachineModels.jsx";
 import "./MachinesPanel.css";
 
 const SERVICES = [
@@ -28,8 +29,8 @@ function ServiceRow({ label, svc }) {
   );
 }
 
-/** Machine switch + one card per machine (status, live GPU). Lives on the System page. */
-export default function MachinesPanel() {
+/** Machine switch + one card per machine (status, live GPU, installed models). Lives on the System page. */
+export default function MachinesPanel({ onOpenModels }) {
   const { machines, selected, effective, switching, error, loaded, select } = useMachinesStore();
   const [now, setNow] = useState(Date.now());
 
@@ -92,6 +93,7 @@ export default function MachinesPanel() {
                 ))}
               </div>
               <GpuStats machineId={m.id} />
+              <MachineModels machine={m} managed={usedFor.length > 0} onOpenModels={onOpenModels} />
               <div className="machine-checked">checked {ago(m.status?.checkedAt, now)}</div>
             </div>
           );

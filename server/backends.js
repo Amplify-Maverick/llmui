@@ -236,6 +236,24 @@ export function machinesSnapshot() {
 export { publicMachine };
 
 /**
+ * Express middleware for read-only listings: a GET of exactly `subPath` may
+ * name a machine with ?machine=<id> (the System page lists every machine's
+ * models). Sets req.machine and req.machineFromQuery; routeTo then keeps it.
+ * Nothing else (writes, events, other paths) can be routed this way.
+ */
+export function machineFromQuery(subPath) {
+  return (req, res, next) => {
+    if (req.method !== "GET" || req.path !== subPath || !req.query.machine) return next();
+    const machine = getMachine(String(req.query.machine));
+    if (!machine) return res.status(404).json({ error: `Unknown machine "${req.query.machine}"` });
+    req.machine = machine;
+    req.machineFallback = null;
+    req.machineFromQuery = true;
+    next();
+  };
+}
+
+/**
  * Express middleware: req.machine = where this `kind` of request goes.
  * A client that pins a machine with X-LLMUI-Machine gets 409 if it no longer
  * matches, so a delete/unload/install never lands on a machine it didn't show.

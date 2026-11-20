@@ -125,3 +125,30 @@ test("normalizeHelperGpu maps sd-fetch fields and keeps nulls", () => {
     { index: 2, name: null, vendor: null, temperature: null, utilization: null, memoryUsed: null, memoryTotal: null, powerDraw: null }
   );
 });
+
+test("machineFromQuery: only a GET of the listing path can name a machine", () => {
+  const run = (mw, req) => {
+    let status = null;
+    let nexted = false;
+    const res = { status: (s) => ((status = s), { json: () => {} }) };
+    mw(req, res, () => (nexted = true));
+    return { status, nexted };
+  };
+  const mw = b.machineFromQuery("/models");
+
+  const req = { method: "GET", path: "/models", query: { machine: "workstation" } };
+  assert.deepEqual(run(mw, req), { status: null, nexted: true });
+  assert.equal(req.machine.id, "workstation");
+  assert.equal(req.machineFromQuery, true);
+
+  for (const other of [
+    { method: "POST", path: "/models", query: { machine: "workstation" } },
+    { method: "GET", path: "/models/sse", query: { machine: "workstation" } },
+    { method: "GET", path: "/models", query: {} },
+  ]) {
+    assert.deepEqual(run(mw, other), { status: null, nexted: true });
+    assert.equal(other.machine, undefined);
+  }
+
+  assert.deepEqual(run(mw, { method: "GET", path: "/models", query: { machine: "nope" } }), { status: 404, nexted: false });
+});

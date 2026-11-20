@@ -28,12 +28,12 @@ import {
   resolveModelSetup,
 } from "../sd.js";
 import imageModelsRouter from "./imageModels.js";
-import { routeTo, publicMachine } from "../backends.js";
+import { routeTo, machineFromQuery, publicMachine } from "../backends.js";
 
 const router = Router();
 const toImageMachine = routeTo("image");
 
-router.use("/models", toImageMachine, imageModelsRouter);
+router.use("/models", machineFromQuery("/"), toImageMachine, imageModelsRouter);
 
 // ── status / options ───────────────────────────────────────────────────
 

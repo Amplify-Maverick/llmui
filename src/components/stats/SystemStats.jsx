@@ -7,7 +7,7 @@ import StatCard from "./StatCard.jsx";
 import MachinesPanel from "./MachinesPanel.jsx";
 import "./SystemStats.css";
 
-export default function SystemStats() {
+export default function SystemStats({ onOpenModels }) {
   const { models, modelsLoaded, fetchModels } = useModelsStore();
   const [hardware, setHardware] = useState(null);
   const chatMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.chat));
@@ -29,7 +29,7 @@ export default function SystemStats() {
     <div className="system-stats">
       <h2 className="system-stats-title">System Overview</h2>
 
-      <MachinesPanel />
+      <MachinesPanel onOpenModels={onOpenModels} />
 
       <div className="system-stats-grid">
         <StatCard

@@ -87,7 +87,7 @@ export default function App() {
       case "models":
         return <ModelManager />;
       case "stats":
-        return <SystemStats />;
+        return <SystemStats onOpenModels={() => setActiveTab("models")} />;
       case "settings":
         return <SettingsPanel />;
       default:

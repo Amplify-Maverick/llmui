@@ -94,7 +94,7 @@ function gpuInfo(models) {
 // count the projector yet, so the UI adds an allowance based on this size.
 // ------------------------------------------------------------
 
-const mmprojCache = new Map(); // model id → { size, at }
+const mmprojCache = new Map(); // model id → { gguf, mmproj, at }
 const MMPROJ_RETRY_MS = 10 * 60 * 1000;
 
 /** "owner/repo:QUANT" → manifest URL (the endpoint llama.cpp's -hf uses), or null for local names. */
@@ -104,25 +104,30 @@ export function manifestUrl(id) {
   return `https://huggingface.co/v2/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}/manifests/${encodeURIComponent(m[3] || "latest")}`;
 }
 
-/** Size in bytes of the mmproj llama.cpp downloads for a model, or null if unknown. Cached. */
-async function mmprojFileSize(id) {
+/**
+ * File sizes from a model's HF manifest: { gguf, mmproj } in bytes (null when
+ * unknown). Cached; an unknown result is retried after MMPROJ_RETRY_MS.
+ */
+async function manifestSizes(id) {
   const hit = mmprojCache.get(id);
-  if (hit && (hit.size != null || Date.now() - hit.at < MMPROJ_RETRY_MS)) return hit.size;
-  let size = null;
+  if (hit && (hit.gguf != null || Date.now() - hit.at < MMPROJ_RETRY_MS)) return hit;
+  const sizes = { gguf: null, mmproj: null, at: Date.now() };
   const url = manifestUrl(id);
   if (url) {
     try {
       const r = await fetch(url, { headers: { "User-Agent": "llama-cpp" }, signal: AbortSignal.timeout(8000) });
       if (r.ok) {
-        const s = (await r.json())?.mmprojFile?.size;
-        if (typeof s === "number" && s > 0) size = s;
+        const body = await r.json();
+        const num = (v) => (typeof v === "number" && v > 0 ? v : null);
+        sizes.gguf = num(body?.ggufFile?.size);
+        sizes.mmproj = num(body?.mmprojFile?.size);
       }
     } catch {
-      // unknown → flat allowance in the UI; retried after MMPROJ_RETRY_MS
+      // unknown → flat allowance / no size in the UI; retried after MMPROJ_RETRY_MS
     }
   }
-  mmprojCache.set(id, { size, at: Date.now() });
-  return size;
+  mmprojCache.set(id, sizes);
+  return sizes;
 }
 
 // GET /api/llama/models — every model the router knows about, with status,
@@ -131,10 +136,18 @@ router.get("/models", async (req, res) => {
   try {
     const listed = await listModels(req.machine);
     const gpu = gpuInfo(listed);
+    // ?sizes=1 (System page): also each model's size on disk (GGUF + installed
+    // projector) from its HF manifest; the router reports none while unloaded.
+    const wantSizes = req.query.sizes === "1";
     const models = await Promise.all(
-      listed.map(async (m) =>
-        m.sidecars.includes("mmproj") ? { ...m, mmprojFileSize: await mmprojFileSize(m.id) } : m
-      )
+      listed.map(async (m) => {
+        const hasMmproj = m.sidecars.includes("mmproj");
+        if (!hasMmproj && !wantSizes) return m;
+        const sizes = await manifestSizes(m.id);
+        const out = hasMmproj ? { ...m, mmprojFileSize: sizes.mmproj } : { ...m };
+        if (wantSizes) out.diskSize = sizes.gguf != null ? sizes.gguf + (hasMmproj ? sizes.mmproj || 0 : 0) : null;
+        return out;
+      })
     );
     res.json({
       machine: publicMachine(req.machine),

@@ -33,6 +33,7 @@ import {
   listMachines,
   resolveMachine,
   routeTo,
+  machineFromQuery,
   selectMachine,
   probeMachine,
   machinesSnapshot,
@@ -845,7 +846,7 @@ app.post("/api/llama/models/load", requireAuth, chatGate());
 // OpenAI-compatible model server (llama.cpp router on the routed machine).
 // Authenticated streaming passthrough; the browser never talks to it directly.
 app.use("/openai/v1", requireAuth, openaiRouter);
-app.use("/api/llama", requireAuth, routeTo("chat"), llamaRouter);
+app.use("/api/llama", requireAuth, machineFromQuery("/models"), routeTo("chat"), llamaRouter);
 
 // SPA fallback: client-side routes get index.html. Backend prefixes are
 // excluded so an unknown API path still 404s rather than returning the app, and

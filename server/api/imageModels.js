@@ -21,6 +21,7 @@ import {
   refreshSdCatalog,
   resolveModelSetup,
   isImageJobActive,
+  sdStatus,
 } from "../sd.js";
 import { fetchHelper, helperConfigured, FetchHelperError } from "../sdfetch.js";
 import { publicMachine } from "../backends.js";
@@ -171,12 +172,24 @@ router.get("/", async (req, res) => {
   const cfg = getSdConfig(m);
   const helper = { ...(await helperConfigured(m)), ok: false, error: null, disk: null, hfToken: null };
 
-  await refreshSdCatalog(m);
+  // A read-only listing for another machine (System page) doesn't rescan its
+  // catalog; files the helper sees but sd-server hasn't scanned still show.
+  if (!req.machineFromQuery) await refreshSdCatalog(m);
   let recipes = [];
   let catalog = [];
   let sdError = null;
+  let loadedIds = new Set(); // file ids sd-server has loaded (or is loading) right now
   try {
-    [recipes, catalog] = await Promise.all([liveRecipes(m, { fresh: true }), liveFiles(m)]);
+    const [r, c, status] = await Promise.all([
+      liveRecipes(m, { fresh: !req.machineFromQuery }),
+      liveFiles(m),
+      sdStatus(m).catch(() => null),
+    ]);
+    recipes = r;
+    catalog = c;
+    if (status && (status.state === "ready" || status.state === "loading")) {
+      loadedIds = new Set(Object.values(status.models || {}).filter((v) => typeof v === "string"));
+    }
   } catch (err) {
     sdError = err.message;
   }
@@ -213,6 +226,7 @@ router.get("/", async (req, res) => {
       kind: MODEL_CATEGORIES.has(category) ? "model" : "component",
       setup: setup ? { recipe: setup.recipe, components: { ...setup.models } } : null,
       isDefault: id === cfg.model,
+      loaded: !!id && loadedIds.has(id),
       usedByDefault: Object.values(cfg.components || {}).includes(id),
       fit: h?.size ? (h.size > gpuBytes(m) ? "nofit" : h.size > gpuBytes(m) - 1.5 * GiB ? "tight" : "fits") : "unknown",
     });
