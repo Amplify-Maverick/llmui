@@ -313,3 +313,6 @@
   }
 }
 
+.chat-header-actions .chat-server-select {
+  max-width: 150px;
+}

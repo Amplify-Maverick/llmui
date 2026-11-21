@@ -117,9 +117,28 @@ export default function ChatView({ onBack }) {
   // Models on the other machine(s): shown greyed, can't be picked here.
   const servedNames = useMemo(() => models.map((m) => m.name), [models]);
   const otherModels = useOtherMachineModels("chat", servedNames);
-  const chatMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.chat));
+  const machines = useMachinesStore((s) => s.machines);
+  const chatMachineId = useMachinesStore((s) => s.effective.chat);
+  const switchingMachine = useMachinesStore((s) => s.switching);
+  const selectMachine = useMachinesStore((s) => s.select);
+  const chatMachine = machines.find((m) => m.id === chatMachineId);
+  // A new, empty chat can pick its server here. This is the same global
+  // choice as the System page (the server only sends GPU work to the selected
+  // machine), so it's offered only before the conversation has a model.
+  const canSwitchServer =
+    machines.length > 1 && messages.length === 0 && !isStreaming && !isReadOnly;
+  const serverOptions = machines.map((m) => {
+    const down = m.status && m.status.llama?.ok === false;
+    return {
+      value: m.id,
+      label: down ? `${m.name} — model server offline` : m.name,
+      disabled: down && m.id !== chatMachineId,
+    };
+  });
   const otherGroups = otherModels.map(({ machine, names }) => ({
-    label: `On ${machine.name}: select it on the System page`,
+    label: canSwitchServer
+      ? `On ${machine.name}: switch server to use`
+      : `On ${machine.name}: select it on the System page`,
     disabled: true,
     options: names.map((n) => ({ value: `other:${machine.id}:${n}`, label: n })),
   }));
@@ -339,15 +358,29 @@ export default function ChatView({ onBack }) {
                   {modelStatusLabel(selectedModelEntry)}
                 </span>
               )}
+              {canSwitchServer && (
+                <Select
+                  value={switchingMachine || chatMachineId || ""}
+                  onChange={(e) => selectMachine(e.target.value)}
+                  options={serverOptions}
+                  placeholder={chatMachineId ? undefined : "Server"}
+                  disabled={!!switchingMachine}
+                  title="Server for this chat (also used for images)"
+                  aria-label="Server"
+                  className="chat-server-select"
+                />
+              )}
               <Select
                 value={defaultModel}
                 onChange={(e) => handleModelChange(e.target.value)}
                 options={modelOptions}
                 groups={otherGroups}
                 placeholder={
-                  noModelsHere ? `No models on ${chatMachine?.name || "server"}` : "Select a model"
+                  switchingMachine || (canSwitchServer && !modelsLoaded)
+                    ? "Loading models…"
+                    : noModelsHere ? `No models on ${chatMachine?.name || "server"}` : "Select a model"
                 }
-                disabled={isReadOnly}
+                disabled={isReadOnly || !!switchingMachine}
                 style={{ width: "240px" }}
               />
             </>
@@ -448,7 +481,10 @@ export default function ChatView({ onBack }) {
               <div className="chat-readonly-banner" role="status">
                 <span>
                   No chat models on {chatMachine?.name || "the model server"}. Install one on the Models page
-                  {otherModels.length > 0 && `, or select ${otherModels[0].machine.name} on the System page`}.
+                  {otherModels.length > 0 &&
+                    (canSwitchServer
+                      ? `, or switch the server to ${otherModels[0].machine.name} above`
+                      : `, or select ${otherModels[0].machine.name} on the System page`)}.
                 </span>
               </div>
             )}
