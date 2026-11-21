@@ -39,6 +39,7 @@ export const SCHEMA_SQL = `
     tokens_per_sec REAL,
     tool_calls TEXT,
     thinking TEXT,
+    machine_id TEXT,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES messages(id) ON DELETE SET NULL
   );

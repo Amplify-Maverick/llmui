@@ -8,9 +8,12 @@ import { nanoid } from "nanoid";
 export const ROLES = ["user", "assistant", "system", "tool"];
 
 export const MESSAGE_COLUMNS = `id, role, content, model, images, created_at as timestamp,
-  position, tokens_per_sec as tokensPerSec, tool_calls as toolCalls, thinking`;
+  position, tokens_per_sec as tokensPerSec, tool_calls as toolCalls, thinking, machine_id as machine`;
 
-/** A row selected with MESSAGE_COLUMNS → the API object. Absent optional fields are omitted. */
+/**
+ * A row selected with MESSAGE_COLUMNS → the API object. Absent optional fields
+ * are omitted; `machine` is always present (null when it wasn't recorded).
+ */
 export function toApiMessage(m) {
   const out = {
     id: m.id,
@@ -20,12 +23,16 @@ export function toApiMessage(m) {
     timestamp: m.timestamp,
     position: m.position,
     tokensPerSec: m.tokensPerSec,
+    machine: m.machine ?? null,
   };
   if (m.images) out.images = JSON.parse(m.images);
   if (m.toolCalls) out.toolCalls = JSON.parse(m.toolCalls);
   if (m.thinking) out.thinking = m.thinking;
   return out;
 }
+
+/** A machine id as stored: a non-empty string (at most 64 chars), else null. */
+export const machineOrNull = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 64) : null);
 
 export function listMessages(db, conversationId) {
   return db
@@ -48,8 +55,8 @@ export function appendMessage(db, conversationId, msg) {
   const now = msg.timestamp || Date.now();
   const content = msg.content || "";
   db.prepare(`
-    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, conversationId, msg.role, content,
     msg.model || null,
@@ -57,7 +64,8 @@ export function appendMessage(db, conversationId, msg) {
     now, position,
     msg.tokensPerSec || null,
     msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
-    msg.thinking || null
+    msg.thinking || null,
+    machineOrNull(msg.machine)
   );
   db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, conversationId);
   if (msg.role === "user" && position === 0 && content) {

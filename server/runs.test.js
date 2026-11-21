@@ -45,15 +45,17 @@ process.env.OPENAI_BASE_URL = `http://127.0.0.1:${fake.address().port}/v1`;
 
 const express = (await import("express")).default;
 const { getDb } = await import("./db/index.js");
-const { runsRouter, resolveTurnSettings, historyForModel } = await import("./runs.js");
+const { runsRouter, resolveTurnSettings, historyForModel, startRun } = await import("./runs.js");
 const messagesRouter = (await import("./api/messages.js")).default;
 const conversationsRouter = (await import("./api/conversations.js")).default;
+const exportRouter = (await import("./api/export.js")).default;
 
 const app = express();
 app.use(express.json());
 app.use("/api/conversations", conversationsRouter);
 app.use("/api", messagesRouter);
 app.use("/api", runsRouter);
+app.use("/api/export", exportRouter);
 let server;
 const url = (p) => server.url + p;
 const json = (method, p, body) =>
@@ -254,4 +256,94 @@ test("thinking is stored and returned by the message routes, and copied into bra
   const branch = await (await json("POST", `/api/conversations/${id}/branch`, { branchAtMessageId: messages[1].id })).json();
   ({ messages } = await (await fetch(url(`/api/conversations/${branch.id}/messages`))).json());
   assert.equal(messages[1].thinking, "edited");
+});
+
+// ── which machine wrote each reply ───────────────────────────────────
+
+const getMessages = async (id) => (await (await fetch(url(`/api/conversations/${id}/messages`))).json()).messages;
+
+test("send, regenerate and an edit branch store the machine (and model) on the reply", async () => {
+  newGate();
+  gate.release();
+  const id = await newChat();
+  const res = await json("POST", `/api/conversations/${id}/send`, { content: "hi", enabledTools: [] });
+  const header = res.headers.get("x-llmui-machine");
+  const events = await readAllNdjson(res);
+  const machine = events.at(-1).machine;
+  assert.equal(machine, "jellyfin");
+  assert.equal(header, machine);
+  assert.equal(events[0].machine, machine);
+
+  let messages = await getMessages(id);
+  assert.deepEqual(messages.map((m) => [m.role, m.machine, m.model ?? null]), [["user", null, null], ["assistant", machine, "test/model:Q4"]]);
+  assert.equal((await (await fetch(url(`/api/runs/${events[0].runId}`))).json()).machine, machine);
+
+  // Regenerate.
+  await readAllNdjson(await json("POST", `/api/conversations/${id}/send`, { regenerate: true, model: "other/model:Q8", enabledTools: [] }));
+  messages = await getMessages(id);
+  assert.deepEqual([messages[1].machine, messages[1].model], [machine, "other/model:Q8"]);
+
+  // Edit: branch with edited text, then send with no content.
+  const branch = await (await json("POST", `/api/conversations/${id}/branch`, { branchAtMessageId: messages[0].id, editedContent: "hello" })).json();
+  await readAllNdjson(await json("POST", `/api/conversations/${branch.id}/send`, { enabledTools: [] }));
+  const branched = await getMessages(branch.id);
+  assert.deepEqual(branched.map((m) => [m.role, m.content, m.machine]), [["user", "hello", null], ["assistant", "Hello", machine]]);
+});
+
+test("a cancelled reply records the machine it fell back to", async () => {
+  const id = await newChat();
+  getDb().prepare("INSERT INTO messages (id, conversation_id, role, content, created_at, position) VALUES (?, ?, 'user', 'q', ?, 0)").run(`u-${id}`, id, Date.now());
+  const run = startRun(
+    {
+      conversationId: id,
+      userMessageId: `u-${id}`,
+      settings: { model: "m", enabledTools: [], systemPrompt: "" },
+      machine: { id: "jellyfin" },
+      history: [{ role: "user", content: "q" }],
+    },
+    {
+      runToolLoop: async ({ track, emit, signal }) => {
+        track({ id: "workstation" });
+        emit({ type: "content", content: "partial" });
+        await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+      },
+    }
+  );
+  run.controller.abort();
+  await run.done;
+  assert.equal(run.status, "cancelled");
+  const messages = await getMessages(id);
+  assert.deepEqual([messages[1].content, messages[1].machine], ["partial", "workstation"]);
+});
+
+test("machine: null on old rows, kept by PUT and branches, validated on POST, in exports", async () => {
+  const id = await newChat();
+  // A row written before the column existed: nothing is inferred.
+  getDb().prepare("INSERT INTO messages (id, conversation_id, role, content, model, created_at, position) VALUES (?, ?, 'assistant', 'old', 'x', ?, 0)").run(`old-${id}`, id, Date.now());
+  let messages = await getMessages(id);
+  assert.equal(messages[0].machine, null);
+  assert.ok("machine" in messages[0]);
+
+  // The web app saves by PUTting back what it loaded: the machine survives.
+  await json("PUT", `/api/conversations/${id}/messages`, {
+    messages: [...messages, { role: "user", content: "q" }, { role: "assistant", content: "a", model: "x", machine: "workstation" }],
+  });
+  messages = await getMessages(id);
+  assert.deepEqual(messages.map((m) => m.machine), [null, null, "workstation"]);
+
+  const branch = await (await json("POST", `/api/conversations/${id}/branch`, { branchAtMessageId: messages[2].id })).json();
+  assert.deepEqual((await getMessages(branch.id)).map((m) => m.machine), [null, null, "workstation"]);
+
+  const bad = await json("POST", `/api/conversations/${id}/messages`, { role: "assistant", content: "b", machine: 5 });
+  assert.equal(bad.status, 400);
+  const posted = await (await json("POST", `/api/conversations/${id}/messages`, { role: "assistant", content: "b", machine: "jellyfin" })).json();
+  assert.equal(posted.machine, "jellyfin");
+
+  // Export → import keeps it (and the nulls).
+  const exported = await (await fetch(url(`/api/export/conversations/${id}`))).json();
+  assert.deepEqual(exported.conversations[0].messages.map((m) => m.machine), [null, null, "workstation", "jellyfin"]);
+  const before = new Set((await (await fetch(url("/api/conversations"))).json()).conversations.map((c) => c.id));
+  await json("POST", "/api/export/import", exported);
+  const imported = (await (await fetch(url("/api/conversations"))).json()).conversations.find((c) => !before.has(c.id));
+  assert.deepEqual((await getMessages(imported.id)).map((m) => m.machine), [null, null, "workstation", "jellyfin"]);
 });

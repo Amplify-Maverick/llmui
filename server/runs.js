@@ -219,6 +219,7 @@ export function startRun({ conversationId, userMessageId, settings, machine, his
         content: run.content,
         thinking: run.thinking || null,
         model: run.model,
+        machine: run.machine,
         toolCalls: run.toolCalls.length ? run.toolCalls : null,
         tokensPerSec: run.timings?.predicted_per_second || null,
       });
@@ -249,7 +250,11 @@ export function startRun({ conversationId, userMessageId, settings, machine, his
         modelOptions: { temperature: settings.temperature, num_predict: settings.maxTokens },
         enableThinking: settings.enableThinking,
         signal: run.controller.signal,
-        track: (m) => releases.push(beginChat(m)),
+        // A turn fell back to another machine: that's where the reply now comes from.
+        track: (m) => {
+          run.machine = m.id;
+          releases.push(beginChat(m));
+        },
         emit,
       });
       run.timings = result.timings;

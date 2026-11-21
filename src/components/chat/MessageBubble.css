@@ -48,7 +48,8 @@
   color: var(--color-text-secondary);
 }
 
-.bubble-model {
+.bubble-model,
+.bubble-machine {
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 500;

@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 // Database migrations for LLMUI
 // Migrations are applied in order, tracked by version number
 
@@ -162,10 +165,38 @@ const MIGRATIONS = [
         )
       `);
     }
+  },
+  {
+    version: 7,
+    description: 'Record which machine wrote each assistant message',
+    up: (db) => {
+      const cols = new Set(db.prepare("PRAGMA table_info(messages)").all().map((c) => c.name));
+      // Existing rows stay NULL: which machine wrote them was never recorded.
+      if (!cols.has('machine_id')) db.exec('ALTER TABLE messages ADD COLUMN machine_id TEXT');
+    }
   }
 ];
 
-export function runMigrations(db) {
+/**
+ * Copy the database to `backupDir` (VACUUM INTO: a consistent snapshot, WAL
+ * included) before applying `pending` migrations. Skipped for a brand-new
+ * database. Throws if the copy fails, so nothing is migrated without one.
+ */
+function backupBeforeMigrating(db, backupDir, pending) {
+  const hasConversations = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conversations'").get();
+  const hasData =
+    db.prepare("SELECT 1 FROM schema_migrations LIMIT 1").get() ||
+    (hasConversations && db.prepare("SELECT 1 FROM conversations LIMIT 1").get());
+  if (!backupDir || !hasData) return null;
+  fs.mkdirSync(backupDir, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(backupDir, `llmui_pre-migration-${pending.map((m) => m.version).join('-')}_${ts}.db`);
+  db.prepare('VACUUM INTO ?').run(file);
+  console.log(`Backed up the database to ${file} before migrating`);
+  return file;
+}
+
+export function runMigrations(db, { backupDir } = {}) {
   // Create migrations table if it doesn't exist
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -179,6 +210,9 @@ export function runMigrations(db) {
   const applied = new Set(
     db.prepare('SELECT version FROM schema_migrations').all().map(r => r.version)
   );
+
+  const pending = MIGRATIONS.filter((m) => !applied.has(m.version));
+  if (pending.length) backupBeforeMigrating(db, backupDir, pending);
 
   // Apply pending migrations in order
   for (const migration of MIGRATIONS) {

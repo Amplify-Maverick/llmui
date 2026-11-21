@@ -2,6 +2,7 @@ import { useState, useCallback, memo } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import ToolCallCard from "./ToolCallCard.jsx";
 import ThinkingBlock from "./ThinkingBlock.jsx";
+import { useMachinesStore } from "../../stores/machinesStore.js";
 import "./MessageBubble.css";
 
 // Icons as inline SVGs for better control
@@ -80,6 +81,11 @@ const MessageBubble = memo(function MessageBubble({
   const [editContent, setEditContent] = useState(message.content);
 
   const isUser = message.role === "user";
+  // The machine the server recorded for this reply (null on replies stored
+  // before it was recorded: then nothing is shown, never a guess).
+  const machineName = useMachinesStore((s) =>
+    message.machine ? s.machines.find((m) => m.id === message.machine)?.name || message.machine : null
+  );
 
   const handleCopy = useCallback(async () => {
     try {
@@ -136,6 +142,11 @@ const MessageBubble = memo(function MessageBubble({
           {isUser ? "You" : "Assistant"}
           {!isUser && message.model && (
             <span className="bubble-model">{message.model}</span>
+          )}
+          {!isUser && machineName && (
+            <span className="bubble-machine" title="Machine that wrote this reply">
+              {machineName}
+            </span>
           )}
           {!isUser && message.duration && (
             <span className="bubble-duration">{formatDuration(message.duration)}</span>

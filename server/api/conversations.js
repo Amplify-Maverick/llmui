@@ -235,8 +235,8 @@ router.post('/:id/branch', (req, res) => {
     );
 
     const insertMsg = db.prepare(`
-      INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     if (editedContent) {
@@ -250,14 +250,14 @@ router.post('/:id/branch', (req, res) => {
       for (const msg of messagesToCopy) {
         insertMsg.run(
           nanoid(), newId, msg.role, msg.content, msg.model,
-          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking
+          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id
         );
       }
 
       // Add the edited message at the branch point position
       insertMsg.run(
         nanoid(), newId, 'user', editedContent, null,
-        null, now, branchMsg.position, null, null, null
+        null, now, branchMsg.position, null, null, null, null
       );
     } else {
       // Copy messages up to and including branch point (positions 0..branchMsg.position)
@@ -270,7 +270,7 @@ router.post('/:id/branch', (req, res) => {
       for (const msg of messagesToCopy) {
         insertMsg.run(
           nanoid(), newId, msg.role, msg.content, msg.model,
-          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking
+          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id
         );
       }
     }

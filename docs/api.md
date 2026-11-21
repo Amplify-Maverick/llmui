@@ -95,7 +95,9 @@ llmui-pair:v1:{"url":"https://box.tailde6c83.ts.net:8452","token":"<64 hex chars
 - `url`: origin to use as the base URL. No trailing slash, no path.
 - `token`: this device's bearer token.
 - A client must reject any other prefix, including a later `llmui-pair:v2:`, and any body whose `url` or `token` isn't a string. Future versions may change the body entirely.
-- **A token that is never used expires 10 minutes after it was created.** After scanning, verify with `GET {url}/api/machines` and the token right away: 200 means paired (and marks the token used), 401 means it's wrong or expired.
+- **A token that is never used expires 10 minutes after it was created.** After scanning (or pasting), verify with `GET {url}/api/machines` and the token right away: 200 means paired (and marks the token used), 401 means it's wrong or expired.
+
+**Paste instead of scanning.** Next to the QR code, **Copy pairing text** copies the exact same string the QR holds (same prefix, same JSON, same device token) and shows "Copied". The app should accept it from a paste field and parse it exactly like a scanned code: trim surrounding whitespace, then apply the rules above. Where the browser has no Clipboard API (e.g. the page was opened over plain HTTP), the web app shows the text in a selectable field instead. The same rules apply as for the QR: it's only shown after **Pair a device**, under the same full-access warning, and hidden after 2 minutes; a copied token that's never used still expires 10 minutes after it was created. Treat pasted text like a password: don't log it or keep it after pairing.
 
 `POST /api/devices` with `{"name":"iPhone"}` (1–64 characters) → **201**:
 
@@ -235,7 +237,7 @@ Deletes the conversation and its messages. Branches of it remain, with `parentCo
 **Message object:**
 
 ```json
-{"id":"hyr8O0YUAH3w_UU6wUZxD","role":"assistant","content":"4.","model":"unsloth/Qwen3-8B-GGUF:Q4_K_M","timestamp":1763683201000,"position":1,"tokensPerSec":31.8,"thinking":"The user asks a simple sum."}
+{"id":"hyr8O0YUAH3w_UU6wUZxD","role":"assistant","content":"4.","model":"unsloth/Qwen3-8B-GGUF:Q4_K_M","timestamp":1763683201000,"position":1,"tokensPerSec":31.8,"machine":"jellyfin","thinking":"The user asks a simple sum."}
 ```
 
 - `role`: `user` | `assistant` | `system` | `tool`.
@@ -243,6 +245,7 @@ Deletes the conversation and its messages. Branches of it remain, with `parentCo
 - `toolCalls` (optional): tool calls on assistant messages, as `[{"id","name","arguments":{},"status":"completed","result":...,"error":null}]`.
 - `model`, `tokensPerSec`: assistant messages only.
 - `thinking` (optional, string): the model's Think text, on assistant messages. Absent when there was none. Replies stored by a run (§4.1) include it; clients that save messages themselves can send it on `POST`, `PUT` and `PATCH`. It's copied into branches and exports, and it isn't sent back to the model as history.
+- `machine` (string or `null`, always present): id of the machine that generated the reply (§5.1 `id`, e.g. `"jellyfin"`, `"workstation"`). Set by the server on every reply a run stores (§4.1: send, regenerate, answering an edit branch), including partial replies after cancel or error; if a turn fell back to another machine, it's that machine. `null` on user messages and on replies stored before this field existed (they are not backfilled; don't guess). Map it to a display name with `GET /api/machines`; show the id if it isn't listed. Clients that save messages themselves may send it on `POST` and `PUT` (`400 {"error":"machine must be a string"}` on `POST` otherwise); `PUT` must send back the value it read, or the value is lost. Copied into branches and exports. `model` on a run's reply is the model that run used.
 - Not stored: `duration` and `promptPerSec`. The server drops any field not listed here.
 
 | Method & path | Body | Response | Notes |
@@ -323,7 +326,7 @@ Response: **200**, `Content-Type: application/x-ndjson`, headers `X-LLMUI-Run-Id
 | `error` | `error`, `messageId` | **Abnormal end** (model error, `"Max tool iterations reached"`). Whatever was produced before the error is stored as `messageId`; `null` if nothing was. |
 | `cancelled` | `messageId` | **Ended by cancel** (§4.3). The partial reply is stored as `messageId` (`null` if empty). |
 
-Exactly one of `done` / `error` / `cancelled` ends every run, and the stream closes after it. Ignore unknown types. The stored reply has `content`, `thinking`, `toolCalls`, `model` and `tokensPerSec` (= `timings.predicted_per_second`). Fetch it with `GET /api/conversations/:id/messages` after the end event; don't save it yourself.
+Exactly one of `done` / `error` / `cancelled` ends every run, and the stream closes after it. Ignore unknown types. The stored reply has `content`, `thinking`, `toolCalls`, `model`, `machine` and `tokensPerSec` (= `timings.predicted_per_second`). Fetch it with `GET /api/conversations/:id/messages` after the end event; don't save it yourself.
 
 Refusals (plain JSON, nothing stored): `404 {"error":"Conversation not found"}`; `400` for `content must be a string`, `content is empty`, `regenerate can't be combined with content`, `enabledTools must be an array of tool names`, `temperature must be 0-5`, `maxTokens must be a positive integer`, `model is required (no model in the request, the chat or the settings)`, nothing to reply to (above); `409 {"error":"A reply is already being generated in this chat","code":"run_in_progress","runId":"..."}` (one run per chat at a time: reattach to `runId` instead); `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
@@ -444,7 +447,7 @@ Response: `Content-Type: application/x-ndjson`, one JSON object per line. The ev
 
 Errors before the stream starts are plain JSON: `400 {"error":"Model is required"}`, `400 {"error":"messages must be an array"}`, `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
-When saving, store the answer text as `content`, the Think text as `thinking` and the calls as `toolCalls` (§3.7).
+When saving, store the answer text as `content`, the Think text as `thinking`, the calls as `toolCalls` and the `done` event's `machine` as `machine` (§3.7).
 
 ---
 
@@ -921,6 +924,12 @@ Still open:
 5. **No token scopes or expiry.** Every device token has full access until revoked (unused ones expire after 10 minutes). The web Compare view still uses the client-managed endpoints (§4.5), so its replies aren't stored server-side.
 
 ## Changes
+
+### 2026-11-20 (third revision)
+
+- **New:** `machine` on every message (§3.7): the machine that generated the reply, stored by runs (send, regenerate, edit branches). `null` on user messages and on replies from before this revision (not backfilled). Accepted on `POST`/`PUT`, copied into branches and exports. The web app shows it next to the model on each reply.
+- **New:** Settings → Devices → **Copy pairing text** (§2.2): the QR's exact `llmui-pair:v1` string, for pasting into the app. Same token, same 2-minute display and 10-minute unused expiry.
+- Server: the database is copied to `~/.llmui/backups/llmui_pre-migration-<versions>_<time>.db` before any schema migration runs (this one adds `messages.machine_id`).
 
 ### 2026-11-20 (second revision)
 

@@ -1,6 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/index.js';
+import { machineOrNull } from '../messageStore.js';
 
 const router = express.Router();
 
@@ -32,6 +33,7 @@ function formatConversation(conv, messages, branches = []) {
       images: m.images ? JSON.parse(m.images) : undefined,
       toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
       thinking: m.thinking || undefined,
+      machine: m.machine_id ?? null,
     })),
     branches: branches.map(b => ({
       id: b.id,
@@ -210,8 +212,8 @@ router.post('/import', (req, res) => {
 
   const insertMsg = db.prepare(`
     INSERT INTO messages
-    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking)
-    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking)
+    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
+    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine)
   `);
 
   const importAll = db.transaction(() => {
@@ -250,6 +252,7 @@ router.post('/import', (req, res) => {
             tokensPerSec: msg.tokensPerSec || null,
             toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
             thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null,
+            machine: machineOrNull(msg.machine),
           });
         }
 

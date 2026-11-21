@@ -56,7 +56,7 @@ export function getDb() {
   db.exec(tableOnlySQL);
 
   // Run migrations to add new columns to existing tables
-  runMigrations(db);
+  runMigrations(db, { backupDir: path.join(STORAGE_DIR, 'backups') });
 
   // Now apply full schema (will add indexes safely since columns now exist)
   db.exec(SCHEMA_SQL);

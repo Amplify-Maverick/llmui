@@ -1,7 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/index.js';
-import { ROLES, appendMessage, listMessages } from '../messageStore.js';
+import { ROLES, appendMessage, listMessages, machineOrNull } from '../messageStore.js';
 import { activeRunFor } from '../runs.js';
 
 const router = express.Router();
@@ -38,14 +38,17 @@ router.post('/conversations/:conversationId/messages', (req, res) => {
   const { conversationId } = req.params;
   if (!requireConversation(db, conversationId, res)) return;
   if (refuseDuringRun(conversationId, res)) return;
-  const { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking } = req.body;
+  const { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine } = req.body;
   if (!ROLES.includes(role)) {
     return res.status(400).json({ error: 'role must be user, assistant, system or tool' });
   }
   if (thinking !== undefined && thinking !== null && typeof thinking !== 'string') {
     return res.status(400).json({ error: 'thinking must be a string' });
   }
-  res.json(appendMessage(db, conversationId, { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking }));
+  if (machine !== undefined && machine !== null && typeof machine !== 'string') {
+    return res.status(400).json({ error: 'machine must be a string' });
+  }
+  res.json(appendMessage(db, conversationId, { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine }));
 });
 
 // PUT /api/conversations/:conversationId/messages - Bulk replace all messages
@@ -63,8 +66,8 @@ router.put('/conversations/:conversationId/messages', (req, res) => {
 
   const deleteAll = db.prepare('DELETE FROM messages WHERE conversation_id = ?');
   const insertMsg = db.prepare(`
-    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking)
-    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking)
+    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
+    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine)
   `);
 
   const replaceAll = db.transaction(() => {
@@ -82,7 +85,9 @@ router.put('/conversations/:conversationId/messages', (req, res) => {
         position: i,
         tokensPerSec: msg.tokensPerSec || null,
         toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
-        thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null
+        thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null,
+        // Round-tripped as the client got it, so a save never drops it.
+        machine: machineOrNull(msg.machine)
       });
     }
     // Update conversation
