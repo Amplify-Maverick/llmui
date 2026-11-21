@@ -158,10 +158,20 @@ export function imageBusyBody(shape) {
     : { error: IMAGE_BUSY_MESSAGE, code: "image_generation_in_progress" };
 }
 
+/** Count a chat as in flight on `machine`. Returns a release function (safe to call twice). */
+export function beginChat(machine) {
+  chatsInFlight.set(machine.id, (chatsInFlight.get(machine.id) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    chatsInFlight.set(machine.id, chatsInFlight.get(machine.id) - 1);
+  };
+}
+
 /** Count a chat request as in flight on `machine` until `res` closes. */
 export function trackChat(machine, res) {
-  chatsInFlight.set(machine.id, (chatsInFlight.get(machine.id) || 0) + 1);
-  res.on("close", () => chatsInFlight.set(machine.id, chatsInFlight.get(machine.id) - 1));
+  res.on("close", beginChat(machine));
 }
 
 /**
@@ -264,10 +274,12 @@ async function residentChatModels(machine) {
 /**
  * Unload every chat model on the router and wait until GET /models shows none
  * resident. onWait(models) is called on each poll that still sees some.
+ * `signal` stops waiting (throws an SdError with code "cancelled").
  */
-export async function unloadChatModels(machine, { timeoutMs = 90000, onWait } = {}) {
+export async function unloadChatModels(machine, { timeoutMs = 90000, onWait, signal } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted) throw new SdError("Generation cancelled", { status: 499, code: "cancelled" });
     const resident = await residentChatModels(machine);
     if (resident.length === 0) return;
     if (Date.now() > deadline) {

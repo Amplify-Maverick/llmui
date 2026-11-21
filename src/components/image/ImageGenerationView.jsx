@@ -8,13 +8,15 @@ import { useMachinesStore } from "../../stores/machinesStore.js";
 import "./ImageGenerationView.css";
 
 export default function ImageGenerationView() {
-  const { isConnected, connectionError, serverUrl, fetchAll, loadHistory } = useImageStore();
+  const { isConnected, connectionError, serverUrl, fetchAll, loadHistory, resumeJob } = useImageStore();
   const machineName = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.image)?.name);
 
   useEffect(() => {
     fetchAll();
     loadHistory();
-  }, [fetchAll, loadHistory]);
+    // A job keeps running when this page goes away; pick it up again.
+    resumeJob();
+  }, [fetchAll, loadHistory, resumeJob]);
 
   return (
     <div className="image-gen-container">

@@ -1,4 +1,4 @@
-import { getAuthToken } from "./auth.js";
+import { sessionHeader } from "./auth.js";
 
 /**
  * Live GPU stats of one machine, read from its sd-fetch helper (GET /v1/gpu)
@@ -10,10 +10,9 @@ import { getAuthToken } from "./auth.js";
  */
 export async function fetchGpuStats(machineId) {
   try {
-    const token = await getAuthToken();
     const qs = machineId ? `?machine=${encodeURIComponent(machineId)}` : "";
     const res = await fetch(`/api/gpu${qs}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: await sessionHeader(),
       signal: AbortSignal.timeout(8000),
     });
     const body = await res.json().catch(() => ({}));

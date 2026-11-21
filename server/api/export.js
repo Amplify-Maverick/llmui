@@ -31,6 +31,7 @@ function formatConversation(conv, messages, branches = []) {
       tokensPerSec: m.tokens_per_sec,
       images: m.images ? JSON.parse(m.images) : undefined,
       toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+      thinking: m.thinking || undefined,
     })),
     branches: branches.map(b => ({
       id: b.id,
@@ -209,8 +210,8 @@ router.post('/import', (req, res) => {
 
   const insertMsg = db.prepare(`
     INSERT INTO messages
-    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls)
-    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls)
+    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking)
+    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking)
   `);
 
   const importAll = db.transaction(() => {
@@ -248,6 +249,7 @@ router.post('/import', (req, res) => {
             position: i,
             tokensPerSec: msg.tokensPerSec || null,
             toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
+            thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null,
           });
         }
 

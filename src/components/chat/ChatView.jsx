@@ -52,7 +52,7 @@ export default function ChatView({ onBack }) {
 
   const { defaultModel: savedDefaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
   const { models, modelsLoaded, fetchModels, refreshModels, modelInfoCache, fetchModelInfo } = useModelsStore();
-  const { sendMessage, stopStreaming, regenerateLastMessage } = useChatStream();
+  const { sendMessage, replyToHistory, stopStreaming, regenerateLastMessage } = useChatStream();
 
   useEffect(() => {
     fetchModels();
@@ -161,12 +161,10 @@ export default function ChatView({ onBack }) {
   const handleEditMessage = useCallback(async (id, newContent) => {
     if (!defaultModel) return;
     // Create a branch instead of truncating the conversation
+    // The branch ends with the edited message; answer it there.
     const branchId = await createBranch(id, newContent);
-    if (branchId) {
-      // Auto-regenerate in the new branch
-      sendMessage(newContent, defaultModel);
-    }
-  }, [createBranch, sendMessage, defaultModel]);
+    if (branchId) replyToHistory(defaultModel);
+  }, [createBranch, replyToHistory, defaultModel]);
 
   const handleDeleteMessage = useCallback(() => {
     if (deleteConfirm) {

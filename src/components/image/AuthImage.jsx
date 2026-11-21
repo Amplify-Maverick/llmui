@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { authHeaders } from "../../services/auth.js";
 
 /**
- * An <img> wrapper that fetches the image with Authorization headers
+ * An <img> wrapper that fetches the image with the session (see auth.js)
  * and displays it via a blob URL. This is needed because <img src="...">
  * cannot send custom headers.
  */

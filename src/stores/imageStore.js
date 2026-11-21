@@ -48,8 +48,9 @@ export const useImageStore = create((set, get) => ({
   selectedGeneration: null,
   isLoadingHistory: false,
 
-  // Abort handle
-  _abortHandle: null,
+  // The job being watched (it runs on the server whether or not it's watched)
+  _jobId: null,
+  _watch: null,
   _defaultsApplied: false,
 
   // ── Actions ──────────────────────────────────────────────────────────
@@ -149,53 +150,8 @@ export const useImageStore = create((set, get) => ({
     });
 
     try {
-      const handle = await imageApi.txt2img(params, (event) => {
-        switch (event.type) {
-          case "stage":
-            set({ stage: event.stage, stageMessage: event.message || "" });
-            break;
-          case "progress":
-            set((state) => ({
-              stage: event.stage,
-              stageMessage: "",
-              progress: event.value ?? state.progress,
-              progressStep: event.step,
-              progressTotalSteps: event.totalSteps,
-            }));
-            break;
-          case "complete":
-            set({
-              isGenerating: false,
-              progress: 1,
-              stage: null,
-              lastTimings: event.timings ? { ...event.timings, generationId: event.generationId } : null,
-              currentGenerationId: event.generationId,
-              currentImages: event.imageIds.map((id) => ({
-                id,
-                generationId: event.generationId,
-              })),
-              _abortHandle: null,
-            });
-            // Show its seed/steps/size without overwriting the form (seed stays -1).
-            imageApi.getGeneration(event.generationId)
-              .then((gen) => set({ selectedGeneration: gen }))
-              .catch(() => {});
-            // Refresh history
-            get().loadHistory();
-            break;
-          case "error":
-            set({
-              isGenerating: false,
-              error: event.error,
-              progress: 0,
-              stage: null,
-              _abortHandle: null,
-            });
-            break;
-        }
-      });
-
-      set({ _abortHandle: handle });
+      const handle = await imageApi.txt2img(params, get()._onJobEvent);
+      set({ _jobId: handle.jobId, _watch: handle });
     } catch (err) {
       set({
         isGenerating: false,
@@ -206,16 +162,94 @@ export const useImageStore = create((set, get) => ({
     }
   },
 
-  cancelGeneration: () => {
-    const { _abortHandle } = get();
-    if (_abortHandle) {
-      _abortHandle.abort();
-      set({
-        isGenerating: false,
-        progress: 0,
-        stage: null,
-        _abortHandle: null,
-      });
+  /** One event of the job being watched (docs/api.md §8.3). */
+  _onJobEvent: (event) => {
+    switch (event.type) {
+      case "job":
+        set({ _jobId: event.jobId });
+        break;
+      case "stage":
+        set({ stage: event.stage, stageMessage: event.message || "" });
+        break;
+      case "progress":
+        set((state) => ({
+          stage: event.stage,
+          stageMessage: "",
+          progress: event.value ?? state.progress,
+          progressStep: event.step,
+          progressTotalSteps: event.totalSteps,
+        }));
+        break;
+      case "complete":
+        set({
+          isGenerating: false,
+          progress: 1,
+          stage: null,
+          lastTimings: event.timings ? { ...event.timings, generationId: event.generationId } : null,
+          currentGenerationId: event.generationId,
+          currentImages: event.imageIds.map((id) => ({ id, generationId: event.generationId })),
+          _jobId: null,
+          _watch: null,
+        });
+        // Show its seed/steps/size without overwriting the form (seed stays -1).
+        imageApi.getGeneration(event.generationId)
+          .then((gen) => set({ selectedGeneration: gen }))
+          .catch(() => {});
+        get().loadHistory();
+        break;
+      case "error":
+      case "cancelled":
+        set({
+          isGenerating: false,
+          error: event.type === "error" ? event.error : null,
+          progress: 0,
+          stage: null,
+          _jobId: null,
+          _watch: null,
+        });
+        break;
+    }
+  },
+
+  /**
+   * A job still running on the server (started before a reload, or from
+   * another device): show it and follow it to the end.
+   */
+  resumeJob: async () => {
+    if (get().isGenerating) return;
+    let jobs;
+    try {
+      ({ jobs } = await imageApi.listJobs({ active: true }));
+    } catch {
+      return;
+    }
+    const job = jobs?.[0];
+    if (!job || get().isGenerating) return;
+    set({
+      isGenerating: true,
+      progress: job.progress?.value ?? 0,
+      progressStep: job.progress?.step ?? 0,
+      progressTotalSteps: job.progress?.totalSteps ?? 0,
+      stage: job.stage || "starting",
+      stageMessage: job.message || "",
+      currentGenerationId: null,
+      currentImages: [],
+      error: null,
+      _jobId: job.id,
+    });
+    set({ _watch: imageApi.watchJob(job.id, get()._onJobEvent, job.seq) });
+  },
+
+  // Stop the job on the server; its stream then ends with "cancelled".
+  cancelGeneration: async () => {
+    const { _jobId, _watch } = get();
+    if (!_jobId) return;
+    set({ stage: "cancelling", stageMessage: "Cancelling…" });
+    try {
+      await imageApi.cancelJob(_jobId);
+    } catch (err) {
+      _watch?.detach();
+      set({ isGenerating: false, progress: 0, stage: null, error: err.message, _jobId: null, _watch: null });
     }
   },
 

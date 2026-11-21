@@ -1,4 +1,4 @@
-import { getAuthToken } from "./auth.js";
+import { sessionHeader } from "./auth.js";
 
 const API_BASE = "/api";
 
@@ -7,9 +7,8 @@ const API_BASE = "/api";
  */
 export async function fetchHardwareInfo() {
   try {
-    const token = await getAuthToken();
     const res = await fetch(`${API_BASE}/hardware`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: await sessionHeader(),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

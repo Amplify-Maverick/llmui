@@ -4,6 +4,8 @@ The API a native client (the iOS app) uses, as it exists today. Everything here 
 
 Examples are real responses captured from an isolated instance (scratch database, real machines, read-only calls) on 2026-11-20. Tokens are replaced with `<token>`. The stored-image example uses a synthetic image written through the same code path as a real generation.
 
+Examples in §2.2–2.3, §4.1–4.3 and §8.3–8.4 were captured from an isolated instance whose model server and sd-server were local fakes speaking the same wire formats (no GPU was used). That's why the model id is `test/fake-model-GGUF:Q4_K_M` and the text is filler.
+
 Labels used below:
 
 - **Stable**: safe to build on; changes will be additive.
@@ -32,7 +34,7 @@ Labels used below:
 
 **Base URL.** `https://box.tailde6c83.ts.net:8452` (`tailscale serve` → Express on `127.0.0.1:3001`). The phone must be on the tailnet.
 
-**Bodies.** JSON in and out (`Content-Type: application/json`), 5 MB request limit. Exceptions: image bytes, and the three streams in §4 and §8 (NDJSON or SSE).
+**Bodies.** JSON in and out (`Content-Type: application/json`), 5 MB request limit. Exceptions: image bytes, and the event streams in §4 and §8 (NDJSON or SSE).
 
 **Errors.** Every API error is JSON. Two shapes exist:
 
@@ -48,9 +50,9 @@ Requests that fail before any route runs (malformed JSON body, database constrai
 | Code | Meaning |
 |---|---|
 | 400 | Invalid input. `error` says what's wrong. |
-| 401 | Missing or wrong bearer token: `{"error":"Unauthorized"}`. |
+| 401 | Missing, wrong, expired or revoked token: `{"error":"Unauthorized"}`. |
 | 404 | Unknown id. |
-| 409 | Conflict: GPU busy with an image job (`code: "image_generation_in_progress"` or `"gpu_busy"`), or the pinned machine changed (`code: "machine_changed"`). See §5 and §8. |
+| 409 | Conflict: GPU busy with an image job (`code: "image_generation_in_progress"` or `"gpu_busy"`), the pinned machine changed (`code: "machine_changed"`), a reply is already being generated in that chat (`code: "run_in_progress"`), or a job hasn't completed (`code: "job_running"` etc.). See §4, §5 and §8. |
 | 429 | Rate limit: `{"error":"Too many requests, please try again later"}`. |
 | 502 | An upstream (model server, sd-server, download helper, Hugging Face) failed or is unreachable. |
 | 503 | A machine's download helper isn't configured on the server. |
@@ -67,21 +69,23 @@ Requests that fail before any route runs (malformed JSON body, database constrai
 
 ### 2.1 Sending the token — Stable
 
-Every endpoint except `/health`, `/api/setup/status`, `/api/llmui-token` and `/auth/token` needs:
+Every endpoint except `/health`, `/api/setup/status` and `POST /api/session` needs one of:
 
 ```
-Authorization: Bearer <token>
+Authorization: Bearer <device token>
 ```
 
-The token is a 64-character hex string, stored on the server in `~/.llmui/token`. It is a single, shared, full-access token. There are no per-device tokens, scopes or revocation (see §11). Store it in the iOS Keychain.
+- **Device token** (what the iOS app uses): 64 hex characters, created by pairing (§2.2). Each paired device has its own, listed in Settings → Devices with its last use, and revocable there (§2.3). Store it in the iOS Keychain. A revoked or unknown token gets `401 {"error":"Unauthorized"}`; on 401 the app should show "Pair again".
+- **Server token**: the contents of `~/.llmui/token` on the server. It's never served over HTTP; only local tools that can read the file (the TUI) use it.
+- **Browser session**: the web app's cookie (§2.4). Native clients don't use it.
 
-CORS: native requests send no `Origin` and are allowed. Custom request header the server accepts: `X-LLMUI-Machine` (§5.4). Exposed response header: `X-LLMUI-Machine`.
+There are no scopes: every credential has full access. CORS: native requests send no `Origin` and are allowed. Request headers the server accepts cross-origin: `Authorization`, `Content-Type`, `X-LLMUI-Machine` (§5.4), `X-LLMUI-Web`. Exposed response headers: `X-LLMUI-Machine`, `X-LLMUI-Run-Id`, `X-LLMUI-Job-Id`.
 
-### 2.2 QR pairing payload — Stable
+### 2.2 Pairing — Stable
 
-**Settings → Pair iPhone** in the web app shows a QR code, only after a click. It hides itself after 2 minutes (or on **Hide now**) and warns that anyone who scans it gets full access.
+**Settings → Devices** in the web app: type a name (default "iPhone"), press **Pair a device**. That calls `POST /api/devices`, which creates a token for that device alone, and shows it as a QR code. The QR hides itself after 2 minutes (or on **Hide now**).
 
-QR text:
+QR text (format unchanged from earlier versions; only the token is now per-device):
 
 ```
 llmui-pair:v1:{"url":"https://box.tailde6c83.ts.net:8452","token":"<64 hex chars>"}
@@ -89,28 +93,62 @@ llmui-pair:v1:{"url":"https://box.tailde6c83.ts.net:8452","token":"<64 hex chars
 
 - The prefix `llmui-pair:v1:` is the version. The rest of the string is a JSON object.
 - `url`: origin to use as the base URL. No trailing slash, no path.
-- `token`: the bearer token.
+- `token`: this device's bearer token.
 - A client must reject any other prefix, including a later `llmui-pair:v2:`, and any body whose `url` or `token` isn't a string. Future versions may change the body entirely.
+- **A token that is never used expires 10 minutes after it was created.** After scanning, verify with `GET {url}/api/machines` and the token right away: 200 means paired (and marks the token used), 401 means it's wrong or expired.
 
-After scanning, verify with `GET {url}/api/machines` and the token. A 200 response means paired, and 401 means the token is wrong.
-
-### 2.3 `GET /api/pairing` — Web-only
-
-Used by the Settings page to build the QR code. Auth required.
+`POST /api/devices` with `{"name":"iPhone"}` (1–64 characters) → **201**:
 
 ```json
-{"version":"llmui-pair:v1","prefix":"llmui-pair:v1:","url":"https://box.tailde6c83.ts.net:8452","token":"<token>"}
+{"device":{"id":"3NV9QKgbKoWeHfNY2C2pC","name":"iPhone","createdAt":1795228960582,"lastUsedAt":null,"current":false},
+ "token":"<token>","expiresIfUnusedAt":1795229560582,
+ "pairing":{"version":"llmui-pair:v1","prefix":"llmui-pair:v1:","url":"https://box.tailde6c83.ts.net:8452"},
+ "text":"llmui-pair:v1:{\"url\":\"https://box.tailde6c83.ts.net:8452\",\"token\":\"<token>\"}"}
 ```
 
-`url` is `LLMUI_PUBLIC_URL` if set, else the first `https://` origin in `LLMUI_ALLOWED_ORIGINS` (the systemd unit sets it to the tailnet URL), else `null`. When it's `null`, the browser uses its own origin.
+(Captured with no public URL configured, where `pairing.url` and `text` were `null`; shown here as they look on the box.) `pairing.url` is `LLMUI_PUBLIC_URL` if set, else the first `https://` origin in `LLMUI_ALLOWED_ORIGINS` (the systemd unit sets it to the tailnet URL), else `null`. When it's `null`, `text` is `null` too and the web app builds the text with its own origin. `400 {"error":"name is required (1-64 characters)"}`.
 
-### 2.4 Other token routes — Web-only
+### 2.3 Devices — Stable
+
+| Method & path | Response |
+|---|---|
+| `GET /api/devices` | `{"devices":[{"id","name","createdAt","lastUsedAt","current"}]}`, newest first. `lastUsedAt` is null until first use and updated at most once a minute. `current` is true for the device making the request. |
+| `DELETE /api/devices/:id` | `{"success":true}`, or `404 {"error":"Device not found"}`. The token stops working immediately. |
+
+```json
+{"devices":[{"id":"3NV9QKgbKoWeHfNY2C2pC","name":"iPhone","createdAt":1795228960582,"lastUsedAt":null,"current":false},
+            {"id":"Yoy5NliBo5juUrTGo9QUY","name":"Test iPhone 2","createdAt":1795228900110,"lastUsedAt":1795228900134,"current":false}]}
+```
+
+### 2.4 How the web app signs in — Web-only
+
+The browser never holds a token. On load it calls `POST /api/session`; the server answers with an `HttpOnly; SameSite=Strict` cookie (`Secure` over HTTPS) valid for 30 days, signed with a secret in `~/.llmui/session_secret`, and the body `{"identity":"tailscale:alice@example.com"}`. Every API request then sends the cookie plus the header `X-LLMUI-Web: 1`. If a request gets 401 (expired, or the secret was rotated), the app renews the session once and retries.
+
+`POST /api/session` only issues a cookie when the TCP peer is loopback (Express listens on 127.0.0.1) **and** either:
+
+- the request carries `Tailscale-User-Login`, i.e. it came through `tailscale serve` from a tailnet user. tailscale serve sets this header from the tailnet's own record of who is connecting, and removes any copy the client sent. It sets none for tagged devices or Funnel traffic; or
+- it carries no proxy headers at all (`X-Forwarded-For`, `Forwarded`): a browser on the server itself, or the Vite dev server.
+
+Anything else gets `403 {"error":"Open LLMUI through tailscale serve as a tailnet user, or from this machine","code":"not_allowed"}`. Set `LLMUI_TAILSCALE_USERS=alice@example.com,bob@example.com` to accept only those tailnet logins.
+
+Why this design:
+
+- **No token reaches an unauthenticated request.** The old `GET /api/llmui-token` handed the full token to anyone who could reach the port. Now the server checks who the caller is first, using an identity tailscale serve already verified, so there is no new login to manage.
+- **The identity header is checked once, at sign-in, not on every request.** All other routes use the same check as native clients (a credential), and nothing else depends on proxy headers.
+- **The cookie is HttpOnly, so page scripts can't read it.** Script injected through rendered model output can't steal a credential to use elsewhere.
+- **`X-LLMUI-Web: 1` blocks cross-site request forgery.** A custom header forces a CORS preflight, and only allowed origins pass it, so another site can't make the browser send cookie-authenticated requests.
+
+Limits:
+
+- Cookies aren't isolated by port. Other web services served on `box.tailde6c83.ts.net` (other ports) receive the cookie if the browser visits them, and could replay it. Only run services you trust on that host name.
+- Revoking a browser isn't per-device. Deleting `~/.llmui/session_secret` and restarting signs every browser out; tailnet users simply sign in again on the next load.
+
+### 2.5 Other routes
 
 | Route | Auth | Notes |
 |---|---|---|
-| `GET /api/llmui-token` | none | `{"token":"..."}`. The SPA bootstraps from this. **Anyone who can reach the server gets the token**, which includes the whole tailnet (§11). |
-| `GET /auth/token` | localhost only | `{"token":"..."}`, 403 from anywhere else. |
 | `GET /health` | none | `{"status":"ok"}`. Fine as a reachability check. |
+| `GET /api/llmui-token`, `GET /auth/token`, `GET /api/pairing` | — | **Removed.** They returned the shared server token. |
 
 ---
 
@@ -139,7 +177,8 @@ Chats are called *conversations* in the API. Messages live in a separate collect
   "compareModels": null,
   "source": "local",
   "messageCount": 2,
-  "childBranchCount": 0
+  "childBranchCount": 0,
+  "activeRunId": null
 }
 ```
 
@@ -148,6 +187,7 @@ Chats are called *conversations* in the API. Messages live in a separate collect
 - `parentConversationId` / `branchPointMessageId`: set on branches (§3.8).
 - `isCompare` / `compareModels`: web Compare mode. Treat these chats as read-only.
 - `source`: `"local"` for chats made in LLMUI. Other values come from imports.
+- `activeRunId`: the id of the run generating a reply in this chat right now (§4.2), else `null`. In the list and the single-chat response.
 
 ### 3.2 List — `GET /api/conversations` — Stable
 
@@ -195,30 +235,31 @@ Deletes the conversation and its messages. Branches of it remain, with `parentCo
 **Message object:**
 
 ```json
-{"id":"hyr8O0YUAH3w_UU6wUZxD","role":"assistant","content":"4.","model":"unsloth/Qwen3-8B-GGUF:Q4_K_M","timestamp":1763683201000,"position":1,"tokensPerSec":31.8}
+{"id":"hyr8O0YUAH3w_UU6wUZxD","role":"assistant","content":"4.","model":"unsloth/Qwen3-8B-GGUF:Q4_K_M","timestamp":1763683201000,"position":1,"tokensPerSec":31.8,"thinking":"The user asks a simple sum."}
 ```
 
 - `role`: `user` | `assistant` | `system` | `tool`.
 - `images` (optional): image attachments on user messages, as `[{"name":"a.png","type":"image/png","size":12345,"data":"<base64, no data: prefix>"}]`. The web app also stores a `preview` data URL. Native clients can omit it.
 - `toolCalls` (optional): tool calls on assistant messages, as `[{"id","name","arguments":{},"status":"completed","result":...,"error":null}]`.
 - `model`, `tokensPerSec`: assistant messages only.
-- Not stored: Think text, `duration` and `promptPerSec`. The server drops any field not listed here.
+- `thinking` (optional, string): the model's Think text, on assistant messages. Absent when there was none. Replies stored by a run (§4.1) include it; clients that save messages themselves can send it on `POST`, `PUT` and `PATCH`. It's copied into branches and exports, and it isn't sent back to the model as history.
+- Not stored: `duration` and `promptPerSec`. The server drops any field not listed here.
 
 | Method & path | Body | Response | Notes |
 |---|---|---|---|
 | `GET /api/conversations/:id/messages` | — | `{"messages":[...]}` ordered by `position` | 404 for unknown chat |
 | `POST /api/conversations/:id/messages` | one message (`role` required; `id`, `timestamp` optional) | the stored message with `id`, `position` | Appends. If it's the first message, it's a user message and the title is still "New Chat", the title becomes the first 30 characters. 400 for a bad role, 404 for an unknown chat |
 | `PUT /api/conversations/:id/messages` | `{"messages":[...]}` | `{"success":true,"count":2}` | **Replaces all** messages (positions renumbered 0..n-1). This is how the web app saves. Doesn't auto-title. |
-| `PATCH /api/messages/:id` | `{"content"?, "tokensPerSec"?, "toolCalls"?}` | `{"success":true}` | 400 if empty, 404 |
+| `PATCH /api/messages/:id` | `{"content"?, "tokensPerSec"?, "toolCalls"?, "thinking"?}` | `{"success":true}` | 400 if empty, 404 |
 | `DELETE /api/messages/:id?truncateAfter=true` | — | `{"success":true}` | With `truncateAfter=true`, also deletes every later message. Without it, deletes one message and renumbers the rest. |
+
+While a run is generating a reply in a chat (§4.1), `POST`, `PUT` and `DELETE` on that chat's messages return `409 {"error":"A reply is being generated in this chat; try again when it finishes","code":"run_in_progress","runId":"..."}`, so nothing rewrites the history under the reply. Deleting the chat itself cancels the run.
 
 ### 3.8 Branches, edit and regenerate
 
-There are no server-side "edit" or "regenerate" operations. The web app builds them from the pieces above. Do the same:
-
-- **Edit a user message** → `POST /api/conversations/:id/branch` with `{"branchAtMessageId":"<user msg id>","editedContent":"new text"}`. This creates a **new conversation** (title `"Branch: <parent title>"`, same settings) containing the messages before that one, plus the edited user message. Then stream a reply (§4) and save it into the new conversation.
+- **Edit a user message** → `POST /api/conversations/:id/branch` with `{"branchAtMessageId":"<user msg id>","editedContent":"new text"}`. This creates a **new conversation** (title `"Branch: <parent title>"`, same settings) containing the messages before that one, plus the edited user message. Then `POST /api/conversations/<new id>/send` with **no `content`** (§4.1) to answer it.
 - **Branch without editing** → same call without `editedContent`. The new conversation contains messages up to and including `branchAtMessageId`.
-- **Regenerate** the last reply → `DELETE /api/messages/<last assistant id>`, stream again (§4), then save the new reply.
+- **Regenerate** the last reply → `POST /api/conversations/:id/send` with `{"regenerate":true}` (§4.1). The server deletes the trailing reply and answers again.
 
 Branch response: the new conversation (`parentConversationId`, `branchPointMessageId`, `messageCount` set). Errors: `400 {"error":"branchAtMessageId is required"}`, `404 {"error":"Conversation not found"}`, `404 {"error":"Message not found in conversation"}`.
 
@@ -228,27 +269,103 @@ Branch response: the new conversation (`parentConversationId`, `branchPointMessa
 
 ## 4. Sending a message (streaming)
 
-**Read this first.** The server doesn't persist anything during a chat turn. The client:
+**Use §4.1.** The server stores the user message, builds the history from the database, runs the model (with tools if enabled), and stores the reply, whether or not the client stays connected. The client watches the run's event stream, and can drop it at any time (app in the background, network change) and reattach later by run id or chat id to get exactly what it missed (§4.2). Only an explicit cancel stops a run (§4.3).
 
-1. creates the chat if needed (§3.4),
-2. builds the full `messages` array itself: the system prompt (chat override, else global), the history, then the new user message,
-3. streams the reply from one of the two endpoints below,
-4. saves the result with `POST` (each message) or `PUT` (the whole list) under §3.7.
+§4.5 and §4.6 are the older client-managed endpoints: the client builds the history, streams, and saves the result itself, and closing the connection stops generation. They remain for the web Compare view and for compatibility.
 
-If the app is killed mid-stream, nothing is saved. A server-side "send and persist" endpoint is listed in §11.
+A run goes to the selected machine, falling back to the default machine if the selected one is down (§5.3). It's refused with **409** while an image job holds that machine's GPU (§8.5).
 
-Pick the endpoint per turn:
+### 4.1 Send — `POST /api/conversations/:id/send` — Stable
 
-| Tools enabled? | Endpoint | Wire format |
+Request (every field optional):
+
+```json
+{
+  "content": "What is 2+2?",
+  "images": [{"name":"a.png","type":"image/png","data":"<base64>"}],
+  "model": "Qwen/Qwen3-8B-GGUF:Q4_K_M",
+  "enableThinking": true,
+  "enabledTools": ["calculator"],
+  "temperature": 0.7,
+  "maxTokens": 2048,
+  "systemPrompt": "Be brief.",
+  "regenerate": false
+}
+```
+
+What it does:
+
+- `content` and/or `images` present: appends that user message (auto-titling a new chat, as in §3.7), then answers it. `images` may also be bare base64 strings. A vision model is needed (`sidecars` includes `mmproj`, §6.1).
+- Neither present: answers the chat as it stands. Its last message must be a user message (e.g. a branch made by editing, §3.8), else `400 {"error":"Nothing to reply to: the chat doesn't end with a user message"}`.
+- `"regenerate": true` (without `content`): deletes the trailing assistant reply, then answers.
+- Settings: each field you send wins; otherwise the chat's override (§3.5), otherwise the global setting (§10.1). `model` falls back to the chat's model, then the global `defaultModel`. Tools: `enabledTools` if sent (`[]` = none), else the global `enabledTools` when global `enableTools` is on, else none. **Omitting tools never enables all of them** (unlike §4.6). The chat's `model` is updated to the model used.
+
+Response: **200**, `Content-Type: application/x-ndjson`, headers `X-LLMUI-Run-Id: <run id>` and `X-LLMUI-Machine: <machine id>`. One JSON object per line, each with a `seq` (1, 2, 3, … per run). Blank lines are keepalives (every 15 s while idle); skip them. Real example (thinking on, no tools; middle elided):
+
+```
+{"seq":1,"type":"start","runId":"B0_BxUC664yuvDh_AUU8B","conversationId":"v0AEJAL2ZeskmZqMRmQN0","userMessageId":"tOLC9pwEsv_YaI5bCsE47","model":"test/fake-model-GGUF:Q4_K_M","machine":"jellyfin"}
+{"seq":2,"type":"thinking","content":"Let "}
+{"seq":3,"type":"thinking","content":"me "}
+{"seq":4,"type":"thinking","content":"think "}
+...
+{"seq":48,"type":"content","content":"time. "}
+{"seq":49,"type":"done","iterations":1,"machine":"jellyfin","timings":{"predicted_n":41,"predicted_ms":16400,"predicted_per_second":2.5,"prompt_n":20,"prompt_ms":40,"prompt_per_second":500},"messageId":"luR-q4Ei-N_TGThYCaUpk"}
+```
+
+| type | fields | notes |
 |---|---|---|
-| No | `POST /openai/v1/chat/completions` | OpenAI SSE, passed through from llama.cpp |
-| Yes | `POST /api/chat-with-tools` | NDJSON, built by LLMUI (tool loop runs on the server) |
+| `start` | `runId`, `conversationId`, `userMessageId`, `model`, `machine` | Always first. `userMessageId` is the stored message being answered. |
+| `thinking` | `content` | Think delta. |
+| `content` | `content` | Answer delta. |
+| `tool_call` | `id`, `name`, `arguments` | As in §4.6. |
+| `tool_result` | `id`, `name`, `result`, `error` | As in §4.6. |
+| `done` | `iterations`, `machine`, `timings`, `messageId` | **Normal end.** The reply is stored as `messageId`. |
+| `error` | `error`, `messageId` | **Abnormal end** (model error, `"Max tool iterations reached"`). Whatever was produced before the error is stored as `messageId`; `null` if nothing was. |
+| `cancelled` | `messageId` | **Ended by cancel** (§4.3). The partial reply is stored as `messageId` (`null` if empty). |
 
-Both go to the selected machine, falling back to the default machine if the selected one is down (§5.3). Both return **409** while an image job holds that machine's GPU (§8.4). To stop generating, close the connection. The server aborts upstream.
+Exactly one of `done` / `error` / `cancelled` ends every run, and the stream closes after it. Ignore unknown types. The stored reply has `content`, `thinking`, `toolCalls`, `model` and `tokensPerSec` (= `timings.predicted_per_second`). Fetch it with `GET /api/conversations/:id/messages` after the end event; don't save it yourself.
 
-Message format for both: `{"role","content","images"?: ["<base64>", ...]}`. Note that `images` here is an array of **base64 strings**, not the stored objects. The server converts it to OpenAI `image_url` parts. A vision model is needed (`sidecars` includes `mmproj`, §6.1).
+Refusals (plain JSON, nothing stored): `404 {"error":"Conversation not found"}`; `400` for `content must be a string`, `content is empty`, `regenerate can't be combined with content`, `enabledTools must be an array of tool names`, `temperature must be 0-5`, `maxTokens must be a positive integer`, `model is required (no model in the request, the chat or the settings)`, nothing to reply to (above); `409 {"error":"A reply is already being generated in this chat","code":"run_in_progress","runId":"..."}` (one run per chat at a time: reattach to `runId` instead); `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
-### 4.1 `POST /openai/v1/chat/completions` — Stable (format is llama.cpp's)
+### 4.2 Reattach and status — Stable
+
+| Method & path | Response |
+|---|---|
+| `GET /api/runs/:id/events?after=<seq>` | The same NDJSON stream: every event with `seq` greater than `after` (0 or omitted = from the start), then live events until the run ends. For a run that has already ended, the missed events and the end event, then the stream closes. |
+| `GET /api/conversations/:id/run/events?after=<seq>` | Same, for the chat's current run, or its latest one if none is running. `404 {"error":"No run for this chat","code":"no_run"}`. |
+| `GET /api/runs/:id` | Snapshot (below). |
+| `GET /api/conversations/:id/run` | `{"run": <snapshot or null>}`: the chat's current run, else its latest one still kept. |
+
+Snapshot (real; `content` shortened):
+
+```json
+{"id":"B0_BxUC664yuvDh_AUU8B","conversationId":"v0AEJAL2ZeskmZqMRmQN0","status":"completed","model":"test/fake-model-GGUF:Q4_K_M","machine":"jellyfin",
+ "userMessageId":"tOLC9pwEsv_YaI5bCsE47","messageId":"luR-q4Ei-N_TGThYCaUpk","startedAt":1795228960619,"finishedAt":1795228977650,"error":null,"seq":49,
+ "content":"This is a slow fake reply, streamed one …","thinking":"Let me think about this carefully. ","toolCalls":[],
+ "timings":{"predicted_n":41,"predicted_ms":16400,"predicted_per_second":2.5,"prompt_n":20,"prompt_ms":40,"prompt_per_second":500}}
+```
+
+- `status`: `running` | `completed` | `failed` | `cancelled`.
+- `content` / `thinking` / `toolCalls`: everything produced so far, so a client can draw the reply at once and then attach with `after=seq` for the rest.
+- `messageId`: the stored reply once the run has ended (null while running, or if nothing was produced).
+
+Runs are kept in server memory for **30 minutes** after they end (Unstable: may change). After that, or after a server restart, `/api/runs/:id` returns `404 {"error":"Run not found","code":"no_run"}`. The stored messages are then the record. A restart **loses a running run**: its user message stays stored with no reply, and `POST …/send` with no `content` answers it again.
+
+**iOS pattern:** send (§4.1) and remember `runId` (from the header or `start`) and the last `seq`. When the app comes back, or the stream breaks: `GET /api/runs/:id` → if `running`, render `content`/`thinking` and attach with `after=<snapshot seq>`; if ended, reload the chat's messages. After a cold start, `activeRunId` on the conversation (§3.1) says which chats are still generating.
+
+### 4.3 Cancel — `POST /api/runs/:id/cancel` — Stable
+
+Stops the model and stores the partial reply. It answers with the snapshot once the run has ended (normally well under a second), or after 10 s with `status` still `running`. A run that has already ended is returned unchanged. Watchers get the `cancelled` event. `404` for an unknown run.
+
+```json
+{"id":"-ZfdrfyH96TsinPaYVBJZ","status":"cancelled","messageId":"ueJIaHIwAF9fnY-6E5Bv_","seq":8, "...":"rest of the snapshot"}
+```
+
+### 4.4 SSE instead of NDJSON — Stable
+
+Add `?format=sse` to `POST …/send`, `GET /api/runs/:id/events` or `GET …/run/events` to get the same events as `data: <json>` SSE events (keepalives are `: ping` comments).
+
+### 4.5 `POST /openai/v1/chat/completions` — Stable (format is llama.cpp's)
 
 Request:
 
@@ -289,7 +406,7 @@ data: [DONE]
 
 `GET /openai/v1/models` passes through the router's list. Prefer `/api/llama/models` (§6.1).
 
-### 4.2 `POST /api/chat-with-tools` — Stable
+### 4.6 `POST /api/chat-with-tools` — Stable
 
 Request:
 
@@ -318,7 +435,7 @@ Response: `Content-Type: application/x-ndjson`, one JSON object per line. The ev
 
 | type | fields | notes |
 |---|---|---|
-| `thinking` | `content` | Think delta (`enableThinking: true`). New in this revision. Older servers never send it. |
+| `thinking` | `content` | Think delta (`enableThinking: true`). |
 | `content` | `content` | Answer delta. Content from all model turns arrives in order. |
 | `tool_call` | `id`, `name`, `arguments` (object) | Sent just before the tool runs. |
 | `tool_result` | `id`, `name`, `result` (any JSON, or null), `error` (string, or null) | Matches `tool_call` by `id`. |
@@ -327,7 +444,7 @@ Response: `Content-Type: application/x-ndjson`, one JSON object per line. The ev
 
 Errors before the stream starts are plain JSON: `400 {"error":"Model is required"}`, `400 {"error":"messages must be an array"}`, `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
-When saving, store the answer text as `content` and the calls as `toolCalls` (§3.7).
+When saving, store the answer text as `content`, the Think text as `thinking` and the calls as `toolCalls` (§3.7).
 
 ---
 
@@ -370,7 +487,7 @@ When the selected machine isn't the default and its chat (or image) service is d
 
 - `fallback.chat` / `fallback.image` = `{"from":"workstation","reason":"ECONNREFUSED"}` in §5.1. Show a banner like "Workstation unreachable, using Jellyfin".
 - `effective.chat` / `effective.image` = where requests go now.
-- The per-request signals: the `X-LLMUI-Machine` response header (§4.1) and `machine` in the `done` event (§4.2).
+- The per-request signals: the `X-LLMUI-Machine` response header (§4.1, §4.5), and `machine` in the `start` and `done` events (§4.1, §4.6).
 
 ### 5.4 Pinning a machine — Stable
 
@@ -583,9 +700,14 @@ These are the models you can generate with on that machine, plus the samplers, s
 
 `502 {"error":"..."}` if sd-server is unreachable.
 
-### 8.3 Generate — `POST /api/images/txt2img` — Stable
+### 8.3 Generate — Stable
 
-Request (everything except `prompt` falls back to the machine's defaults):
+Generation is a **job**: it gets an id, owns the machine's GPU until it ends, and runs whether or not anyone is watching. **Closing a connection never cancels a job**; only `POST /api/images/jobs/:id/cancel` does (§8.4). Start one either way:
+
+- `POST /api/images/jobs`: answers **202** at once with the job's snapshot (§8.4). Best for iOS: then poll the snapshot, or watch its events.
+- `POST /api/images/txt2img`: starts the job and streams its events (SSE) on the same response, with header `X-LLMUI-Job-Id`. Hanging up just stops watching.
+
+Both take the same body. Request (everything except `prompt` falls back to the machine's defaults):
 
 ```json
 {"prompt":"a lighthouse on a cliff at dusk, oil painting","negativePrompt":"blurry","checkpoint":"checkpoints/sd15.safetensors",
@@ -594,7 +716,7 @@ Request (everything except `prompt` falls back to the machine's defaults):
 
 Limits: width and height are multiples of 8 from 64 to 2048. `steps` 1–150, `cfgScale` 1–30, `batchCount` 1–4. `seed` is -1 (random; the server picks it and reports it) or 0..2³²-1.
 
-Rejected before the stream starts (plain JSON):
+Rejected before the job starts (plain JSON, nothing runs):
 
 | Status | Body |
 |---|---|
@@ -605,44 +727,77 @@ Rejected before the stream starts (plain JSON):
 | 409 | `{"error":"a chat response is still streaming; try again when it finishes","code":"gpu_busy"}` |
 | 502 | `{"error":"..."}`: sd-server unreachable |
 
-Otherwise: **200, `text/event-stream`**. Each event is one `data:` line with JSON. The `type` field is the event name, and there are no `event:` lines.
+Events (SSE: one `data:` line of JSON per event, blank line between; `: ping` comments every 15 s while idle). Each has a `seq` (1, 2, 3, … per job). Real example (fake sd-server, 3 steps; repeated keepalive stages elided):
 
 ```
-data: {"type":"stage","stage":"freeing_gpu","message":"Unloading chat models on Jellyfin…"}
+data: {"seq":1,"type":"job","jobId":"_mxS2ASxJ81M_aU9fD_TJ","machine":"jellyfin"}
 
-data: {"type":"stage","stage":"freeing_gpu","message":"Waiting for Qwen/Qwen3-8B-GGUF:Q4_K_M (sleeping) to unload…"}
+data: {"seq":2,"type":"stage","stage":"freeing_gpu","message":"Unloading chat models on Jellyfin…"}
 
-data: {"type":"stage","stage":"loading_model","message":"Loading checkpoints/sd15.safetensors…"}
+data: {"seq":3,"type":"stage","stage":"freeing_gpu","message":"Waiting for test/fake-model-GGUF:Q4_K_M (loaded) to unload…"}
 
-data: {"type":"progress","stage":"preparing","step":0,"totalSteps":20,"pass":1,"value":null}
+data: {"seq":4,"type":"stage","stage":"loading_model","message":"Loading checkpoints/sd15.safetensors…"}
 
-data: {"type":"progress","stage":"sampling","step":7,"totalSteps":20,"pass":1,"value":0.35}
+data: {"seq":7,"type":"progress","stage":"sampling","step":1,"totalSteps":3,"pass":1,"value":0.3333333333333333}
 
-data: {"type":"progress","stage":"vae_decode","step":0,"totalSteps":20,"pass":1,"value":null}
-
-data: {"type":"complete","machine":"jellyfin","generationId":"0Foi-r9i02OlKlYKIfx_9","imageIds":["tCmbP-dcb8eF1-PbS9ZoV"],"seed":1234567890,"imageCount":1,"api":"sdcpp","timings":{"totalMs":23410,"generateMs":21032}}
+data: {"seq":11,"type":"complete","machine":"jellyfin","generationId":"cvRS1cWdIJUXv3FI0p-rX","imageIds":["ui1OeQxCSTTgLyBqDYxYM"],"seed":1366911423,"imageCount":1,"api":"sdcpp","timings":{"totalMs":4535,"generateMs":3019}}
 ```
 
-- `stage` events: `freeing_gpu`, `loading_model` (repeated every 5 s while loading, as a keepalive).
+- `job`: always first; the job id.
+- `stage`: `freeing_gpu`, `loading_model` (repeated every 5 s while loading, as a keepalive).
 - `progress`: `stage` is `queued` | `preparing` | `sampling` | `vae_decode` | …. `value` is overall progress 0..1 across the batch, or null when unknown. `pass` is which image of the batch (1-based).
-- **Normal end**: `complete`. Then fetch the images (§8.6).
-- **Abnormal end**: `{"type":"error","error":"sd-server job failed: ..."}`. The stream closes after it.
-- **Cancel**: close the connection. The job is cancelled on sd-server. **Closing the connection for any reason cancels the job**, including the app going to the background (§11).
+- Exactly one end event, then the stream closes: **`complete`** (fetch the images, §8.7), **`error`** `{"error":"sd-server job failed: ..."}`, or **`cancelled`** (after §8.4's cancel).
 - After a job ends, either way, the SD model is unloaded and the GPU is freed for chat. The chat model is *not* reloaded until the next chat request.
 
-### 8.4 409 behaviour while a job runs — Stable
+### 8.4 Jobs — Stable
+
+| Method & path | Response |
+|---|---|
+| `GET /api/images/jobs/:id` | Snapshot (below). |
+| `GET /api/images/jobs/:id/events?after=<seq>` | SSE: events with `seq` > `after` (0 = from the start), then live until the end event. For an ended job: the missed events and the end event. |
+| `GET /api/images/jobs/:id/result` | Completed: `{jobId, machine, generationId, imageIds, seed, imageCount, api, timings, images:[{id, url, metaUrl}]}`. Otherwise `409` with `code` `job_running`, `job_failed` or `job_cancelled` (and `status`). |
+| `POST /api/images/jobs/:id/cancel` | Stops the job (sd-server cancels it, the SD model is unloaded, the GPU freed) and answers with the snapshot once it has ended (`status: "cancelled"`), or after 30 s with `status` still `running`. An ended job is returned unchanged. |
+| `GET /api/images/jobs[?active=1]` | `{"jobs":[snapshot, ...]}` newest first: jobs the server still holds; `active=1` only running ones. Use it after a restart of the app to find a job it lost track of. |
+
+Unknown ids: `404 {"error":"Job not found","code":"no_job"}`.
+
+Snapshot (real, while sampling):
+
+```json
+{"id":"_mxS2ASxJ81M_aU9fD_TJ","status":"running","machine":"jellyfin",
+ "params":{"prompt":"a lighthouse on a cliff at dusk, oil painting","negativePrompt":"","checkpoint":"checkpoints/sd15.safetensors","width":512,"height":512,"steps":3,"cfgScale":7,"sampler":"euler_a","scheduler":null,"seed":1366911423,"batchCount":1},
+ "stage":"sampling","message":"","progress":{"stage":"sampling","step":0,"totalSteps":3,"pass":1,"value":0},
+ "createdAt":1795228985807,"finishedAt":null,"error":null,"result":null,"seq":6}
+```
+
+- `status`: `running` | `completed` | `failed` | `cancelled`. `progress` is the last `progress` event; `stage`/`message` the current stage.
+- `result` (when completed): `{generationId, imageIds, seed, imageCount, api, timings}`.
+
+Result (real):
+
+```json
+{"jobId":"_mxS2ASxJ81M_aU9fD_TJ","machine":"jellyfin","generationId":"cvRS1cWdIJUXv3FI0p-rX","imageIds":["ui1OeQxCSTTgLyBqDYxYM"],"seed":1366911423,"imageCount":1,"api":"sdcpp",
+ "timings":{"totalMs":4535,"generateMs":3019},
+ "images":[{"id":"ui1OeQxCSTTgLyBqDYxYM","url":"/api/images/generations/cvRS1cWdIJUXv3FI0p-rX/images/ui1OeQxCSTTgLyBqDYxYM","metaUrl":"/api/images/generations/cvRS1cWdIJUXv3FI0p-rX/images/ui1OeQxCSTTgLyBqDYxYM/meta"}]}
+```
+
+Jobs stay in server memory for **1 hour** after they end (Unstable: may change). A completed job's generation records its job id, so `GET /api/images/jobs/:id` and `/result` still answer for it after that, and after a restart (with `params`, `createdAt` and `seq` null). A failed or cancelled job is forgotten. A server restart loses a running job.
+
+**iOS pattern:** `POST /api/images/jobs`, keep the id. While in the foreground, watch `/events` (or poll the snapshot every 1–2 s). When the app comes back, `GET` the snapshot: still `running` → watch `/events?after=<seq>`; `completed` → `/result`.
+
+### 8.5 409 behaviour while a job runs — Stable
 
 While a job runs on machine M (`/api/images/status` → `busy: true`), these requests to M return 409:
 
-- `POST /api/chat-with-tools` → `{"error":"image generation in progress","code":"image_generation_in_progress"}`
+- `POST /api/conversations/:id/send` and `POST /api/chat-with-tools` → `{"error":"image generation in progress","code":"image_generation_in_progress"}`
 - `POST /openai/v1/chat/completions` → `{"error":{"message":"image generation in progress","code":"image_generation_in_progress","type":"conflict"}}`
 - `POST /api/llama/models/load` → same as chat-with-tools
-- `POST /api/images/txt2img` → `{"error":"image generation in progress","code":"gpu_busy"}`
+- `POST /api/images/jobs`, `POST /api/images/txt2img` → `{"error":"image generation in progress","code":"gpu_busy"}`
 - `DELETE /api/images/models/files/...` → `{"error":"An image is being generated; try again when it finishes"}`
 
-The other machine is unaffected. The iOS app should disable Send while `busy` and retry after `complete` or `error`.
+Likewise, a job can't start while a chat reply (§4) is being generated on M: `409 {"error":"a chat response is still streaming; try again when it finishes","code":"gpu_busy"}`. The other machine is unaffected. The iOS app should disable Send while `busy` and retry after the job ends.
 
-### 8.5 History list — `GET /api/images/generations?page=1&limit=20` — Stable
+### 8.6 History list — `GET /api/images/generations?page=1&limit=20` — Stable
 
 `limit` maxes out at 100. Newest first. The fields are **snake_case** (database columns).
 
@@ -656,15 +811,15 @@ The other machine is unaffected. The iOS app should disable Send while `busy` an
 
 `machine_id`, `machine_name` and `recipe` are null for images generated before they were recorded.
 
-`GET /api/images/generations/:id` returns one generation's raw row plus `images: [{id, filename, width, height, position, created_at}]`. **Web-only**: it includes internal JSON strings (`workflow_json`, `components_json`). Use §8.7 instead.
+`GET /api/images/generations/:id` returns one generation's raw row plus `images: [{id, filename, width, height, position, created_at}]`. **Web-only**: it includes internal JSON strings (`workflow_json`, `components_json`). Use §8.8 instead.
 
 `DELETE /api/images/generations/:id` → `{"success":true}`. It deletes the generation and its images, and succeeds even if the id is unknown.
 
-### 8.6 Fetch image bytes — `GET /api/images/generations/:genId/images/:imageId` — Stable
+### 8.7 Fetch image bytes — `GET /api/images/generations/:genId/images/:imageId` — Stable
 
 Returns the PNG bytes (`Content-Type: image/png`, or `image/jpeg` for jpg files) with `Cache-Control: private, max-age=31536000, immutable`, so cache it forever by URL. `404 {"error":"Image not found"}`. Requires the bearer header like everything else, so no plain `<img src>` loading.
 
-### 8.7 Image details — `GET /api/images/generations/:genId/images/:imageId/meta` — Stable
+### 8.8 Image details — `GET /api/images/generations/:genId/images/:imageId/meta` — Stable
 
 Everything known about one stored image, versioned by `schema`. A field that wasn't recorded is `null`, never guessed.
 
@@ -749,23 +904,36 @@ Full-text search over message content: `{"results":[...]}`. `400 {"error":"Inval
 
 ### 10.3 Web-only
 
-`/storage/:key`, `/api/gpu-config`, `/api/hardware`, `/api/setup/*`, `/api/backup*`, `/api/export*`, `/api/import`, `/api/pairing`, `/api/llmui-token`, `/auth/token`.
+`/storage/:key`, `/api/gpu-config`, `/api/hardware`, `/api/setup/*`, `/api/backup*`, `/api/export*`, `/api/import`, `POST /api/session`.
 
 ---
 
 ## 11. Known gaps
 
-These were found while writing this document and are too large to fix in passing. Each is a candidate for a follow-up.
+Closed in this revision: server-side send (§4.1), image jobs that outlive the connection (§8.3), stored Think text (§3.7), per-device tokens with revocation and no unauthenticated token route (§2).
 
-1. **No server-side "send message".** The client builds the history, streams, and saves (§4). If the iOS app is suspended mid-reply, the reply is lost, and two clients writing the same chat with `PUT` overwrite each other. Proposed fix: `POST /api/conversations/:id/turns` that appends the user message, streams the same NDJSON as §4.2, and persists the reply server-side even if the client disconnects.
-2. **Image jobs die with the connection.** Closing the `txt2img` stream cancels the job (§8.3). iOS kills connections when the app goes to the background. Proposed fix: a job id with `GET /api/images/jobs/:id` (progress) and `POST .../cancel`, with the SSE stream as an optional view of it.
-3. **Think text isn't stored.** It's streamed (§4) but there's no column for it, so reopened chats lose it.
-4. **One shared full-access token.** There's no per-device token, no revocation and no expiry. Also, `GET /api/llmui-token` hands the token to anyone who can reach the server, so the QR warning matters less than it should while that route exists. Proposed fix: per-device tokens created by pairing, with a revoke list, and the web bootstrap limited to the web app.
-5. **Text-model download events are unverified.** The router's `/models/sse` format was never observed live (§6.3). Rely on polling.
-6. **Mixed casing.** Conversations are camelCase. `PATCH` settings fields, image history and helper jobs are snake_case. A future `v2` could normalize these; nothing has been renamed, to avoid breaking the web app.
-7. **No push.** There are no notifications or websockets. Everything is polling plus the three streams.
+Still open:
 
-## Changes made while writing this
+1. **Runs and jobs don't survive a server restart.** They live in memory. A restart loses a running reply or image job (the user message stays stored; send again with no `content`). Finished ones are only reattachable for 30 min (runs) or 1 h (jobs); after that, read the stored messages / images.
+2. **Text-model download events are unverified.** The router's `/models/sse` format was never observed live (§6.3). Rely on polling.
+3. **Mixed casing.** Conversations are camelCase. `PATCH` settings fields, image history and helper jobs are snake_case. A future `v2` could normalize these; nothing has been renamed, to avoid breaking the web app.
+4. **No push.** There are no notifications or websockets. Everything is polling plus the event streams; a finished run or job doesn't notify a backgrounded app.
+5. **No token scopes or expiry.** Every device token has full access until revoked (unused ones expire after 10 minutes). The web Compare view still uses the client-managed endpoints (§4.5), so its replies aren't stored server-side.
+
+## Changes
+
+### 2026-11-20 (second revision)
+
+- **New:** `POST /api/conversations/:id/send`, `GET /api/runs/:id[/events]`, `GET /api/conversations/:id/run[/events]`, `POST /api/runs/:id/cancel` (§4.1–4.4). The web app sends, regenerates and answers edit branches through them, and reattaches to a running reply after a reload.
+- **New:** image jobs: `POST /api/images/jobs`, `GET /api/images/jobs[/:id[/events|/result]]`, `POST /api/images/jobs/:id/cancel` (§8.3–8.4). **Changed:** closing the `txt2img` stream no longer cancels the job; its events gained `seq`, a first `job` event and a `cancelled` end event. Cancelling during "freeing GPU" now stops at once instead of waiting for the chat models to unload.
+- **New:** `thinking` on messages (§3.7). The web app shows it, collapsed, on stored replies and live while streaming.
+- **New:** per-device tokens: `POST /api/devices` (pairing), `GET /api/devices`, `DELETE /api/devices/:id` (§2.2–2.3); Settings → Devices. The QR format stays `llmui-pair:v1`; its token is now the device's own.
+- **New:** browser sessions: `POST /api/session` and the `X-LLMUI-Web` header (§2.4).
+- **Removed:** `GET /api/llmui-token`, `GET /auth/token`, `GET /api/pairing`. They all returned the shared server token.
+- **Changed:** `POST`/`PUT`/`DELETE` on a chat's messages return 409 `run_in_progress` while a reply is being generated there. Conversations include `activeRunId`.
+- Web fix: Settings → Import sent a stale `localStorage` token and always failed with 401; it now uses the session.
+
+### 2026-11-20 (first revision)
 
 - `/api/chat-with-tools` now streams Think as `{"type":"thinking"}` events. Before, they were silently dropped.
 - Router `download_progress` events carry a normalized `progress: {done, total}`.

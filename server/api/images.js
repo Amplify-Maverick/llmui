@@ -6,7 +6,8 @@
  *  - GET  /status        sd-server reachability, model state, whether a job runs
  *  - GET  /options       configured models (+ per-model defaults), samplers, schedulers, defaults
  *  - /models/...         search, install, delete and set up models (see imageModels.js)
- *  - POST /txt2img       one job, streamed as SSE: stage / progress / complete / error
+ *  - POST /txt2img       start a job and watch it as SSE (closing doesn't cancel it)
+ *  - /jobs...            start (202), list, status, events, result, cancel (see imageJobs.js)
  *  - /generations...     history, stored in SQLite (image_generations, generated_images)
  */
 
@@ -19,14 +20,11 @@ import {
   sdFetch,
   sdStatus,
   acquireImageLock,
-  releaseImageLock,
   isImageJobActive,
-  unloadChatModels,
-  loadSdModel,
-  unloadSdModel,
-  txt2img,
   resolveModelSetup,
 } from "../sd.js";
+import { startImageJob, getJob, listJobs, jobSnapshot } from "../imageJobs.js";
+import { streamLog } from "../eventlog.js";
 import imageModelsRouter from "./imageModels.js";
 import { routeTo, machineFromQuery, publicMachine, getMachine } from "../backends.js";
 
@@ -149,7 +147,7 @@ function parseParams(body = {}, cfg) {
   return [p, null];
 }
 
-export function saveGeneration(machine, p, setup, result, timings) {
+export function saveGeneration(machine, p, setup, result, timings, jobId = null) {
   const db = getDb();
   const generationId = nanoid();
   const now = Date.now();
@@ -157,15 +155,15 @@ export function saveGeneration(machine, p, setup, result, timings) {
   db.transaction(() => {
     db.prepare(`
       INSERT INTO image_generations (id, prompt, negative_prompt, model, width, height, steps, cfg_scale, sampler, scheduler, seed, batch_count, workflow_json,
-        machine_id, machine_name, recipe, components_json, total_ms, generate_ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        machine_id, machine_name, recipe, components_json, total_ms, generate_ms, created_at, job_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       generationId, p.prompt, p.negativePrompt, p.checkpoint, p.width, p.height, p.steps,
       p.cfgScale, p.sampler, p.scheduler, p.seed, p.batchCount,
       JSON.stringify({ backend: "sd-server", machine: machine.id, api: result.api, generation_info: result.generationInfo }),
       machine.id, machine.name, setup.recipe || null, JSON.stringify(setup.models || {}),
       timings.totalMs ?? null, timings.generateMs ?? null,
-      now,
+      now, jobId,
     );
     const insert = db.prepare(`
       INSERT INTO generated_images (id, generation_id, filename, image_data, width, height, position, created_at)
@@ -181,18 +179,22 @@ export function saveGeneration(machine, p, setup, result, timings) {
   return { generationId, imageIds };
 }
 
-router.post("/txt2img", toImageMachine, async (req, res) => {
+/**
+ * Validate a generation request and take the machine's GPU. Resolves
+ * { machine, p, setup } or { status, body } for a refusal.
+ */
+async function prepareJob(req) {
   // Fixed for the whole job: switching machines mid-job doesn't move it.
   const machine = req.machine;
   const cfg = getSdConfig(machine);
   if (!req.body?.checkpoint && !cfg.model) {
-    return res.status(400).json({ error: `No image model on ${machine.name}; install one under Models → Image`, code: "no_model" });
+    return { status: 400, body: { error: `No image model on ${machine.name}; install one under Models → Image`, code: "no_model" } };
   }
   const [p, invalid] = parseParams(req.body, cfg);
-  if (invalid) return res.status(400).json({ error: invalid });
+  if (invalid) return { status: 400, body: { error: invalid } };
   const setup = resolveModelSetup(machine, p.checkpoint);
   if (!setup) {
-    return res.status(400).json({ error: `${p.checkpoint} has no recipe set on ${machine.name}; configure it under Models → Image` });
+    return { status: 400, body: { error: `${p.checkpoint} has no recipe set on ${machine.name}; configure it under Models → Image` } };
   }
   // Every file of the setup must be on this machine before anything is
   // unloaded or loaded: never ask sd-server to load a file it doesn't have.
@@ -200,90 +202,135 @@ router.post("/txt2img", toImageMachine, async (req, res) => {
   try {
     present = new Set(((await sdFetch(machine, "/sdcpp/v1/model-files")).files || []).map((f) => f.id));
   } catch (err) {
-    return res.status(502).json({ error: err.message });
+    return { status: 502, body: { error: err.message } };
   }
   const missing = Object.values(setup.models).filter((id) => !present.has(id));
   if (missing.length) {
-    return res.status(400).json({
-      error: `${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} on ${machine.name}; install ${missing.length === 1 ? "it" : "them"} under Models → Image`,
-      code: "no_model",
-    });
+    return {
+      status: 400,
+      body: {
+        error: `${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} on ${machine.name}; install ${missing.length === 1 ? "it" : "them"} under Models → Image`,
+        code: "no_model",
+      },
+    };
   }
-
   const busy = acquireImageLock(machine);
-  if (busy) return res.status(409).json({ error: busy, code: "gpu_busy" });
+  if (busy) return { status: 409, body: { error: busy, code: "gpu_busy" } };
+  return { machine, p, setup };
+}
 
-  const controller = new AbortController();
-  res.on("close", () => {
-    if (!res.writableFinished) controller.abort();
-  });
-
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
-  const send = (type, data = {}) => {
-    if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-  };
-  const t0 = Date.now();
-  const checkAborted = () => {
-    if (controller.signal.aborted) throw Object.assign(new Error("Generation cancelled"), { code: "cancelled" });
-  };
-
-  let sdLoaded = false;
-  try {
-    // Only this machine's chat models; other machines are never touched.
-    send("stage", { stage: "freeing_gpu", message: `Unloading chat models on ${machine.name}…` });
-    await unloadChatModels(machine, {
-      onWait: (models) => send("stage", {
-        stage: "freeing_gpu",
-        message: `Waiting for ${models.map((m) => `${m.id} (${m.status})`).join(", ")} to unload…`,
-      }),
-    });
-    checkAborted();
-
-    send("stage", { stage: "loading_model", message: `Loading ${p.checkpoint}…` });
-    sdLoaded = true; // from here on, always try to unload
-    const keepalive = setInterval(() => send("stage", { stage: "loading_model", message: `Loading ${p.checkpoint}…` }), 5000);
-    try {
-      await loadSdModel(machine, { ...setup, signal: controller.signal });
-    } finally {
-      clearInterval(keepalive);
-    }
-    checkAborted();
-
-    const tGen = Date.now();
-    const result = await txt2img(machine, p, {
-      signal: controller.signal,
-      onProgress: (pr) => send("progress", pr),
-    });
-    checkAborted();
-
-    const timings = { totalMs: Date.now() - t0, generateMs: result.elapsedMs ?? Date.now() - tGen };
-    const { generationId, imageIds } = saveGeneration(machine, p, setup, result, timings);
-    send("complete", {
-      machine: machine.id,
-      generationId,
-      imageIds,
-      seed: p.seed,
-      imageCount: imageIds.length,
-      api: result.api,
-      timings,
-    });
-  } catch (err) {
-    if (err.code !== "cancelled") console.error("Image generation failed:", err.message);
-    send("error", { error: err.message });
-  } finally {
-    if (sdLoaded) {
-      try {
-        await unloadSdModel(machine);
-      } catch (err) {
-        console.error("Failed to unload SD model:", err.message);
-      }
-    }
-    releaseImageLock(machine);
-    if (!res.writableEnded) res.end();
+async function createJob(req, res) {
+  const prepared = await (req.app.locals.prepareImageJob || prepareJob)(req);
+  if (prepared.status) {
+    res.status(prepared.status).json(prepared.body);
+    return null;
   }
+  return startImageJob({ ...prepared, saveGeneration }, req.app.locals.imageJobDeps);
+}
+
+// Start a job and watch it (SSE). Closing the stream doesn't cancel the job.
+router.post("/txt2img", toImageMachine, async (req, res) => {
+  const job = await createJob(req, res);
+  if (!job) return;
+  res.setHeader("X-LLMUI-Job-Id", job.id);
+  streamLog(req, res, job.log, { format: "sse" });
+});
+
+// Start a job and return at once (202) with its snapshot.
+router.post("/jobs", toImageMachine, async (req, res) => {
+  const job = await createJob(req, res);
+  if (!job) return;
+  res.status(202).json(jobSnapshot(job));
+});
+
+router.get("/jobs", (req, res) => {
+  const active = req.query.active === "1" || req.query.active === "true";
+  res.set("Cache-Control", "no-store");
+  res.json({ jobs: listJobs().filter((j) => !active || j.status === "running").map(jobSnapshot) });
+});
+
+/** A job that's no longer in memory but whose images were stored. */
+function storedJob(id) {
+  const gen = getDb().prepare(`
+    SELECT g.id, g.machine_id, g.seed, g.created_at, g.total_ms, g.generate_ms,
+      (SELECT json_group_array(id) FROM (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position)) AS image_ids
+    FROM image_generations g WHERE g.job_id = ?
+  `).get(id);
+  if (!gen) return null;
+  const imageIds = JSON.parse(gen.image_ids || "[]");
+  return {
+    id,
+    status: "completed",
+    machine: gen.machine_id,
+    params: null,
+    stage: null,
+    message: "",
+    progress: null,
+    createdAt: null,
+    finishedAt: gen.created_at,
+    error: null,
+    result: {
+      generationId: gen.id,
+      imageIds,
+      seed: gen.seed,
+      imageCount: imageIds.length,
+      api: null,
+      timings: gen.total_ms == null && gen.generate_ms == null ? null : { totalMs: gen.total_ms, generateMs: gen.generate_ms },
+    },
+    seq: null,
+  };
+}
+
+router.get("/jobs/:id", (req, res) => {
+  const job = getJob(req.params.id);
+  const snap = job ? jobSnapshot(job) : storedJob(req.params.id);
+  if (!snap) return res.status(404).json({ error: "Job not found", code: "no_job" });
+  res.set("Cache-Control", "no-store");
+  res.json(snap);
+});
+
+router.get("/jobs/:id/events", (req, res) => {
+  const job = getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Job not found", code: "no_job" });
+  res.setHeader("X-LLMUI-Job-Id", job.id);
+  streamLog(req, res, job.log, { after: req.query.after, format: "sse" });
+});
+
+router.get("/jobs/:id/result", (req, res) => {
+  const job = getJob(req.params.id);
+  const snap = job ? jobSnapshot(job) : storedJob(req.params.id);
+  if (!snap) return res.status(404).json({ error: "Job not found", code: "no_job" });
+  if (snap.status === "running") return res.status(409).json({ error: "The job is still running", code: "job_running", status: snap.status });
+  if (snap.status !== "completed") {
+    return res.status(409).json({
+      error: snap.status === "cancelled" ? "The job was cancelled" : `The job failed: ${snap.error}`,
+      code: snap.status === "cancelled" ? "job_cancelled" : "job_failed",
+      status: snap.status,
+    });
+  }
+  const { generationId, imageIds } = snap.result;
+  const base = `/api/images/generations/${encodeURIComponent(generationId)}/images`;
+  res.json({
+    jobId: snap.id,
+    machine: snap.machine,
+    ...snap.result,
+    images: imageIds.map((id) => ({ id, url: `${base}/${id}`, metaUrl: `${base}/${id}/meta` })),
+  });
+});
+
+// Cancel a job. Answers once it has stopped and freed the GPU (or after 30 s,
+// with status still "running").
+router.post("/jobs/:id/cancel", async (req, res) => {
+  const job = getJob(req.params.id);
+  if (!job) {
+    if (storedJob(req.params.id)) return res.json(storedJob(req.params.id));
+    return res.status(404).json({ error: "Job not found", code: "no_job" });
+  }
+  if (job.status === "running") {
+    job.controller.abort();
+    await Promise.race([job.done, new Promise((r) => setTimeout(r, 30000).unref?.())]);
+  }
+  res.json(jobSnapshot(job));
 });
 
 // ── image history (DB) ─────────────────────────────────────────────────

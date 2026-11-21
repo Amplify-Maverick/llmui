@@ -20,6 +20,19 @@ function toMeta(conv) {
   return { ...meta, messageCount: messages?.length ?? meta.messageCount ?? 0 };
 }
 
+// Streaming fields when nothing is streaming.
+const idleStream = {
+  isStreaming: false,
+  streamingContent: "",
+  streamingThinking: "",
+  streamingTokenCount: 0,
+  streamingStartTime: null,
+  streamingFirstTokenTime: null,
+  streamingToolCalls: [],
+  streamOwner: null,
+  activeRunId: null,
+};
+
 export const useChatStore = create((set, get) => ({
   conversations: [], // metadata only — no .messages on these objects
   activeConversationId: null,
@@ -32,6 +45,11 @@ export const useChatStore = create((set, get) => ({
   // fallback tok/s is measured from here, excluding load + prompt time.
   streamingFirstTokenTime: null,
   streamingToolCalls: [], // {id, name, arguments, status: 'calling'|'completed', result?, error?}
+  streamingThinking: "",
+  // The conversation the current stream belongs to (switching away detaches
+  // from it; the server-side run carries on) and its server run id.
+  streamOwner: null,
+  activeRunId: null,
   isLoading: true,
 
   // ================================================================
@@ -45,9 +63,10 @@ export const useChatStore = create((set, get) => ({
   _saveActiveMessages: () => {
     const { activeConversationId, messages } = get();
     if (!activeConversationId) return;
+    // Local-only bubbles (a send's error text) are never stored.
     debouncedSaveToStorage(
       STORAGE_KEYS.convMessages(activeConversationId),
-      messages
+      messages.filter((m) => !m.localOnly)
     );
   },
 
@@ -314,7 +333,9 @@ export const useChatStore = create((set, get) => ({
 
     // Guard against rapid switching — only apply if we haven't started another switch
     if (get().activeConversationId === activeConversationId) {
-      set({ activeConversationId: id, messages: msgs || [] });
+      // Leaving a chat mid-reply only stops watching it; the server keeps
+      // generating and the chat picks the run up again when reopened.
+      set({ activeConversationId: id, messages: msgs || [], ...idleStream });
       saveToStorage(STORAGE_KEYS.activeConversation, id);
     }
   },
@@ -346,6 +367,7 @@ export const useChatStore = create((set, get) => ({
         conversations: newConversations,
         activeConversationId: newActiveId,
         messages: wasActive ? [] : state.messages,
+        ...(wasActive ? idleStream : {}),
       };
     });
 
@@ -449,7 +471,8 @@ export const useChatStore = create((set, get) => ({
   // ================================================================
   // Messages
   // ================================================================
-  addMessage: (message) => {
+  // `save: false` shows it without storing (the server stores sends itself).
+  addMessage: (message, { save = true } = {}) => {
     const id = nanoid();
     const newMessage = { id, ...message, timestamp: Date.now() };
 
@@ -471,7 +494,7 @@ export const useChatStore = create((set, get) => ({
       );
       return { messages: newMessages, conversations };
     });
-    get()._saveCurrentConversation();
+    if (save) get()._saveCurrentConversation();
     return id;
   },
 
@@ -541,7 +564,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   // Remove last assistant message for regeneration
-  removeLastAssistantMessage: () => {
+  removeLastAssistantMessage: ({ save = true } = {}) => {
     set((state) => {
       const lastIndex = state.messages.length - 1;
       if (lastIndex >= 0 && state.messages[lastIndex].role === "assistant") {
@@ -555,20 +578,58 @@ export const useChatStore = create((set, get) => ({
       }
       return state;
     });
-    get()._saveCurrentConversation();
+    if (save) get()._saveCurrentConversation();
   },
 
   // ================================================================
   // Streaming
   // ================================================================
-  setStreaming: (isStreaming, content = "") => {
+  setStreaming: (isStreaming, content = "", owner = null) => {
     set({
       isStreaming,
       streamingContent: content,
+      streamingThinking: "",
+      streamingToolCalls: [],
       streamingTokenCount: 0,
       streamingStartTime: isStreaming ? Date.now() : null,
       streamingFirstTokenTime: null,
+      streamOwner: isStreaming ? owner : null,
+      activeRunId: null,
     });
+  },
+
+  setActiveRunId: (activeRunId) => set({ activeRunId }),
+
+  appendStreamThinking: (chunk) => {
+    set((state) => ({
+      streamingThinking: state.streamingThinking + chunk,
+      streamingTokenCount: state.streamingTokenCount + 1,
+      streamingFirstTokenTime: state.streamingFirstTokenTime ?? Date.now(),
+    }));
+  },
+
+  /**
+   * A server-side run ended (or a send failed): show the stored messages.
+   * `messageId` is the stored reply, which also gets this session's
+   * `extras` (duration, prompt speed: shown, not stored). `error` adds a
+   * local-only bubble with the error text.
+   */
+  finishRun: async ({ conversationId, messageId = null, extras = {}, error = null }) => {
+    const msgs = await loadFromStorage(STORAGE_KEYS.convMessages(conversationId));
+    if (get().activeConversationId !== conversationId) return;
+    const messages = (msgs || get().messages.filter((m) => !(m.role === "assistant" && !m.content))).map((m) =>
+      m.id === messageId ? { ...m, ...extras, tokensPerSec: m.tokensPerSec ?? extras.tokensPerSec ?? null } : m
+    );
+    if (error) {
+      messages.push({ id: nanoid(), role: "assistant", content: `Error: ${error}`, localOnly: true, timestamp: Date.now() });
+    }
+    set((state) => ({
+      messages,
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId ? { ...c, messageCount: messages.filter((m) => !m.localOnly).length, updatedAt: Date.now() } : c
+      ),
+      ...idleStream,
+    }));
   },
 
   appendStreamContent: (chunk) => {

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useChatStore } from "../../stores/chatStore.js";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import ToolCallCard from "./ToolCallCard.jsx";
+import ThinkingBlock from "./ThinkingBlock.jsx";
 import { formatDuration, formatTokensPerSec } from "./MessageBubble.jsx";
 import { liveTokensPerSec } from "../../utils/streamSpeed.js";
 import "./MessageBubble.css";
@@ -16,6 +17,7 @@ import "./MessageBubble.css";
 export default function StreamingBubble({ model }) {
   const streamingContent = useChatStore((s) => s.streamingContent);
   const streamingToolCalls = useChatStore((s) => s.streamingToolCalls);
+  const streamingThinking = useChatStore((s) => s.streamingThinking);
   const streamingStartTime = useChatStore((s) => s.streamingStartTime);
   const streamingTokenCount = useChatStore((s) => s.streamingTokenCount);
   const streamingFirstTokenTime = useChatStore((s) => s.streamingFirstTokenTime);
@@ -50,6 +52,8 @@ export default function StreamingBubble({ model }) {
             <span className="bubble-tokens-per-sec">{formatTokensPerSec(tokensPerSec)}</span>
           )}
         </div>
+
+        <ThinkingBlock text={streamingThinking} live={!streamingContent} />
 
         {/* Tool calls display */}
         {streamingToolCalls && streamingToolCalls.length > 0 && (

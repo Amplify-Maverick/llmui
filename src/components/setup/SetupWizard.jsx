@@ -1,16 +1,14 @@
 import { useState } from "react";
-import { getAuthToken } from "../../services/auth.js";
+import { authHeaders } from "../../services/auth.js";
 import "./SetupWizard.css";
 
 const TOTAL_STEPS = 2; // gpu · done
 
 async function authFetch(path, options = {}) {
-  const token = await getAuthToken();
   return fetch(path, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      ...(await authHeaders()),
       ...(options.headers ?? {}),
     },
   });

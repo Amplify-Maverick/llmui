@@ -142,6 +142,26 @@ const MIGRATIONS = [
         WHERE machine_id IS NULL AND json_valid(workflow_json) AND json_extract(workflow_json, '$.machine') IS NOT NULL
       `);
     }
+  },
+  {
+    version: 6,
+    description: 'Think text on messages, per-device tokens, image job ids',
+    up: (db) => {
+      const msgCols = new Set(db.prepare("PRAGMA table_info(messages)").all().map((c) => c.name));
+      if (!msgCols.has('thinking')) db.exec('ALTER TABLE messages ADD COLUMN thinking TEXT');
+      const genCols = new Set(db.prepare("PRAGMA table_info(image_generations)").all().map((c) => c.name));
+      if (!genCols.has('job_id')) db.exec('ALTER TABLE image_generations ADD COLUMN job_id TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_generations_job ON image_generations(job_id)');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS devices (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          created_at INTEGER NOT NULL,
+          last_used_at INTEGER
+        )
+      `);
+    }
   }
 ];
 

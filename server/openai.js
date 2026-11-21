@@ -38,9 +38,11 @@ const openaiRequest = (machine, upstreamPath, init) =>
  * can't be reached at all (no response), its router is marked down and the
  * request is retried on the default machine, unless an image job holds that
  * GPU (then it throws with status 409). `res`, if given, is counted as an
- * in-flight chat on the fallback machine. Returns { response, machine }.
+ * in-flight chat on the fallback machine; `track(machine)`, if given, is
+ * called with it instead (for work not tied to a response). Returns
+ * { response, machine }.
  */
-export async function openaiFetch(machine, upstreamPath, init = {}, { res } = {}) {
+export async function openaiFetch(machine, upstreamPath, init = {}, { res, track } = {}) {
   try {
     return { response: await openaiRequest(machine, upstreamPath, init), machine };
   } catch (err) {
@@ -53,6 +55,7 @@ export async function openaiFetch(machine, upstreamPath, init = {}, { res } = {}
       throw Object.assign(new Error(IMAGE_BUSY_MESSAGE), { status: 409 });
     }
     if (res) trackChat(fallback, res);
+    track?.(fallback);
     return { response: await openaiRequest(fallback, upstreamPath, init), machine: fallback };
   }
 }
@@ -205,6 +208,7 @@ openaiRouter.post("/chat/completions", (req, res) =>
 export async function streamOpenAITurn({
   machine,
   res,
+  track,
   model,
   messages,
   tools,
@@ -233,7 +237,7 @@ export async function streamOpenAITurn({
       body: JSON.stringify(body),
       signal,
     },
-    { res }
+    { res, track }
   );
   if (!response.ok) {
     throw new Error(await upstreamError(response));

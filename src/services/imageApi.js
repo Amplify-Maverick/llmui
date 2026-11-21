@@ -94,9 +94,12 @@ class ImageAPI {
   }
 
   /**
-   * Start a txt2img job. Calls onEvent for each SSE event
-   * (stage, progress, complete, error). Resolves with { abort } once the
-   * stream is open; throws with the server's error text if it refuses.
+   * Start a txt2img job and watch it (docs/api.md §8.3). Calls onEvent for
+   * each event: job (first, with jobId), stage, progress, then one of
+   * complete / error / cancelled. If the connection drops, reattaches to the
+   * job where it left off. Resolves once the stream is open with
+   * { jobId, detach }: detach() stops watching (the job keeps running; use
+   * cancelJob to stop it). Throws with the server's error text if it refuses.
    */
   async txt2img(params, onEvent) {
     const controller = new AbortController();
@@ -106,51 +109,87 @@ class ImageAPI {
       body: JSON.stringify(params),
       signal: controller.signal,
     });
-
     if (!response.ok) {
-      const text = await response.text();
-      let message = text;
-      try {
-        message = JSON.parse(text).error || text;
-      } catch {
-        // not JSON
-      }
-      throw new Error(message || `Failed to start generation (${response.status})`);
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `Failed to start generation (${response.status})`);
     }
+    const jobId = response.headers.get("X-LLMUI-Job-Id");
+    this._follow(jobId, response, 0, onEvent, controller);
+    return { jobId, detach: () => controller.abort() };
+  }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let sawTerminal = false;
-    (async () => {
-      let buffer = "";
+  /** Watch a running job from event `after` on; same events and return as txt2img. */
+  watchJob(jobId, onEvent, after = 0) {
+    const controller = new AbortController();
+    this._follow(jobId, null, after, onEvent, controller);
+    return { jobId, detach: () => controller.abort() };
+  }
+
+  async _follow(jobId, response, after, onEvent, controller) {
+    let seq = after;
+    let attempts = 0;
+    for (;;) {
+      let terminal = false;
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            let event;
-            try {
-              event = JSON.parse(line.slice(6));
-            } catch {
-              continue;
-            }
-            if (event.type === "complete" || event.type === "error") sawTerminal = true;
-            onEvent(event);
+        if (!response) {
+          response = await fetch(`${BASE}/jobs/${encodeURIComponent(jobId)}/events?after=${seq}`, {
+            headers: await authHeaders(),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw Object.assign(new Error(data.error || `Lost the job (${response.status})`), { status: response.status });
           }
         }
-        if (!sawTerminal) onEvent({ type: "error", error: "Connection closed before the image finished" });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              let event;
+              try {
+                event = JSON.parse(line.slice(6));
+              } catch {
+                continue;
+              }
+              if (event.seq) seq = event.seq;
+              attempts = 0;
+              if (["complete", "error", "cancelled"].includes(event.type)) terminal = true;
+              onEvent(event);
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
       } catch (err) {
-        if (err.name !== "AbortError") onEvent({ type: "error", error: err.message });
-      } finally {
-        reader.releaseLock();
+        if (err.name === "AbortError") return;
+        if (err.status === 404 || !jobId || ++attempts > 6) {
+          onEvent({ type: "error", error: err.message });
+          return;
+        }
       }
-    })();
+      if (terminal || controller.signal.aborted) return;
+      // Connection dropped mid-job: the job carries on; pick it up again.
+      response = null;
+      await new Promise((r) => setTimeout(r, Math.min(1000 * Math.max(attempts, 1), 5000)));
+    }
+  }
 
-    return { abort: () => controller.abort() };
+  /** Stop a job. Resolves with its snapshot once it has stopped. */
+  cancelJob(jobId) {
+    return getJson(`/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  }
+
+  /** Jobs the server still holds, newest first; `active` = only running ones. */
+  listJobs({ active = false } = {}) {
+    return getJson(`/jobs${active ? "?active=1" : ""}`);
   }
 
   // ── History (DB-backed) ──────────────────────────────────────────────

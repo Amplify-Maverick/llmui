@@ -175,6 +175,96 @@ class OpenAIAPI {
   }
 }
 
+/** Yield each JSON object of an NDJSON response body (blank keepalive lines skipped). */
+export async function* readNdjson(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          yield JSON.parse(line);
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        yield JSON.parse(buffer);
+      } catch {
+        // skip malformed trailing line
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function errorFrom(response, fallback) {
+  const body = await response.json().catch(() => ({}));
+  const message = typeof body.error === "string" ? body.error : body.error?.message;
+  return Object.assign(new Error(message || `${fallback} (${response.status})`), {
+    status: response.status,
+    code: body.code || body.error?.code || null,
+    runId: body.runId || null,
+  });
+}
+
+/**
+ * Server-side runs (docs/api.md §4.1): the server stores the user message,
+ * runs the model and stores the reply; these only watch and steer it.
+ */
+export const runsApi = {
+  /** POST /api/conversations/:id/send. Resolves with the response whose body is the run's NDJSON events. */
+  async send(conversationId, body, signal) {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/send`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok) throw await errorFrom(response, "Send failed");
+    return response;
+  },
+
+  /** Reattach: the run's events after `after` (0 = from the start), then live until it ends. */
+  async attach(runId, after, signal) {
+    const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/events?after=${after || 0}`, {
+      headers: await authHeaders(),
+      signal,
+    });
+    if (!response.ok) throw await errorFrom(response, "Reattach failed");
+    return response;
+  },
+
+  async cancel(runId) {
+    const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+      headers: await authHeaders(),
+    });
+    if (!response.ok) throw await errorFrom(response, "Cancel failed");
+    return response.json();
+  },
+
+  /** The chat's current or most recent run ({ status, ... }), or null. */
+  async forConversation(conversationId) {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/run`, {
+      headers: await authHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    return (await response.json()).run;
+  },
+};
+
 /** Convert an app message ({ role, content, images?: [base64] }) to OpenAI format. */
 function toOpenAIMessage(msg) {
   if (!msg.images || msg.images.length === 0) {

@@ -101,7 +101,7 @@ Or use the start script which checks port availability:
 
 Open http://localhost:3000 in your browser. This runs both the storage server (port 3001) and the Vite dev server for the frontend (port 3000). Both servers listen on `127.0.0.1` only (set `HOST` to change the storage server's bind address).
 
-**Production / always-on:** build the frontend once with `npm run build`, then run `npm start` (or the `deploy/llmui.service` systemd unit). Express serves the built app and the API together on `127.0.0.1:3001`; no Vite process is involved. Rebuild after frontend changes and restart. For access from other machines, publish it on your tailnet with `tailscale serve --bg --https=<port> http://127.0.0.1:3001`.
+**Production / always-on:** build the frontend once with `npm run build`, then run `npm start` (or the `deploy/llmui.service` systemd unit). Express serves the built app and the API together on `127.0.0.1:3001`; no Vite process is involved. Rebuild after frontend changes and restart. For access from other machines, publish it on your tailnet with `tailscale serve --bg --https=<port> http://127.0.0.1:3001`. Browsers sign in with the Tailscale identity that `tailscale serve` attaches (or as a local browser on the server itself); keep `HOST=127.0.0.1` so only tailscale serve can reach the port. `LLMUI_TAILSCALE_USERS=a@x,b@y` limits sign-in to those tailnet logins. See `docs/api.md` §2.
 
 The browser never talks to the model server directly: all model traffic goes through the authenticated Express server (`/openai/v1/*` passthrough, and `/api/chat-with-tools` for the server-side tool loop).
 
@@ -223,7 +223,9 @@ All data is stored locally in `~/.llmui/`:
 - **Windows**: `C:\Users\<user>\.llmui\`
 
 - **Database**: `llmui.db` - SQLite database (WAL mode) containing conversations, messages, and settings
-- **Auth token**: `token` - bearer token for API authentication
+- **Server token**: `token` - bearer token for local tools (the TUI, scripts); never served over HTTP
+- **Session secret**: `session_secret` - signs browser session cookies; delete it and restart to sign every browser out
+- **Paired devices**: per-device tokens (iOS app) live in the database as hashes; manage them in Settings → Devices
 - **Backups**: `backups/` - database backups created via the API
 
 ### Migration from JSON

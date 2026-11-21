@@ -9,9 +9,8 @@ import path from "path";
 import os from "os";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
-import { nanoid } from "nanoid";
-import { getToolsSchema, executeTool } from "./tools/index.js";
-import { openaiRouter, streamOpenAITurn, toOpenAIMessage, combineTimings } from "./openai.js";
+import { getToolsSchema } from "./tools/index.js";
+import { openaiRouter, toOpenAIMessage } from "./openai.js";
 
 // Database and API imports
 import { getDb, closeDb } from "./db/index.js";
@@ -28,7 +27,9 @@ import llamaRouter from "./api/llama.js";
 import { loadSdConfig, chatGate, sdStatus } from "./sd.js";
 import { llamaFetch, keyHint } from "./llama.js";
 import { fetchHelper, helperConfigured, normalizeHelperGpu } from "./sdfetch.js";
-import { PAIR_VERSION, PAIR_PREFIX, publicUrl } from "./pairing.js";
+import { createAuth, readOrCreateSecret, pruneUnusedDevices } from "./auth.js";
+import { runsRouter } from "./runs.js";
+import { runToolLoop } from "./chatLoop.js";
 import {
   getMachine,
   listMachines,
@@ -58,11 +59,12 @@ const HOST = process.env.HOST || "127.0.0.1";
 const DIST_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const DIST_INDEX = path.join(DIST_DIR, "index.html");
 // Path prefixes owned by the backend. Never answered with index.html.
-const BACKEND_PREFIXES = ["/api", "/openai", "/storage", "/auth", "/health"];
+const BACKEND_PREFIXES = ["/api", "/openai", "/storage", "/health"];
 
 // Storage directory: ~/.llmui
 const STORAGE_DIR = path.join(os.homedir(), ".llmui");
 const TOKEN_FILE = path.join(STORAGE_DIR, "token");
+const SESSION_SECRET_FILE = path.join(STORAGE_DIR, "session_secret");
 const GPU_CONFIG_FILE = path.join(STORAGE_DIR, "gpu_config.json");
 // Pre-OpenAI-migration installs kept remoteGpuUrl in this file; read it once as a fallback.
 const LEGACY_OLLAMA_CONFIG_FILE = path.join(STORAGE_DIR, "ollama_config.json");
@@ -107,30 +109,11 @@ async function getOrCreateToken() {
   return authToken;
 }
 
-function isLocalhost(req) {
-  const ip = req.ip || req.connection.remoteAddress;
-  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
-}
-
-function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  const token = authHeader.slice(7);
-
-  // Use timing-safe comparison to prevent timing attacks
-  // timingSafeEqual throws on length mismatch, so check length first
-  const tokenBuffer = Buffer.from(token);
-  const authTokenBuffer = Buffer.from(authToken);
-  if (
-    tokenBuffer.length !== authTokenBuffer.length ||
-    !crypto.timingSafeEqual(tokenBuffer, authTokenBuffer)
-  ) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-}
+// Auth (server/auth.js): device tokens, the ~/.llmui/token server token, and
+// browser session cookies. Built at startup once the token and the session
+// secret are read; no request arrives before then.
+let auth = null;
+const requireAuth = (req, res, next) => auth.requireAuth(req, res, next);
 
 // CORS configuration with allowlist
 // Default allows localhost:3000, additional origins can be added via LLMUI_ALLOWED_ORIGINS env var
@@ -151,9 +134,9 @@ app.use(
       callback(null, !origin || allowedOrigins.includes(origin));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "X-LLMUI-Machine"],
-    exposedHeaders: ["X-LLMUI-Machine"],
-    methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-LLMUI-Machine", "X-LLMUI-Web"],
+    exposedHeaders: ["X-LLMUI-Machine", "X-LLMUI-Run-Id", "X-LLMUI-Job-Id"],
+    methods: ["GET", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
   })
 );
 app.use(express.json({ limit: "5mb" }));
@@ -205,35 +188,9 @@ if (hasDist) {
 
 app.use(globalLimiter);
 
-// Browser token bootstrap: the SPA fetches its bearer token from here (see
-// src/services/auth.js). Same exposure as before, when Vite served it: anyone
-// who can load the page (loopback, or the tailnet via tailscale serve) gets it.
+// Browser sessions and paired devices (POST /api/session, /api/devices).
 // Registered before the authenticated /api routers so they don't shadow it.
-app.get("/api/llmui-token", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  if (!authToken) {
-    return res.status(503).json({ error: "Token not ready" });
-  }
-  res.json({ token: authToken });
-});
-
-// ============================================================
-// Device pairing (Settings → Pair iPhone; payload documented in docs/api.md)
-// The QR text is "llmui-pair:v1:" + JSON {url, token}. The token is the same
-// full-access bearer token the web app uses.
-// ============================================================
-app.get("/api/pairing", requireAuth, (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json({ version: PAIR_VERSION, prefix: PAIR_PREFIX, url: publicUrl(), token: authToken });
-});
-
-// Token endpoint - only serves to localhost
-app.get("/auth/token", (req, res) => {
-  if (!isLocalhost(req)) {
-    return res.status(403).json({ error: "Token only available from localhost" });
-  }
-  res.json({ token: authToken });
-});
+app.use("/api", (req, res, next) => auth.router(req, res, next));
 
 // Ensure storage directory exists
 async function ensureStorageDir() {
@@ -344,188 +301,52 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/chat-with-tools - Chat with tool calling support (authenticated, streaming NDJSON)
-//
-// Runs the tool loop server-side against the machine chat is routed to
-// (req.machine, set by chatGate; see server/backends.js): stream a turn, execute any tool calls, feed results back,
-// repeat until the model answers without tools or MAX_TOOL_ITERATIONS is hit.
+// POST /api/chat-with-tools - the tool loop (server/chatLoop.js) over a history
+// the client sends, streamed as NDJSON. Nothing is stored; see
+// POST /api/conversations/:id/send (server/runs.js) for the server-side
+// version. Closing the connection stops generation.
 // Body: { model, messages, options: { modelOptions }, enabledTools, enableThinking? }
 // Emits: {type:"thinking"|"content"|"tool_call"|"tool_result"|"done"|"error", ...}
 // (documented in docs/api.md)
-//
-// Manual test for abort handling:
-// 1. Start a chat that triggers a slow tool (e.g., web_search or fetch_url with a slow endpoint)
-// 2. Close the browser tab while the tool is executing
-// 3. Check server logs - you should see "chat-with-tools aborted: client disconnected"
-//    instead of the tool result being logged/processed
-const MAX_TOOL_ITERATIONS = 5;
-
 app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
-  const {
-    model,
-    messages,
-    options = {},
-    enabledTools = null,
-    enableThinking = false,
-  } = req.body;
+  const { model, messages, options = {}, enabledTools = null, enableThinking = false } = req.body;
+  if (!model) return res.status(400).json({ error: "Model is required" });
+  if (!Array.isArray(messages)) return res.status(400).json({ error: "messages must be an array" });
 
-  if (!model) {
-    return res.status(400).json({ error: "Model is required" });
-  }
-  if (!Array.isArray(messages)) {
-    return res.status(400).json({ error: "messages must be an array" });
-  }
-
-  // Create abort controller for cancellation on client disconnect.
   // Listen on `res`, not `req`: since Node 16, req "close" fires once the
   // request body has been read, not when the client goes away.
   const controller = new AbortController();
-  const { signal } = controller;
   res.on("close", () => {
-    if (!res.writableFinished) {
-      controller.abort();
-    }
+    if (!res.writableFinished) controller.abort();
   });
-
-  // OpenAI function-tool schemas for the enabled tools
-  const tools = getToolsSchema(enabledTools);
-
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("X-Accel-Buffering", "no");
-
-  const currentMessages = messages.map(toOpenAIMessage);
-  let iterations = 0;
-  const turnTimings = []; // llama.cpp timings per model turn
-  // Where turns go; switches to the default machine if the selected one
-  // turns out to be unreachable (see openaiFetch).
-  let machine = req.machine;
-  const onContent = (text) => {
-    res.write(JSON.stringify({ type: "content", content: text }) + "\n");
-  };
-  const onThinking = (text) => {
-    res.write(JSON.stringify({ type: "thinking", content: text }) + "\n");
+  const emit = (e) => {
+    if (!res.writableEnded) res.write(JSON.stringify(e) + "\n");
   };
 
   try {
-    while (iterations < MAX_TOOL_ITERATIONS) {
-      // Check if aborted before starting new iteration
-      if (signal.aborted) {
-        throw new DOMException("Request aborted", "AbortError");
-      }
-
-      iterations++;
-
-      const turn = await streamOpenAITurn({
-        machine,
-        res,
-        model,
-        messages: currentMessages,
-        tools,
-        modelOptions: options.modelOptions || {},
-        enableThinking,
-        signal,
-        onContent,
-        onThinking,
-      });
-      const { content: assistantContent, toolCalls, timings } = turn;
-      machine = turn.machine;
-
-      turnTimings.push(timings);
-
-      // If no tool calls, we're done
-      if (toolCalls.length === 0) {
-        res.write(JSON.stringify({ type: "done", iterations, machine: machine.id, timings: combineTimings(turnTimings) }) + "\n");
-        res.end();
-        return;
-      }
-
-      // Every call needs an id so its tool result can reference it
-      for (const tc of toolCalls) tc.id ||= `call_${nanoid()}`;
-
-      // Add assistant message with tool calls to history
-      currentMessages.push({
-        role: "assistant",
-        content: assistantContent,
-        tool_calls: toolCalls,
-      });
-
-      // Execute each tool and emit results
-      for (const toolCall of toolCalls) {
-        // Check if aborted before executing each tool
-        if (signal.aborted) {
-          throw new DOMException("Request aborted", "AbortError");
-        }
-
-        const { function: fn } = toolCall;
-        const toolId = toolCall.id;
-        const toolName = fn.name;
-        let toolArgs = fn.arguments;
-
-        // Parse arguments if they're a string
-        if (typeof toolArgs === "string") {
-          try {
-            toolArgs = JSON.parse(toolArgs || "{}");
-          } catch {
-            toolArgs = {};
-          }
-        }
-
-        // Emit tool call event
-        res.write(JSON.stringify({
-          type: "tool_call",
-          id: toolId,
-          name: toolName,
-          arguments: toolArgs,
-        }) + "\n");
-
-        // Execute tool
-        const result = await executeTool(toolName, toolArgs);
-
-        // Check if aborted after tool execution (before emitting result)
-        if (signal.aborted) {
-          throw new DOMException("Request aborted", "AbortError");
-        }
-
-        // Emit tool result
-        res.write(JSON.stringify({
-          type: "tool_result",
-          id: toolId,
-          name: toolName,
-          result: result.success ? result.result : null,
-          error: result.success ? null : result.error,
-        }) + "\n");
-
-        // Feed the result back, linked to its call
-        currentMessages.push({
-          role: "tool",
-          tool_call_id: toolId,
-          content: JSON.stringify(result.success ? result.result : { error: result.error }),
-        });
-      }
-
-      // Continue loop - model will generate new response with tool results
-    }
-
-    // Max iterations reached
-    res.write(JSON.stringify({ type: "error", error: "Max tool iterations reached" }) + "\n");
-    res.end();
+    const result = await runToolLoop({
+      machine: req.machine,
+      res,
+      model,
+      messages: messages.map(toOpenAIMessage),
+      tools: getToolsSchema(enabledTools),
+      modelOptions: options.modelOptions || {},
+      enableThinking,
+      signal: controller.signal,
+      emit,
+    });
+    emit({ type: "done", iterations: result.iterations, machine: result.machine.id, timings: result.timings });
   } catch (err) {
-    // Handle abort gracefully - don't treat as crash
     if (err.name === "AbortError") {
       console.log("chat-with-tools aborted: client disconnected");
-      // Response already closed by client, just clean up and return
-      if (!res.writableEnded) {
-        res.end();
-      }
-      return;
-    }
-
-    console.error("Error in chat-with-tools:", err);
-    if (!res.writableEnded) {
-      res.write(JSON.stringify({ type: "error", error: err.message || "Tool execution failed" }) + "\n");
-      res.end();
+    } else {
+      if (err.code !== "max_iterations") console.error("Error in chat-with-tools:", err);
+      emit({ type: "error", error: err.message || "Tool execution failed" });
     }
   }
+  if (!res.writableEnded) res.end();
 });
 
 // ============================================================
@@ -850,6 +671,8 @@ app.use("/api/setup", requireAuth, setupRouter);
 // ============================================================
 app.use("/api/conversations", requireAuth, conversationsRouter);
 app.use("/api", requireAuth, messagesRouter);
+// Server-side send, reattach and cancel (server/runs.js).
+app.use("/api", requireAuth, runsRouter);
 app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/search", requireAuth, searchRouter);
 app.use("/api/backup", requireAuth, backupRouter);
@@ -905,6 +728,7 @@ const dryRun = args.includes("--dry-run");
 
 await ensureStorageDir();
 await getOrCreateToken();
+auth = createAuth({ serverToken: authToken, sessionSecret: readOrCreateSecret(SESSION_SECRET_FILE) });
 await loadGpuConfig();
 
 await loadSdConfig();
@@ -915,6 +739,7 @@ console.log("Initializing database...");
 getDb();
 
 const migrationResult = await checkAndMigrate({ dryRun });
+pruneUnusedDevices();
 if (migrationResult.log.length > 0 && migrationResult.migrated) {
   console.log("Migration completed successfully");
 }

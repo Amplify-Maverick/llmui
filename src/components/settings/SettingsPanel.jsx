@@ -5,6 +5,7 @@ import { useChatStore } from "../../stores/chatStore.js";
 import { AVAILABLE_TOOLS } from "../../constants/config.js";
 import { TextArea, Select } from "../shared/Input.jsx";
 import PairDevice from "./PairDevice.jsx";
+import { authHeaders } from "../../services/auth.js";
 import "./SettingsPanel.css";
 
 export default function SettingsPanel() {
@@ -52,10 +53,7 @@ export default function SettingsPanel() {
 
         const response = await fetch('/api/import', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('llmui_token')}`
-          },
+          headers: await authHeaders(),
           body: JSON.stringify({ conversations })
         });
 

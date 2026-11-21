@@ -1,6 +1,7 @@
 import { useState, useCallback, memo } from "react";
 import MarkdownRenderer from "./MarkdownRenderer.jsx";
 import ToolCallCard from "./ToolCallCard.jsx";
+import ThinkingBlock from "./ThinkingBlock.jsx";
 import "./MessageBubble.css";
 
 // Icons as inline SVGs for better control
@@ -158,6 +159,8 @@ const MessageBubble = memo(function MessageBubble({
             <span>{branchCount} branch{branchCount > 1 ? 'es' : ''}</span>
           </div>
         )}
+
+        {!isUser && <ThinkingBlock text={message.thinking} />}
 
         {/* Tool calls for assistant messages */}
         {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
