@@ -4,6 +4,7 @@ import { useModelsStore } from "../../stores/modelsStore.js";
 import { useChatStore } from "../../stores/chatStore.js";
 import { AVAILABLE_TOOLS } from "../../constants/config.js";
 import { TextArea, Select } from "../shared/Input.jsx";
+import PairDevice from "./PairDevice.jsx";
 import "./SettingsPanel.css";
 
 export default function SettingsPanel() {
@@ -284,6 +285,10 @@ export default function SettingsPanel() {
           </div>
         </div>
       )}
+
+      <div className="settings-divider" />
+
+      <PairDevice />
 
       <div className="settings-divider" />
 

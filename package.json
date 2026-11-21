@@ -21,6 +21,7 @@
     "express-rate-limit": "^8.4.1",
     "ink": "^7.1.0",
     "nanoid": "^5.0.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

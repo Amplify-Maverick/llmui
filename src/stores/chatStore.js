@@ -51,6 +51,21 @@ export const useChatStore = create((set, get) => ({
     );
   },
 
+  // The index save is a no-op (the list is derived from the conversations
+  // table), so metadata edits must PATCH the conversation itself.
+  _patchConversation: async (id, fields) => {
+    try {
+      const response = await fetch(`${API_BASE}/conversations/${id}`, {
+        method: "PATCH",
+        headers: await authHeaders(),
+        body: JSON.stringify(fields),
+      });
+      if (!response.ok) console.error(`Failed to update conversation ${id}`);
+    } catch (err) {
+      console.error("Error updating conversation:", err);
+    }
+  },
+
   _saveCurrentConversation: () => {
     get()._saveIndex();
     get()._saveActiveMessages();
@@ -209,6 +224,8 @@ export const useChatStore = create((set, get) => ({
   },
 
   updateConversationModel: (model) => {
+    const { conversations: current, activeConversationId: activeId } = get();
+    if (current.find((c) => c.id === activeId)?.model === model) return;
     set((state) => {
       const conversations = state.conversations.map((c) =>
         c.id === state.activeConversationId
@@ -217,7 +234,7 @@ export const useChatStore = create((set, get) => ({
       );
       return { conversations };
     });
-    get()._saveIndex();
+    if (activeId) get()._patchConversation(activeId, { model });
   },
 
   renameConversation: (id, title) => {
@@ -226,7 +243,7 @@ export const useChatStore = create((set, get) => ({
         c.id === id ? { ...c, title, updatedAt: Date.now() } : c
       ),
     }));
-    get()._saveIndex();
+    get()._patchConversation(id, { title });
   },
 
   updateConversationTags: (id, tags) => {
@@ -235,7 +252,7 @@ export const useChatStore = create((set, get) => ({
         c.id === id ? { ...c, tags, updatedAt: Date.now() } : c
       ),
     }));
-    get()._saveIndex();
+    get()._patchConversation(id, { tags });
   },
 
   // Update per-conversation settings

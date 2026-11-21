@@ -86,7 +86,7 @@ router.get('/:id', (req, res) => {
     SELECT id, title, model, tags, created_at as createdAt, updated_at as updatedAt, archived,
            parent_conversation_id as parentConversationId, branch_point_message_id as branchPointMessageId,
            temperature, max_tokens as maxTokens, system_prompt as systemPrompt, enable_thinking as enableThinking,
-           is_compare as isCompare, compare_models as compareModels,
+           is_compare as isCompare, compare_models as compareModels, source,
            (SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id) as messageCount,
            (SELECT COUNT(*) FROM conversations c2 WHERE c2.parent_conversation_id = conversations.id) as childBranchCount
     FROM conversations

@@ -4,10 +4,18 @@ import { getDb } from '../db/index.js';
 
 const router = express.Router();
 
+/** 404 unless the conversation exists. Returns true when it does. */
+function requireConversation(db, id, res) {
+  if (db.prepare('SELECT 1 FROM conversations WHERE id = ?').get(id)) return true;
+  res.status(404).json({ error: 'Conversation not found' });
+  return false;
+}
+
 // GET /api/conversations/:conversationId/messages - List messages
 router.get('/conversations/:conversationId/messages', (req, res) => {
   const db = getDb();
   const { conversationId } = req.params;
+  if (!requireConversation(db, conversationId, res)) return;
 
   const messages = db.prepare(`
     SELECT id, role, content, model, images, created_at as timestamp,
@@ -30,7 +38,11 @@ router.get('/conversations/:conversationId/messages', (req, res) => {
 router.post('/conversations/:conversationId/messages', (req, res) => {
   const db = getDb();
   const { conversationId } = req.params;
+  if (!requireConversation(db, conversationId, res)) return;
   const { id: providedId, role, content, model, images, tokensPerSec, toolCalls, timestamp } = req.body;
+  if (!['user', 'assistant', 'system', 'tool'].includes(role)) {
+    return res.status(400).json({ error: 'role must be user, assistant, system or tool' });
+  }
 
   // Get next position
   const lastPos = db.prepare(`
@@ -83,6 +95,7 @@ router.post('/conversations/:conversationId/messages', (req, res) => {
 router.put('/conversations/:conversationId/messages', (req, res) => {
   const db = getDb();
   const { conversationId } = req.params;
+  if (!requireConversation(db, conversationId, res)) return;
   const { messages } = req.body;
 
   if (!Array.isArray(messages)) {

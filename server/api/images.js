@@ -296,7 +296,7 @@ router.get("/generations", (req, res) => {
 
   const generations = db.prepare(`
     SELECT g.id, g.prompt, g.negative_prompt, g.model, g.width, g.height, g.steps, g.cfg_scale,
-      g.sampler, g.scheduler, g.seed, g.batch_count, g.created_at,
+      g.sampler, g.scheduler, g.seed, g.batch_count, g.created_at, g.machine_id, g.machine_name, g.recipe,
       (SELECT COUNT(*) FROM generated_images gi WHERE gi.generation_id = g.id) AS image_count,
       (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position LIMIT 1) AS first_image_id,
       (SELECT json_group_array(id) FROM (SELECT id FROM generated_images gi WHERE gi.generation_id = g.id ORDER BY position)) AS image_ids
@@ -305,7 +305,10 @@ router.get("/generations", (req, res) => {
     LIMIT ? OFFSET ?
   `).all(limit, offset);
 
-  for (const g of generations) g.image_ids = JSON.parse(g.image_ids || "[]");
+  for (const g of generations) {
+    g.image_ids = JSON.parse(g.image_ids || "[]");
+    g.machine_name ||= (g.machine_id && getMachine(g.machine_id)?.name) || null;
+  }
   const total = db.prepare("SELECT COUNT(*) AS count FROM image_generations").get().count;
   res.json({ generations, total, page, limit });
 });

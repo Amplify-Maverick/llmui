@@ -289,11 +289,40 @@ export function normalizeEvent(event, rawData) {
   const type = event || payload.event || payload.type;
   if (!type) return null;
   const data = "data" in payload ? payload.data : payload;
-  return { type, model: payload.model ?? data?.model ?? null, data };
+  const ev = { type, model: payload.model ?? data?.model ?? null, data };
+  // Bytes { done, total } summed over the model's files, so clients don't
+  // have to know the router's progress shape.
+  if (type === "download_progress") ev.progress = parseProgress(data);
+  return ev;
+}
+
+/**
+ * { done, total } bytes from a router download_progress payload: either
+ * { done|downloaded|current, total } or an object of those per file (summed).
+ * null when the payload has neither.
+ */
+export function parseProgress(data) {
+  if (!data || typeof data !== "object") return null;
+  const pick = (o) => {
+    const done = o.done ?? o.downloaded ?? o.current;
+    return typeof done === "number" && typeof o.total === "number" ? { done, total: o.total } : null;
+  };
+  const direct = pick(data);
+  if (direct) return direct;
+  let done = 0, total = 0, any = false;
+  for (const v of Object.values(data)) {
+    const p = v && typeof v === "object" ? pick(v) : null;
+    if (p) {
+      done += p.done;
+      total += p.total;
+      any = true;
+    }
+  }
+  return any ? { done, total } : null;
 }
 
 // GET /api/llama/events — the router's /models/sse, re-emitted as one JSON
-// object per `data:` line: { type, model, data }.
+// object per `data:` line: { type, model, data } (+ progress on download_progress).
 router.get("/events", async (req, res) => {
   const controller = new AbortController();
   res.on("close", () => controller.abort());

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupQuants, normalizeEvent, gpuBytes, manifestUrl, normalizeModel } from "./llama.js";
+import { groupQuants, normalizeEvent, parseProgress, gpuBytes, manifestUrl, normalizeModel } from "./llama.js";
 
 const f = (path, size) => ({ type: "file", path, size: 1, lfs: { size } });
 
@@ -29,7 +29,7 @@ test("groupQuants groups by quant, sums shards, skips mmproj and non-gguf", () =
 test("normalizeEvent handles JSON {model,event,data} and event: framing", () => {
   assert.deepEqual(
     normalizeEvent(null, '{"model":"a/b:Q4","event":"download_progress","data":{"u":{"done":1,"total":2}}}'),
-    { type: "download_progress", model: "a/b:Q4", data: { u: { done: 1, total: 2 } } }
+    { type: "download_progress", model: "a/b:Q4", data: { u: { done: 1, total: 2 } }, progress: { done: 1, total: 2 } }
   );
   assert.deepEqual(
     normalizeEvent("model_status", '{"model":"a/b:Q4","status":"loaded"}'),
@@ -76,4 +76,11 @@ test("manifestUrl builds the HF manifest URL for owner/repo:QUANT only", () => {
 test("normalizeModel keeps sidecars", () => {
   assert.deepEqual(normalizeModel({ id: "a/b:Q4", sidecars: ["mmproj"] }).sidecars, ["mmproj"]);
   assert.deepEqual(normalizeModel({ id: "a/b:Q4" }).sidecars, []);
+});
+
+test("parseProgress reads direct and per-file progress, summing files", () => {
+  assert.deepEqual(parseProgress({ downloaded: 5, total: 10 }), { done: 5, total: 10 });
+  assert.deepEqual(parseProgress({ "a.gguf": { done: 1, total: 4 }, "mmproj.gguf": { current: 2, total: 2 } }), { done: 3, total: 6 });
+  assert.equal(parseProgress({ status: "x" }), null);
+  assert.equal(parseProgress(null), null);
 });

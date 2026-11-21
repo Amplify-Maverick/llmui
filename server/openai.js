@@ -193,7 +193,8 @@ openaiRouter.post("/chat/completions", (req, res) =>
 
 /**
  * Run one streamed chat turn against the OpenAI-compatible server.
- * Calls onContent(text) for each content delta as it arrives.
+ * Calls onContent(text) for each content delta as it arrives, and
+ * onThinking(text) for each reasoning_content (thinking) delta.
  * `machine` is where to send it (falls back like openaiFetch; `res` is the
  * client response, counted as in flight on a fallback machine).
  * Returns { content, toolCalls, timings, machine } with tool calls in OpenAI format
@@ -211,6 +212,7 @@ export async function streamOpenAITurn({
   enableThinking = false,
   signal,
   onContent,
+  onThinking,
 }) {
   const body = {
     model,
@@ -255,6 +257,8 @@ export async function streamOpenAITurn({
     // llama.cpp attaches timings to the final chunk
     if (event.timings) timings = event.timings;
     const delta = event.choices?.[0]?.delta || {};
+    // Thinking (enable_thinking): llama.cpp streams it as reasoning_content.
+    if (delta.reasoning_content) onThinking?.(delta.reasoning_content);
     if (delta.content) {
       content += delta.content;
       onContent(delta.content);

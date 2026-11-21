@@ -28,6 +28,7 @@ import llamaRouter from "./api/llama.js";
 import { loadSdConfig, chatGate, sdStatus } from "./sd.js";
 import { llamaFetch, keyHint } from "./llama.js";
 import { fetchHelper, helperConfigured, normalizeHelperGpu } from "./sdfetch.js";
+import { PAIR_VERSION, PAIR_PREFIX, publicUrl } from "./pairing.js";
 import {
   getMachine,
   listMachines,
@@ -216,6 +217,16 @@ app.get("/api/llmui-token", (req, res) => {
   res.json({ token: authToken });
 });
 
+// ============================================================
+// Device pairing (Settings → Pair iPhone; payload documented in docs/api.md)
+// The QR text is "llmui-pair:v1:" + JSON {url, token}. The token is the same
+// full-access bearer token the web app uses.
+// ============================================================
+app.get("/api/pairing", requireAuth, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ version: PAIR_VERSION, prefix: PAIR_PREFIX, url: publicUrl(), token: authToken });
+});
+
 // Token endpoint - only serves to localhost
 app.get("/auth/token", (req, res) => {
   if (!isLocalhost(req)) {
@@ -339,7 +350,8 @@ app.put("/api/gpu-config", requireAuth, async (req, res) => {
 // (req.machine, set by chatGate; see server/backends.js): stream a turn, execute any tool calls, feed results back,
 // repeat until the model answers without tools or MAX_TOOL_ITERATIONS is hit.
 // Body: { model, messages, options: { modelOptions }, enabledTools, enableThinking? }
-// Emits: {type:"content"|"tool_call"|"tool_result"|"done"|"error", ...}
+// Emits: {type:"thinking"|"content"|"tool_call"|"tool_result"|"done"|"error", ...}
+// (documented in docs/api.md)
 //
 // Manual test for abort handling:
 // 1. Start a chat that triggers a slow tool (e.g., web_search or fetch_url with a slow endpoint)
@@ -390,6 +402,9 @@ app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
   const onContent = (text) => {
     res.write(JSON.stringify({ type: "content", content: text }) + "\n");
   };
+  const onThinking = (text) => {
+    res.write(JSON.stringify({ type: "thinking", content: text }) + "\n");
+  };
 
   try {
     while (iterations < MAX_TOOL_ITERATIONS) {
@@ -410,6 +425,7 @@ app.post("/api/chat-with-tools", requireAuth, chatGate(), async (req, res) => {
         enableThinking,
         signal,
         onContent,
+        onThinking,
       });
       const { content: assistantContent, toolCalls, timings } = turn;
       machine = turn.machine;
@@ -868,6 +884,18 @@ if (hasDist) {
     res.sendFile(DIST_INDEX);
   });
 }
+
+// Errors nothing else handled (malformed JSON body, a database constraint,
+// ...) answer JSON like every other API error, never Express's HTML page.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error(`${req.method} ${req.path} failed:`, err);
+  if (res.headersSent) return res.end();
+  res.status(status).json({
+    error: status >= 500 ? "Internal server error" : err.expose !== false && err.message ? err.message : "Bad request",
+  });
+});
 
 // ============================================================
 // Startup
