@@ -180,16 +180,18 @@ Chats are called *conversations* in the API. Messages live in a separate collect
   "source": "local",
   "messageCount": 2,
   "childBranchCount": 0,
-  "activeRunId": null
+  "activeRunId": null,
+  "activeRunIds": []
 }
 ```
 
 - `archived` is `0`/`1` (an integer, not a boolean).
 - `temperature`, `maxTokens`, `systemPrompt`, `enableThinking`: per-chat overrides. `null` means use the global setting (§10.1).
 - `parentConversationId` / `branchPointMessageId`: set on branches (§3.8).
-- `isCompare` / `compareModels`: web Compare mode. Treat these chats as read-only.
+- `isCompare` / `compareModels`: **legacy**. Comparisons saved by the old client-side Compare view (before 2026-11-21) were whole chats with these set. Treat those chats as read-only. New comparisons are turns inside an ordinary chat (§4.8) and leave these `false`/`null`.
 - `source`: `"local"` for chats made in LLMUI. Other values come from imports.
-- `activeRunId`: the id of the run generating a reply in this chat right now (§4.2), else `null`. In the list and the single-chat response.
+- `activeRunId`: the id of a run generating a reply in this chat right now (§4.2), else `null`. In the list and the single-chat response.
+- `activeRunIds`: every such run: `[]`, one id, or two during a Compare (§4.8).
 
 ### 3.2 List — `GET /api/conversations` — Stable
 
@@ -246,6 +248,9 @@ Deletes the conversation and its messages. Branches of it remain, with `parentCo
 - `model`, `tokensPerSec`: assistant messages only.
 - `thinking` (optional, string): the model's Think text, on assistant messages. Absent when there was none. Replies stored by a run (§4.1) include it; clients that save messages themselves can send it on `POST`, `PUT` and `PATCH`. It's copied into branches and exports, and it isn't sent back to the model as history.
 - `machine` (string or `null`, always present): id of the machine that generated the reply (§5.1 `id`, e.g. `"jellyfin"`, `"workstation"`). Set by the server on every reply a run stores (§4.1: send, regenerate, answering an edit branch), including partial replies after cancel or error; if a turn fell back to another machine, it's that machine. `null` on user messages and on replies stored before this field existed (they are not backfilled; don't guess). Map it to a display name with `GET /api/machines`; show the id if it isn't listed. Clients that save messages themselves may send it on `POST` and `PUT` (`400 {"error":"machine must be a string"}` on `POST` otherwise); `PUT` must send back the value it read, or the value is lost. Copied into branches and exports. `model` on a run's reply is the model that run used.
+- `status` (string or `null`, always present): `"interrupted"` when the server stopped (restart, crash) while writing this reply; what it had written is the content (§4.7). `null` for every other message, including replies stopped by cancel or an error. Continue (§4.7) clears it. New values may be added; treat unknown ones like `null`.
+- `compareGroup`, `compareSlot`, `picked` (only on Compare replies, §4.8): the two replies to one user message share `compareGroup` (string); `compareSlot` is `0` or `1` (left, right); `picked` is `true` on the reply the user chose, at most one per group. Absent on every other message.
+- Clients that save messages themselves may send `status`, `compareGroup`, `compareSlot` and `picked` on `POST` and `PUT`; `PUT` must send back what it read, or they're lost. All are copied into branches and exports.
 - Not stored: `duration` and `promptPerSec`. The server drops any field not listed here.
 
 | Method & path | Body | Response | Notes |
@@ -253,7 +258,7 @@ Deletes the conversation and its messages. Branches of it remain, with `parentCo
 | `GET /api/conversations/:id/messages` | — | `{"messages":[...]}` ordered by `position` | 404 for unknown chat |
 | `POST /api/conversations/:id/messages` | one message (`role` required; `id`, `timestamp` optional) | the stored message with `id`, `position` | Appends. If it's the first message, it's a user message and the title is still "New Chat", the title becomes the first 30 characters. 400 for a bad role, 404 for an unknown chat |
 | `PUT /api/conversations/:id/messages` | `{"messages":[...]}` | `{"success":true,"count":2}` | **Replaces all** messages (positions renumbered 0..n-1). This is how the web app saves. Doesn't auto-title. |
-| `PATCH /api/messages/:id` | `{"content"?, "tokensPerSec"?, "toolCalls"?, "thinking"?}` | `{"success":true}` | 400 if empty, 404 |
+| `PATCH /api/messages/:id` | `{"content"?, "tokensPerSec"?, "toolCalls"?, "thinking"?, "status"?, "picked"?}` | `{"success":true}` | 400 if empty, 404. `picked: true` marks this Compare reply as the chosen one and unpicks the other; `false` unpicks it (`400 {"error":"Only a Compare reply can be picked"}` otherwise). `status`: `"interrupted"` or `null`. |
 | `DELETE /api/messages/:id?truncateAfter=true` | — | `{"success":true}` | With `truncateAfter=true`, also deletes every later message. Without it, deletes one message and renumbers the rest. |
 
 While a run is generating a reply in a chat (§4.1), `POST`, `PUT` and `DELETE` on that chat's messages return `409 {"error":"A reply is being generated in this chat; try again when it finishes","code":"run_in_progress","runId":"..."}`, so nothing rewrites the history under the reply. Deleting the chat itself cancels the run.
@@ -274,7 +279,9 @@ Branch response: the new conversation (`parentConversationId`, `branchPointMessa
 
 **Use §4.1.** The server stores the user message, builds the history from the database, runs the model (with tools if enabled), and stores the reply, whether or not the client stays connected. The client watches the run's event stream, and can drop it at any time (app in the background, network change) and reattach later by run id or chat id to get exactly what it missed (§4.2). Only an explicit cancel stops a run (§4.3).
 
-§4.5 and §4.6 are the older client-managed endpoints: the client builds the history, streams, and saves the result itself, and closing the connection stops generation. They remain for the web Compare view and for compatibility.
+§4.5 and §4.6 are the older client-managed endpoints: the client builds the history, streams, and saves the result itself, and closing the connection stops generation. They remain for compatibility; the web app no longer uses them for chat (Compare moved to §4.8).
+
+Every run is also recorded in the database while it streams (the partial reply is written about once a second), so a server restart doesn't lose it: the reply is stored with `status: "interrupted"` and can be continued (§4.7).
 
 A run goes to the selected machine, falling back to the default machine if the selected one is down (§5.3). It's refused with **409** while an image job holds that machine's GPU (§8.5).
 
@@ -292,7 +299,9 @@ Request (every field optional):
   "temperature": 0.7,
   "maxTokens": 2048,
   "systemPrompt": "Be brief.",
-  "regenerate": false
+  "regenerate": false,
+  "continue": false,
+  "messageId": null
 }
 ```
 
@@ -300,7 +309,8 @@ What it does:
 
 - `content` and/or `images` present: appends that user message (auto-titling a new chat, as in §3.7), then answers it. `images` may also be bare base64 strings. A vision model is needed (`sidecars` includes `mmproj`, §6.1).
 - Neither present: answers the chat as it stands. Its last message must be a user message (e.g. a branch made by editing, §3.8), else `400 {"error":"Nothing to reply to: the chat doesn't end with a user message"}`.
-- `"regenerate": true` (without `content`): deletes the trailing assistant reply, then answers.
+- `"regenerate": true` (without `content`): deletes the trailing assistant reply (both replies of a trailing Compare), then answers. With `"messageId"` it deletes only that reply, which must be one of the replies at the end of the chat. If it's a Compare reply, the new one takes its place in the same group and slot, and runs on that reply's own model and machine unless `model` is sent (the other reply stays and isn't sent to the model).
+- `"continue": true` (§4.7): carries on the trailing reply (or the one `messageId` names; required when the chat ends with a Compare pair) and appends to the same message.
 - Settings: each field you send wins; otherwise the chat's override (§3.5), otherwise the global setting (§10.1). `model` falls back to the chat's model, then the global `defaultModel`. Tools: `enabledTools` if sent (`[]` = none), else the global `enabledTools` when global `enableTools` is on, else none. **Omitting tools never enables all of them** (unlike §4.6). The chat's `model` is updated to the model used.
 
 Response: **200**, `Content-Type: application/x-ndjson`, headers `X-LLMUI-Run-Id: <run id>` and `X-LLMUI-Machine: <machine id>`. One JSON object per line, each with a `seq` (1, 2, 3, … per run). Blank lines are keepalives (every 15 s while idle); skip them. Real example (thinking on, no tools; middle elided):
@@ -317,7 +327,7 @@ Response: **200**, `Content-Type: application/x-ndjson`, headers `X-LLMUI-Run-Id
 
 | type | fields | notes |
 |---|---|---|
-| `start` | `runId`, `conversationId`, `userMessageId`, `model`, `machine` | Always first. `userMessageId` is the stored message being answered. |
+| `start` | `runId`, `conversationId`, `userMessageId`, `model`, `machine` | Always first. `userMessageId` is the stored message being answered. Continue adds `continues` (the message id) and `content` / `thinking` (the text so far, which later deltas add to). Compare runs add `compareGroup`, `compareSlot`. |
 | `thinking` | `content` | Think delta. |
 | `content` | `content` | Answer delta. |
 | `tool_call` | `id`, `name`, `arguments` | As in §4.6. |
@@ -325,10 +335,11 @@ Response: **200**, `Content-Type: application/x-ndjson`, headers `X-LLMUI-Run-Id
 | `done` | `iterations`, `machine`, `timings`, `messageId` | **Normal end.** The reply is stored as `messageId`. |
 | `error` | `error`, `messageId` | **Abnormal end** (model error, `"Max tool iterations reached"`). Whatever was produced before the error is stored as `messageId`; `null` if nothing was. |
 | `cancelled` | `messageId` | **Ended by cancel** (§4.3). The partial reply is stored as `messageId` (`null` if empty). |
+| `interrupted` | `messageId`, `error` | **The server restarted mid-run.** Only seen when reattaching after the restart (§4.2). The partial reply is stored as `messageId` with `status: "interrupted"`. |
 
-Exactly one of `done` / `error` / `cancelled` ends every run, and the stream closes after it. Ignore unknown types. The stored reply has `content`, `thinking`, `toolCalls`, `model`, `machine` and `tokensPerSec` (= `timings.predicted_per_second`). Fetch it with `GET /api/conversations/:id/messages` after the end event; don't save it yourself.
+Exactly one of `done` / `error` / `cancelled` / `interrupted` ends every run, and the stream closes after it. Ignore unknown types. The stored reply has `content`, `thinking`, `toolCalls`, `model`, `machine` and `tokensPerSec` (= `timings.predicted_per_second`). Fetch it with `GET /api/conversations/:id/messages` after the end event; don't save it yourself.
 
-Refusals (plain JSON, nothing stored): `404 {"error":"Conversation not found"}`; `400` for `content must be a string`, `content is empty`, `regenerate can't be combined with content`, `enabledTools must be an array of tool names`, `temperature must be 0-5`, `maxTokens must be a positive integer`, `model is required (no model in the request, the chat or the settings)`, nothing to reply to (above); `409 {"error":"A reply is already being generated in this chat","code":"run_in_progress","runId":"..."}` (one run per chat at a time: reattach to `runId` instead); `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
+Refusals (plain JSON, nothing stored): `404 {"error":"Conversation not found"}`; `400` for `content must be a string`, `content is empty`, `regenerate can't be combined with content`, `enabledTools must be an array of tool names`, `temperature must be 0-5`, `maxTokens must be a positive integer`, `model is required (no model in the request, the chat or the settings)`, nothing to reply to (above); `continue must be true or false`, `continue can't be combined with content or regenerate`, `messageId only goes with continue or regenerate`, `messageId must be one of the replies at the end of the chat`, `messageId is required to continue one reply of a Compare`, `Nothing to continue: the chat doesn't end with a reply`; `409 {"error":"A reply is already being generated in this chat","code":"run_in_progress","runId":"..."}` (one turn per chat at a time, a Compare's two runs included: reattach to `runId` instead); `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
 ### 4.2 Reattach and status — Stable
 
@@ -337,7 +348,8 @@ Refusals (plain JSON, nothing stored): `404 {"error":"Conversation not found"}`;
 | `GET /api/runs/:id/events?after=<seq>` | The same NDJSON stream: every event with `seq` greater than `after` (0 or omitted = from the start), then live events until the run ends. For a run that has already ended, the missed events and the end event, then the stream closes. |
 | `GET /api/conversations/:id/run/events?after=<seq>` | Same, for the chat's current run, or its latest one if none is running. `404 {"error":"No run for this chat","code":"no_run"}`. |
 | `GET /api/runs/:id` | Snapshot (below). |
-| `GET /api/conversations/:id/run` | `{"run": <snapshot or null>}`: the chat's current run, else its latest one still kept. |
+| `GET /api/conversations/:id/run` | `{"run": <snapshot or null>}`: the chat's current run, else its latest one. |
+| `GET /api/conversations/:id/runs` | `{"runs": [snapshot, ...]}`: every run of the chat's latest turn, oldest slot first: one, or the two of a Compare (§4.8). `[]` if the chat never had a run. |
 
 Snapshot (real; `content` shortened):
 
@@ -348,17 +360,18 @@ Snapshot (real; `content` shortened):
  "timings":{"predicted_n":41,"predicted_ms":16400,"predicted_per_second":2.5,"prompt_n":20,"prompt_ms":40,"prompt_per_second":500}}
 ```
 
-- `status`: `running` | `completed` | `failed` | `cancelled`.
-- `content` / `thinking` / `toolCalls`: everything produced so far, so a client can draw the reply at once and then attach with `after=seq` for the rest.
-- `messageId`: the stored reply once the run has ended (null while running, or if nothing was produced).
+- `status`: `running` | `completed` | `failed` | `cancelled` | `interrupted`. **Stable.** `interrupted` = the server stopped while it was running (§4.7).
+- `content` / `thinking` / `toolCalls`: everything produced so far, so a client can draw the reply at once and then attach with `after=seq` for the rest. For a Continue run, this includes the text it started from.
+- `messageId`: the stored reply once the run has ended (null while running, or if nothing was produced). For a Continue run, the continued message.
+- `continues`: the message a Continue run appends to, else `null`. `compareGroup` / `compareSlot`: set on Compare runs (§4.8), else `null`.
 
-Runs are kept in server memory for **30 minutes** after they end (Unstable: may change). After that, or after a server restart, `/api/runs/:id` returns `404 {"error":"Run not found","code":"no_run"}`. The stored messages are then the record. A restart **loses a running run**: its user message stays stored with no reply, and `POST …/send` with no `content` answers it again.
+**After a restart — Stable.** Every run is a database row, so these routes answer for any run of a chat that still exists, before or after a restart (rows of ended runs are deleted after 30 days, and with their chat). A run that ended before the server last started has lost its individual events: `GET /api/runs/:id/events` (and `…/run/events`) then sends **one event**, the end event (`done`, `error`, `cancelled` or `interrupted`), whose `seq` is greater than both the run's last recorded `seq` and your `after`, and closes. Fetch the reply with the messages route. `done` replayed this way has `iterations: null`. Runs that ended in this process keep their full event log for 30 minutes (Unstable), then switch to the same single end event. `404 {"error":"Run not found","code":"no_run"}` only for ids that never existed (or whose chat was deleted).
 
-**iOS pattern:** send (§4.1) and remember `runId` (from the header or `start`) and the last `seq`. When the app comes back, or the stream breaks: `GET /api/runs/:id` → if `running`, render `content`/`thinking` and attach with `after=<snapshot seq>`; if ended, reload the chat's messages. After a cold start, `activeRunId` on the conversation (§3.1) says which chats are still generating.
+**iOS pattern:** send (§4.1) and remember `runId` (from the header or `start`) and the last `seq`. When the app comes back, or the stream breaks: `GET /api/runs/:id` → if `running`, render `content`/`thinking` and attach with `after=<snapshot seq>`; if ended (including `interrupted`), reload the chat's messages. While the server restarts, reattach fails to connect for a few seconds; keep retrying with backoff, then the run reads as `interrupted`. After a cold start, `activeRunIds` on the conversation (§3.1) says which chats are still generating.
 
 ### 4.3 Cancel — `POST /api/runs/:id/cancel` — Stable
 
-Stops the model and stores the partial reply. It answers with the snapshot once the run has ended (normally well under a second), or after 10 s with `status` still `running`. A run that has already ended is returned unchanged. Watchers get the `cancelled` event. `404` for an unknown run.
+Stops the model and stores the partial reply. It answers with the snapshot once the run has ended (normally well under a second), or after 10 s with `status` still `running`. A run that has already ended (also before a restart) is returned unchanged. Watchers get the `cancelled` event. `404` for an unknown run. Each side of a Compare is cancelled on its own.
 
 ```json
 {"id":"-ZfdrfyH96TsinPaYVBJZ","status":"cancelled","messageId":"ueJIaHIwAF9fnY-6E5Bv_","seq":8, "...":"rest of the snapshot"}
@@ -448,6 +461,62 @@ Response: `Content-Type: application/x-ndjson`, one JSON object per line. The ev
 Errors before the stream starts are plain JSON: `400 {"error":"Model is required"}`, `400 {"error":"messages must be an array"}`, `409 {"error":"image generation in progress","code":"image_generation_in_progress"}`.
 
 When saving, store the answer text as `content`, the Think text as `thinking`, the calls as `toolCalls` and the `done` event's `machine` as `machine` (§3.7).
+
+### 4.7 Interrupted replies and Continue — Stable
+
+**What a restart does.** While a run streams, the server writes its partial reply (`content`, `thinking`, `toolCalls`, `machine`, `seq`) to the database about once a second, and again when the process is stopped with SIGTERM/SIGINT. When the server starts, every run still marked running was cut off. For each, it stores what was written as the assistant reply with `status: "interrupted"` (kept: Think text, tool calls, `model`, `machine`; and `compareGroup`/`compareSlot` for a Compare side), **even if it's empty**, and marks the run `interrupted`. At most the last second of text before a crash is lost. The chat is then free: the 409 rule (§3.7, §4.1) only applies while a run is actually running.
+
+**Showing it.** A reply with `status: "interrupted"` should get a small "Interrupted" label and, when it's at the end of the chat, two actions:
+
+- **Continue**: `POST /api/conversations/:id/send` with `{"continue": true}` (plus `"messageId"` for one side of a Compare; other fields as in §4.1). The server sends the history up to the reply's user message, then the partial reply as an assistant message, then a fixed user instruction to carry on exactly where it stopped (the wording is **Unstable**). It runs on the reply's own model and machine unless `model` is sent. The new text is **appended to the same message**: the stream's `start` event carries `continues`, `content` and `thinking` (the text so far), later deltas add to it, and the end event's `messageId` is that message. When the run ends with new output, the message gets the full text and `status: null`; new Think text is appended after a blank line. Continue also works on a reply that isn't interrupted.
+- **Retry**: `{"regenerate": true}` (with `"messageId"` for a Compare side), as in §4.1.
+
+```
+{"seq":1,"type":"start","runId":"...","conversationId":"...","userMessageId":"...","model":"test/model:Q4","machine":"jellyfin","continues":"<message id>","content":"Partial reply from","thinking":"..."}
+{"seq":2,"type":"content","content":" and the rest."}
+{"seq":3,"type":"done","iterations":1,"machine":"jellyfin","timings":{...},"messageId":"<message id>"}
+```
+
+If the server restarts during a Continue, the message keeps the text so far and goes back to `status: "interrupted"`.
+
+### 4.8 Compare — `POST /api/conversations/:id/compare` — Unstable
+
+Two models answer one user message in parallel, each on its own machine. Both replies are stored in the chat, side by side, as ordinary messages that share a `compareGroup` (§3.7), and each is a normal run (§4.2–4.4, §4.7). Unstable: new in this revision; the request shape may still change.
+
+Request (fields as in §4.1, plus `sides`):
+
+```json
+{
+  "content": "Which sorting algorithm should I use here?",
+  "sides": [
+    {"model": "Qwen/Qwen3-8B-GGUF:Q4_K_M", "machine": "jellyfin"},
+    {"model": "unsloth/gemma-3-12b-it-GGUF:Q4_K_M", "machine": "workstation"}
+  ],
+  "enableThinking": true,
+  "enabledTools": []
+}
+```
+
+- `sides`: exactly two `{model, machine}`. `machine` is a machine id (§5.1); omitted or `null` = where chat requests go now. A side never moves to another machine because the other side did; like any run it falls back to the default machine if its own is unreachable.
+- `content` / `images`: the new user message. Without them, the chat must end with a user message, which both models answer. `"regenerate": true` deletes the trailing reply (or Compare pair) first. `continue` and `messageId` are refused here: continue or retry one side through §4.1.
+- Thinking, tools, temperature, max tokens and system prompt apply to both sides. The chat's `model` isn't changed.
+- Both sides run at the same time. Two sides on the **same** machine both go to its model router at once; whether that works depends on both models fitting there.
+
+Response: **202**, at once:
+
+```json
+{"compareGroup":"V1StGXR8_Z5jdHi6B-myT","userMessageId":"tOLC9pwEsv_YaI5bCsE47",
+ "runs":[{"id":"…","status":"running","model":"Qwen/Qwen3-8B-GGUF:Q4_K_M","machine":"jellyfin","compareGroup":"V1StGXR8_Z5jdHi6B-myT","compareSlot":0,"...":"snapshot (§4.2)"},
+         {"id":"…","status":"running","model":"unsloth/gemma-3-12b-it-GGUF:Q4_K_M","machine":"workstation","compareGroup":"V1StGXR8_Z5jdHi6B-myT","compareSlot":1,"...":"snapshot"}]}
+```
+
+Watch each with `GET /api/runs/:id/events` (§4.2). Each ends independently and stores its reply with `compareGroup` and its `compareSlot` (0 = first side). `GET /api/conversations/:id/runs` lists both while they run and afterwards; `activeRunIds` lists the running ones.
+
+**Reopening.** The chat's messages hold the comparison: the user message, then the two replies with the same `compareGroup`. Show replies sharing a group side by side, ordered by `compareSlot`.
+
+**Picking.** `PATCH /api/messages/:id` with `{"picked": true}` stores the chosen reply (and unpicks the other); `{"picked": false}` clears it. Both replies always stay. The next turn's history sends the model one reply per group: the picked one, else slot 0.
+
+Refusals: `400 {"error":"sides must be an array of two {model, machine}"}`, `400 {"error":"each side needs a model"}`, `400 {"error":"Unknown machine \"x\""}`, the §4.1 validation errors, `404`, `409 run_in_progress`, and `409 image_generation_in_progress` (with `machine`) if an image job holds either side's GPU.
 
 ---
 
@@ -749,7 +818,7 @@ data: {"seq":11,"type":"complete","machine":"jellyfin","generationId":"cvRS1cWdI
 - `job`: always first; the job id.
 - `stage`: `freeing_gpu`, `loading_model` (repeated every 5 s while loading, as a keepalive).
 - `progress`: `stage` is `queued` | `preparing` | `sampling` | `vae_decode` | …. `value` is overall progress 0..1 across the batch, or null when unknown. `pass` is which image of the batch (1-based).
-- Exactly one end event, then the stream closes: **`complete`** (fetch the images, §8.7), **`error`** `{"error":"sd-server job failed: ..."}`, or **`cancelled`** (after §8.4's cancel).
+- Exactly one end event, then the stream closes: **`complete`** (fetch the images, §8.7), **`error`** `{"error":"sd-server job failed: ..."}`, **`cancelled`** (after §8.4's cancel), or **`interrupted`** `{"error":"The server restarted while this image was being generated"}` (only when reattaching after a restart, §8.4).
 - After a job ends, either way, the SD model is unloaded and the GPU is freed for chat. The chat model is *not* reloaded until the next chat request.
 
 ### 8.4 Jobs — Stable
@@ -757,10 +826,10 @@ data: {"seq":11,"type":"complete","machine":"jellyfin","generationId":"cvRS1cWdI
 | Method & path | Response |
 |---|---|
 | `GET /api/images/jobs/:id` | Snapshot (below). |
-| `GET /api/images/jobs/:id/events?after=<seq>` | SSE: events with `seq` > `after` (0 = from the start), then live until the end event. For an ended job: the missed events and the end event. |
-| `GET /api/images/jobs/:id/result` | Completed: `{jobId, machine, generationId, imageIds, seed, imageCount, api, timings, images:[{id, url, metaUrl}]}`. Otherwise `409` with `code` `job_running`, `job_failed` or `job_cancelled` (and `status`). |
+| `GET /api/images/jobs/:id/events?after=<seq>` | SSE: events with `seq` > `after` (0 = from the start), then live until the end event. For an ended job: the missed events and the end event. For a job that ended before the server last started: only its end event, with a `seq` greater than `after`. |
+| `GET /api/images/jobs/:id/result` | Completed: `{jobId, machine, generationId, imageIds, seed, imageCount, api, timings, images:[{id, url, metaUrl}]}`. Otherwise `409` with `code` `job_running`, `job_failed`, `job_cancelled` or `job_interrupted` (and `status`). |
 | `POST /api/images/jobs/:id/cancel` | Stops the job (sd-server cancels it, the SD model is unloaded, the GPU freed) and answers with the snapshot once it has ended (`status: "cancelled"`), or after 30 s with `status` still `running`. An ended job is returned unchanged. |
-| `GET /api/images/jobs[?active=1]` | `{"jobs":[snapshot, ...]}` newest first: jobs the server still holds; `active=1` only running ones. Use it after a restart of the app to find a job it lost track of. |
+| `GET /api/images/jobs[?active=1]` | `{"jobs":[snapshot, ...]}` newest first: jobs in server memory plus jobs from the last hour that only the database still knows (e.g. interrupted by a restart); `active=1` only running ones. Use it after a restart of the app or the server to find a job it lost track of. |
 
 Unknown ids: `404 {"error":"Job not found","code":"no_job"}`.
 
@@ -773,7 +842,7 @@ Snapshot (real, while sampling):
  "createdAt":1795228985807,"finishedAt":null,"error":null,"result":null,"seq":6}
 ```
 
-- `status`: `running` | `completed` | `failed` | `cancelled`. `progress` is the last `progress` event; `stage`/`message` the current stage.
+- `status`: `running` | `completed` | `failed` | `cancelled` | `interrupted` (**Stable**). `progress` is the last `progress` event; `stage`/`message` the current stage.
 - `result` (when completed): `{generationId, imageIds, seed, imageCount, api, timings}`.
 
 Result (real):
@@ -784,9 +853,11 @@ Result (real):
  "images":[{"id":"ui1OeQxCSTTgLyBqDYxYM","url":"/api/images/generations/cvRS1cWdIJUXv3FI0p-rX/images/ui1OeQxCSTTgLyBqDYxYM","metaUrl":"/api/images/generations/cvRS1cWdIJUXv3FI0p-rX/images/ui1OeQxCSTTgLyBqDYxYM/meta"}]}
 ```
 
-Jobs stay in server memory for **1 hour** after they end (Unstable: may change). A completed job's generation records its job id, so `GET /api/images/jobs/:id` and `/result` still answer for it after that, and after a restart (with `params`, `createdAt` and `seq` null). A failed or cancelled job is forgotten. A server restart loses a running job.
+**After a restart — Stable.** Every job is also a database row (state written at start, about once a second while it runs, and at the end), so `GET /api/images/jobs/:id`, `/events`, `/result` and `/cancel` answer for any job, before or after a restart, with the same snapshot (`params` included). Rows of ended jobs are deleted after 30 days; completed jobs from before this revision are still found through their stored images (with `params`, `createdAt` and `seq` null). The full event log stays in memory for **1 hour** after a job ends (Unstable); after that, or after a restart, `/events` sends only the end event.
 
-**iOS pattern:** `POST /api/images/jobs`, keep the id. While in the foreground, watch `/events` (or poll the snapshot every 1–2 s). When the app comes back, `GET` the snapshot: still `running` → watch `/events?after=<seq>`; `completed` → `/result`.
+When the server starts, jobs still marked running were cut off: they become **`interrupted`** (`error: "The server restarted while this image was being generated"`, `finishedAt` = the restart). Nothing was stored for them. In the background the server asks that machine's sd-server to cancel the job (if it had been submitted) and unloads the SD model, so the GPU is free again. To **Retry**, `POST /api/images/jobs` again with the snapshot's `params` (the `seed` there is the one actually used, so the image comes out the same).
+
+**iOS pattern:** `POST /api/images/jobs`, keep the id. While in the foreground, watch `/events` (or poll the snapshot every 1–2 s). When the app comes back, `GET` the snapshot: still `running` → watch `/events?after=<seq>`; `completed` → `/result`; `interrupted` → offer Retry with its `params`.
 
 ### 8.5 409 behaviour while a job runs — Stable
 
@@ -917,13 +988,21 @@ Closed in this revision: server-side send (§4.1), image jobs that outlive the c
 
 Still open:
 
-1. **Runs and jobs don't survive a server restart.** They live in memory. A restart loses a running reply or image job (the user message stays stored; send again with no `content`). Finished ones are only reattachable for 30 min (runs) or 1 h (jobs); after that, read the stored messages / images.
+1. **A restart still stops work in progress.** Runs and image jobs are recorded and come back as `interrupted` (§4.7, §8.4), but they aren't resumed automatically: the user continues or retries. Up to about a second of reply text before a crash is lost. An interrupted image's partial progress is lost.
 2. **Text-model download events are unverified.** The router's `/models/sse` format was never observed live (§6.3). Rely on polling.
 3. **Mixed casing.** Conversations are camelCase. `PATCH` settings fields, image history and helper jobs are snake_case. A future `v2` could normalize these; nothing has been renamed, to avoid breaking the web app.
 4. **No push.** There are no notifications or websockets. Everything is polling plus the event streams; a finished run or job doesn't notify a backgrounded app.
-5. **No token scopes or expiry.** Every device token has full access until revoked (unused ones expire after 10 minutes). The web Compare view still uses the client-managed endpoints (§4.5), so its replies aren't stored server-side.
+5. **No token scopes or expiry.** Every device token has full access until revoked (unused ones expire after 10 minutes).
 
 ## Changes
+
+### 2026-11-21
+
+- **New:** runs and image jobs are recorded in the database while they run and survive a server restart as **`interrupted`** (§4.7, §8.4): the partial reply is stored with `status: "interrupted"` (Think text, tool calls, model and machine kept), the job keeps its `params`. Run and job status values gain `interrupted`; streams gain an `interrupted` end event. `GET /api/runs/:id[/events]`, `GET /api/images/jobs/:id[/events|/result|/cancel]` answer after a restart (and after the in-memory window) instead of 404. `/result` adds `code: "job_interrupted"`. `GET /api/images/jobs` includes recent interrupted jobs.
+- **New:** **Continue**: `POST …/send` with `{"continue": true, "messageId"?}` appends to an existing reply (§4.7). `regenerate` takes an optional `messageId`.
+- **New:** **Compare on the server**: `POST /api/conversations/:id/compare` (§4.8), `GET /api/conversations/:id/runs`, `activeRunIds` on conversations. Messages gain `status`, and on Compare replies `compareGroup`, `compareSlot`, `picked` (§3.7); `PATCH /api/messages/:id` accepts `picked` and `status`.
+- **Web:** Compare runs through §4.8 inside the open chat (each side picks a model on any machine), shows the two replies side by side when the chat is reopened, and stores "Pick this one". The old client-side Compare (§4.5 streaming, plan/unload logic, "Save Comparison" chats) is removed. Interrupted replies show an "Interrupted" label with Continue and Retry; an interrupted image job shows Retry with the same settings.
+- Server: the database is copied to `~/.llmui/backups/` before migration 8 (`runs`, `image_jobs` tables; `messages.status`, `compare_group`, `compare_slot`, `compare_picked`). Existing rows are unchanged (`status` null).
 
 ### 2026-11-20 (third revision)
 

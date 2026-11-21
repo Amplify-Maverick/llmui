@@ -14,12 +14,19 @@ import BranchRow from "./BranchRow.jsx";
 import GpuMini from "../stats/GpuMini.jsx";
 import ModelSwitchModal from "./ModelSwitchModal.jsx";
 import ConversationSettingsPopover from "./ConversationSettingsPopover.jsx";
-import CompareView from "../compare/CompareView.jsx";
-import ModelMultiSelect from "../compare/ModelMultiSelect.jsx";
+import CompareGroup from "../compare/CompareGroup.jsx";
 import { Select } from "../shared/Input.jsx";
 import { ConfirmModal } from "../shared/Modal.jsx";
 import { liveTokensPerSec } from "../../utils/streamSpeed.js";
 import "./ChatView.css";
+
+const NO_NAMES = [];
+// A Compare side picker's value: "<machine id>::<model id>".
+const sideValue = (machine, model) => (machine && model ? `${machine}::${model}` : "");
+const parseSide = (v) => {
+  const i = v ? v.indexOf("::") : -1;
+  return i < 0 ? { machine: null, model: null } : { machine: v.slice(0, i), model: v.slice(i + 2) };
+};
 
 export default function ChatView({ onBack }) {
   const messagesEndRef = useRef(null);
@@ -28,7 +35,7 @@ export default function ChatView({ onBack }) {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [modelSwitchPending, setModelSwitchPending] = useState(null);
   const [compareMode, setCompareMode] = useState(false);
-  const [compareModels, setCompareModels] = useState([]);
+  const [compareSides, setCompareSides] = useState(["", ""]);
   const [showConvSettings, setShowConvSettings] = useState(false);
 
   const {
@@ -43,16 +50,18 @@ export default function ChatView({ onBack }) {
     removeLastAssistantMessage,
     getLastUserMessage,
     createConversation,
-    addMessage,
     createBranch,
     getBranchCountForMessage,
     conversations,
     activeConversationId,
+    compareLive,
+    pickReply,
   } = useChatStore();
 
   const { defaultModel: savedDefaultModel, enableThinking, enableTools, updateSetting } = useSettingsStore();
   const { models, modelsLoaded, fetchModels, refreshModels, modelInfoCache, fetchModelInfo } = useModelsStore();
-  const { sendMessage, replyToHistory, stopStreaming, regenerateLastMessage } = useChatStream();
+  const { sendMessage, sendCompare, replyToHistory, stopStreaming, regenerateLastMessage, continueReply, retryReply } =
+    useChatStream();
 
   useEffect(() => {
     fetchModels();
@@ -71,13 +80,6 @@ export default function ChatView({ onBack }) {
     if (!isStreaming) refreshModels();
   }, [isStreaming, refreshModels]);
 
-  // Compare mode is a view over no conversation; switching to or creating a
-  // conversation (e.g. "New Chat") leaves it.
-  useEffect(() => {
-    setCompareMode(false);
-    setCompareModels([]);
-  }, [activeConversationId]);
-
   const isServed = useCallback((name) => models.some((m) => m.name === name), [models]);
 
   // A saved default that the /v1 server doesn't serve (e.g. an old Ollama
@@ -90,8 +92,9 @@ export default function ChatView({ onBack }) {
   // model list has actually loaded, so a slow/failed fetch doesn't lock chats.
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
   const conversationModel = useMemo(() => {
+    // Compare replies can come from any machine; they don't make a chat read-only.
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant" && messages[i].model) return messages[i].model;
+      if (messages[i].role === "assistant" && messages[i].model && !messages[i].compareGroup) return messages[i].model;
     }
     return activeConversation?.model || null;
   }, [messages, activeConversation]);
@@ -151,7 +154,35 @@ export default function ChatView({ onBack }) {
 
   const currentModelInfo = modelInfoCache[defaultModel];
 
+  // Compare: a model on any machine for each side.
+  const allOtherModels = useOtherMachineModels("chat", NO_NAMES);
+  const sideGroups = useMemo(() => {
+    const here = chatMachine
+      ? [{ label: chatMachine.name, options: models.map((m) => ({ value: sideValue(chatMachine.id, m.name), label: m.name })) }]
+      : [];
+    const others = allOtherModels.map(({ machine, names }) => ({
+      label: machine.name,
+      options: names.map((n) => ({ value: sideValue(machine.id, n), label: n })),
+    }));
+    return [...here, ...others].filter((g) => g.options.length);
+  }, [chatMachine, models, allOtherModels]);
+  const sides = compareSides.map(parseSide);
+  const compareReady = sides.every((x) => x.model);
+
+  const toggleCompare = () => {
+    setCompareMode((on) => {
+      if (!on && !compareSides[0] && defaultModel && chatMachineId) {
+        setCompareSides([sideValue(chatMachineId, defaultModel), compareSides[1]]);
+      }
+      return !on;
+    });
+  };
+
   const handleSend = (content, images = []) => {
+    if (compareMode) {
+      if (compareReady) sendCompare(content, sides, images).catch((err) => console.error(err));
+      return;
+    }
     sendMessage(content, defaultModel, images);
   };
 
@@ -206,28 +237,13 @@ export default function ChatView({ onBack }) {
     await createBranch(messageId);
   }, [createBranch]);
 
-  // Handle "Pick this one" from Compare mode - creates a new conversation
-  const handlePickResponse = useCallback(async (model, content, userPrompt, stats) => {
-    // Create new conversation with the picked model
-    await createConversation(model);
-
-    // Add the user message (the comparison prompt)
-    addMessage({ role: "user", content: userPrompt });
-
-    // Add the assistant message with metadata
-    addMessage({
-      role: "assistant",
-      content,
-      model,
-      duration: stats?.duration ? parseFloat(stats.duration) : undefined,
-      tokensPerSec: stats?.avgTokPerSec ? parseFloat(stats.avgTokPerSec) : undefined,
-      promptPerSec: stats?.readTokPerSec ? parseFloat(stats.readTokPerSec) : undefined,
-    });
-
-    // Exit compare mode
-    setCompareMode(false);
-    setCompareModels([]);
-  }, [createConversation, addMessage]);
+  // A reply cut off by a server restart: carry on, or write it again.
+  const handleContinue = useCallback((message) => {
+    continueReply(message).catch((err) => console.error(err));
+  }, [continueReply]);
+  const handleRetry = useCallback((message) => {
+    retryReply(message, isServed(message.model) ? message.model : defaultModel).catch((err) => console.error(err));
+  }, [retryReply, isServed, defaultModel]);
 
   // Live tokens/sec while streaming, measured from the first generated token
   // (the final figure comes from llama.cpp's own timings).
@@ -262,6 +278,27 @@ export default function ChatView({ onBack }) {
       -1
     );
   }, [displayMessages, isStreaming]);
+
+  // Messages as rendered: the two replies of a Compare form one row, plus a
+  // row for a Compare that's streaming and not stored yet.
+  const rows = useMemo(() => {
+    const out = [];
+    displayMessages.forEach((message, idx) => {
+      const last = out[out.length - 1];
+      if (message.role === "assistant" && message.compareGroup) {
+        if (last?.type === "compare" && last.group === message.compareGroup) last.messages.push(message);
+        else out.push({ type: "compare", group: message.compareGroup, messages: [message] });
+      } else out.push({ type: "message", message, idx });
+    });
+    if (compareLive && !out.some((row) => row.type === "compare" && row.group === compareLive.group)) {
+      out.push({ type: "compare", group: compareLive.group, messages: [] });
+    }
+    return out;
+  }, [displayMessages, compareLive]);
+
+  // An interrupted reply at the end of the chat can be continued or retried.
+  const canResume = (row) =>
+    !isReadOnly && !isStreaming && row.message.status === "interrupted" && row.idx === displayMessages.length - 1;
 
   // The model for the streaming bubble — grab from the placeholder
   // assistant message that the stream hook creates.
@@ -332,18 +369,24 @@ export default function ChatView({ onBack }) {
           </button>
           <button
             className={`compare-toggle ${compareMode ? "active" : ""}`}
-            onClick={() => setCompareMode((v) => !v)}
-            title={compareMode ? "Switch to single model" : "Compare two models side by side"}
+            onClick={toggleCompare}
+            title={compareMode ? "Switch to single model" : "Send the next message to two models side by side"}
           >
             Compare
           </button>
           {compareMode ? (
-            <ModelMultiSelect
-              value={compareModels}
-              onChange={setCompareModels}
-              maxSelections={2}
-              minSelections={2}
-            />
+            [0, 1].map((i) => (
+              <Select
+                key={i}
+                value={compareSides[i]}
+                onChange={(e) => setCompareSides((cur) => cur.map((v, j) => (j === i ? e.target.value : v)))}
+                groups={sideGroups}
+                placeholder={i === 0 ? "Model A" : "Model B"}
+                disabled={isStreaming}
+                aria-label={i === 0 ? "Compare model A" : "Compare model B"}
+                className="compare-side-select"
+              />
+            ))
           ) : (
             <>
               {selectedModelEntry && (
@@ -391,18 +434,6 @@ export default function ChatView({ onBack }) {
       {/* GPU Stats - available in both modes */}
       {showGpu && <GpuMini />}
 
-      {compareMode ? (
-        /* Compare Mode View */
-        <CompareView
-          models={compareModels}
-          onPickResponse={handlePickResponse}
-          onSaveComplete={() => {
-            setCompareMode(false);
-            setCompareModels([]);
-          }}
-        />
-      ) : (
-        /* Regular Chat View */
         <>
           {/* Model Info Bar */}
           {currentModelInfo && (currentModelInfo.parameters || currentModelInfo.quantization) && (
@@ -437,20 +468,36 @@ export default function ChatView({ onBack }) {
               </div>
             ) : (
               <>
-                {displayMessages.map((msg, idx) => (
-                  <MessageBubble
-                    key={msg.id || idx}
-                    message={msg}
-                    onEdit={isReadOnly ? undefined : handleEditMessage}
-                    onDelete={isReadOnly ? undefined : handleSetDeleteConfirm}
-                    onRegenerate={isReadOnly ? undefined : handleRegenerate}
-                    onBranch={isReadOnly ? undefined : handleBranch}
-                    isLastAssistant={idx === lastAssistantIndex}
-                    branchCount={getBranchCountForMessage(msg.id)}
-                  />
-                ))}
+                {rows.map((row, r) =>
+                  row.type === "compare" ? (
+                    <CompareGroup
+                      key={`cmp-${row.group || "new"}`}
+                      messages={row.messages}
+                      live={compareLive && compareLive.group === row.group ? compareLive.sides : null}
+                      canAct={!isReadOnly && !isStreaming}
+                      isTrailing={r === rows.length - 1}
+                      onPick={pickReply}
+                      onContinue={handleContinue}
+                      onRetry={handleRetry}
+                      onDelete={handleSetDeleteConfirm}
+                    />
+                  ) : (
+                    <MessageBubble
+                      key={row.message.id || row.idx}
+                      message={row.message}
+                      onEdit={isReadOnly ? undefined : handleEditMessage}
+                      onDelete={isReadOnly ? undefined : handleSetDeleteConfirm}
+                      onRegenerate={isReadOnly ? undefined : handleRegenerate}
+                      onBranch={isReadOnly ? undefined : handleBranch}
+                      onContinue={canResume(row) && row.message.content ? handleContinue : undefined}
+                      onRetry={canResume(row) ? handleRetry : undefined}
+                      isLastAssistant={row.idx === lastAssistantIndex}
+                      branchCount={getBranchCountForMessage(row.message.id)}
+                    />
+                  )
+                )}
                 {/* Isolated streaming bubble — only this re-renders per token */}
-                {isStreaming && (
+                {isStreaming && !compareLive && (
                   streamingContent === "" && (!streamingToolCalls || streamingToolCalls.length === 0)
                     ? <StreamingIndicator />
                     : <StreamingBubble model={streamingModel} />
@@ -492,13 +539,12 @@ export default function ChatView({ onBack }) {
               onSend={handleSend}
               onStop={stopStreaming}
               onInputChange={handleInputChange}
-              disabled={!defaultModel}
+              disabled={compareMode ? !compareReady : !defaultModel}
               isStreaming={isStreaming}
             />
             </>
           )}
         </>
-      )}
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal

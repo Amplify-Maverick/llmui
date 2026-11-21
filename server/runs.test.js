@@ -347,3 +347,127 @@ test("machine: null on old rows, kept by PUT and branches, validated on POST, in
   const imported = (await (await fetch(url("/api/conversations"))).json()).conversations.find((c) => !before.has(c.id));
   assert.deepEqual((await getMessages(imported.id)).map((m) => m.machine), [null, null, "workstation", "jellyfin"]);
 });
+
+// ── Compare on the server ────────────────────────────────────────────
+
+test("compare: one user message, two runs in parallel, two stored replies in one group, with Think text", async () => {
+  newGate();
+  const id = await newChat();
+  const before = upstreamRequests.length;
+  const res = await json("POST", `/api/conversations/${id}/compare`, {
+    content: "Which is bigger?",
+    enableThinking: true,
+    enabledTools: [],
+    sides: [{ model: "test/a:Q4", machine: "jellyfin" }, { model: "test/b:Q4" }],
+  });
+  assert.equal(res.status, 202);
+  const cmp = await res.json();
+  assert.equal(cmp.runs.length, 2);
+  assert.deepEqual(cmp.runs.map((r) => [r.model, r.machine, r.compareGroup, r.compareSlot, r.status]), [
+    ["test/a:Q4", "jellyfin", cmp.compareGroup, 0, "running"],
+    ["test/b:Q4", "jellyfin", cmp.compareGroup, 1, "running"],
+  ]);
+
+  // Both are streaming at the same time (the fake holds both at the gate).
+  await waitFor(() => upstreamRequests.length === before + 2);
+  const conv = await (await fetch(url(`/api/conversations/${id}`))).json();
+  assert.deepEqual(conv.activeRunIds.sort(), cmp.runs.map((r) => r.id).sort());
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { content: "x" })).status, 409);
+  assert.equal((await json("POST", `/api/conversations/${id}/compare`, { content: "x", sides: cmp.runs })).status, 409);
+  assert.equal((await json("PUT", `/api/conversations/${id}/messages`, { messages: [] })).status, 409);
+  const live = await (await fetch(url(`/api/conversations/${id}/runs`))).json();
+  assert.deepEqual(live.runs.map((r) => r.status), ["running", "running"]);
+  assert.ok(upstreamRequests.slice(-2).every((r) => r.chat_template_kwargs.enable_thinking === true));
+
+  gate.release();
+  // Each side is reattachable by its run id like a normal run.
+  const ends = await Promise.all(cmp.runs.map(async (r) => (await readAllNdjson(await fetch(url(`/api/runs/${r.id}/events`)))).at(-1)));
+  assert.deepEqual(ends.map((e) => e.type), ["done", "done"]);
+
+  const messages = await getMessages(id);
+  assert.deepEqual(
+    messages.map((m) => [m.role, m.model ?? null, m.compareGroup ?? null, m.compareSlot ?? null, m.picked ?? null, m.thinking ?? null]),
+    [
+      ["user", null, null, null, null, null],
+      ["assistant", "test/a:Q4", cmp.compareGroup, 0, false, "Two plus two is four."],
+      ["assistant", "test/b:Q4", cmp.compareGroup, 1, false, "Two plus two is four."],
+    ]
+  );
+  assert.deepEqual(ends.map((e) => e.messageId).sort(), [messages[1].id, messages[2].id].sort());
+  assert.equal(messages[0].id, cmp.userMessageId);
+  // The chat's own model isn't changed by a Compare.
+  assert.equal((await (await fetch(url(`/api/conversations/${id}`))).json()).model, "test/model:Q4");
+});
+
+test("compare: picking a winner is stored, one per group, and the next turn sends only the winner", async () => {
+  newGate();
+  gate.release();
+  const id = await newChat();
+  const cmp = await (await json("POST", `/api/conversations/${id}/compare`, {
+    content: "q", enabledTools: [], sides: [{ model: "test/a:Q4" }, { model: "test/b:Q4" }],
+  })).json();
+  await Promise.all(cmp.runs.map(async (r) => readAllNdjson(await fetch(url(`/api/runs/${r.id}/events`)))));
+  let messages = await getMessages(id);
+  // Make the two replies distinguishable.
+  await json("PATCH", `/api/messages/${messages[1].id}`, { content: "answer A" });
+  await json("PATCH", `/api/messages/${messages[2].id}`, { content: "answer B" });
+
+  assert.equal((await json("PATCH", `/api/messages/${messages[0].id}`, { picked: true })).status, 400);
+  assert.equal((await json("PATCH", `/api/messages/${messages[1].id}`, { picked: "yes" })).status, 400);
+  await json("PATCH", `/api/messages/${messages[1].id}`, { picked: true });
+  await json("PATCH", `/api/messages/${messages[2].id}`, { picked: true });
+  messages = await getMessages(id);
+  assert.deepEqual(messages.slice(1).map((m) => m.picked), [false, true]);
+
+  // A reopened chat (and a branch, and an export) keeps the comparison.
+  const branch = await (await json("POST", `/api/conversations/${id}/branch`, { branchAtMessageId: messages[2].id })).json();
+  assert.deepEqual((await getMessages(branch.id)).slice(1).map((m) => [m.compareGroup, m.compareSlot, m.picked]), [
+    [cmp.compareGroup, 0, false],
+    [cmp.compareGroup, 1, true],
+  ]);
+  const exported = await (await fetch(url(`/api/export/conversations/${id}`))).json();
+  assert.deepEqual(exported.conversations[0].messages.slice(1).map((m) => m.picked), [false, true]);
+
+  await readAllNdjson(await json("POST", `/api/conversations/${id}/send`, { content: "and then?", enabledTools: [] }));
+  assert.deepEqual(upstreamRequests.at(-1).messages.map((m) => m.content), ["q", "answer B", "and then?"]);
+
+  // Unpicked: slot 0 goes to the model.
+  await json("PATCH", `/api/messages/${messages[2].id}`, { picked: false });
+  await readAllNdjson(await json("POST", `/api/conversations/${id}/send`, { regenerate: true, enabledTools: [] }));
+  assert.deepEqual(upstreamRequests.at(-1).messages.map((m) => m.content), ["q", "answer A", "and then?"]);
+});
+
+test("compare validation", async () => {
+  const id = await newChat();
+  assert.equal((await json("POST", `/api/conversations/nope/compare`, { content: "x", sides: [] })).status, 404);
+  for (const body of [
+    { content: "x" },
+    { content: "x", sides: [{ model: "a" }] },
+    { content: "x", sides: [{ model: "a" }, { model: "" }] },
+    { content: "x", sides: [{ model: "a" }, { model: "b", machine: "nowhere" }] },
+    { content: "x", continue: true, sides: [{ model: "a" }, { model: "b" }] },
+    { sides: [{ model: "a" }, { model: "b" }] },
+  ]) {
+    assert.equal((await json("POST", `/api/conversations/${id}/compare`, body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await getMessages(id)).length, 0);
+});
+
+test("continue validation", async () => {
+  newGate();
+  gate.release();
+  const id = await newChat();
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { continue: true })).status, 400);
+  await readAllNdjson(await json("POST", `/api/conversations/${id}/send`, { content: "q", enabledTools: [] }));
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { continue: true, content: "x" })).status, 400);
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { continue: "yes" })).status, 400);
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { continue: true, messageId: "nope" })).status, 400);
+  assert.equal((await json("POST", `/api/conversations/${id}/send`, { content: "x", messageId: "nope" })).status, 400);
+  // A finished reply can be continued too; it's appended to.
+  const [, reply] = await getMessages(id);
+  const events = await readAllNdjson(await json("POST", `/api/conversations/${id}/send`, { continue: true, enabledTools: [] }));
+  assert.equal(events.at(-1).messageId, reply.id);
+  const after = await getMessages(id);
+  assert.equal(after.length, 2);
+  assert.equal(after[1].content, "HelloHello");
+});

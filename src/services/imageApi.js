@@ -161,7 +161,7 @@ class ImageAPI {
               }
               if (event.seq) seq = event.seq;
               attempts = 0;
-              if (["complete", "error", "cancelled"].includes(event.type)) terminal = true;
+              if (["complete", "error", "cancelled", "interrupted"].includes(event.type)) terminal = true;
               onEvent(event);
             }
           }
@@ -187,7 +187,12 @@ class ImageAPI {
     return getJson(`/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
   }
 
-  /** Jobs the server still holds, newest first; `active` = only running ones. */
+  /** One job's snapshot (also answers for jobs that ended before a server restart). */
+  getJob(jobId) {
+    return getJson(`/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  /** Jobs the server still holds (and recent interrupted ones), newest first; `active` = only running ones. */
   listJobs({ active = false } = {}) {
     return getJson(`/jobs${active ? "?active=1" : ""}`);
   }

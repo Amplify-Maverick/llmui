@@ -31,6 +31,7 @@ const idleStream = {
   streamingToolCalls: [],
   streamOwner: null,
   activeRunId: null,
+  compareLive: null,
 };
 
 export const useChatStore = create((set, get) => ({
@@ -50,6 +51,10 @@ export const useChatStore = create((set, get) => ({
   // from it; the server-side run carries on) and its server run id.
   streamOwner: null,
   activeRunId: null,
+  // Compare runs being watched (a new Compare, or one side run again):
+  // { group, sides: { [slot]: { runId, model, machine, content, thinking,
+  //   toolCalls, status: "running"|"done"|"error"|"cancelled"|"interrupted", error } } }
+  compareLive: null,
   isLoading: true,
 
   // ================================================================
@@ -172,72 +177,6 @@ export const useChatStore = create((set, get) => ({
       return meta.id;
     } catch (err) {
       console.error('Error creating conversation:', err);
-      return null;
-    }
-  },
-
-  // Save a compare session as a conversation
-  saveCompareConversation: async (userPrompt, responses, models) => {
-    try {
-      // Create conversation on the server
-      const response = await fetch(`${API_BASE}/conversations`, {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({
-          model: models.join(', '),
-          title: userPrompt.slice(0, 30) + (userPrompt.length > 30 ? '...' : ''),
-          isCompare: true,
-          compareModels: models
-        })
-      });
-
-      if (!response.ok) {
-        console.error('Failed to create compare conversation');
-        return null;
-      }
-
-      const meta = await response.json();
-
-      // Build messages array: user prompt + all model responses
-      const messages = [
-        { role: 'user', content: userPrompt, timestamp: Date.now() }
-      ];
-
-      // Add each model's response
-      for (const [model, streamState] of responses) {
-        if (streamState?.content) {
-          // Calculate duration and tokensPerSec from stream state
-          const duration = streamState.startTime && streamState.endTime
-            ? (streamState.endTime - streamState.startTime) / 1000
-            : null;
-          // Measured by llama.cpp (or from the first token), set by useCompareStreams
-          const tokensPerSec = streamState.tokensPerSec || null;
-          messages.push({
-            role: 'assistant',
-            content: streamState.content,
-            model,
-            timestamp: Date.now(),
-            duration,
-            tokensPerSec,
-            ...(streamState.promptPerSec ? { promptPerSec: streamState.promptPerSec } : {})
-          });
-        }
-      }
-
-      // Save messages to local storage
-      await saveToStorage(STORAGE_KEYS.convMessages(meta.id), messages);
-
-      // Update local state
-      set((state) => ({
-        conversations: [{ ...meta, messageCount: messages.length }, ...state.conversations],
-        activeConversationId: meta.id,
-        messages,
-      }));
-
-      saveToStorage(STORAGE_KEYS.activeConversation, meta.id);
-      return meta.id;
-    } catch (err) {
-      console.error('Error saving compare conversation:', err);
       return null;
     }
   },
@@ -584,11 +523,11 @@ export const useChatStore = create((set, get) => ({
   // ================================================================
   // Streaming
   // ================================================================
-  setStreaming: (isStreaming, content = "", owner = null) => {
+  setStreaming: (isStreaming, content = "", owner = null, thinking = "") => {
     set({
       isStreaming,
       streamingContent: content,
-      streamingThinking: "",
+      streamingThinking: thinking,
       streamingToolCalls: [],
       streamingTokenCount: 0,
       streamingStartTime: isStreaming ? Date.now() : null,
@@ -599,6 +538,40 @@ export const useChatStore = create((set, get) => ({
   },
 
   setActiveRunId: (activeRunId) => set({ activeRunId }),
+
+  /** Start watching Compare runs in `owner` (sides keyed by slot). */
+  startCompareLive: (owner, group, sides) =>
+    set({ isStreaming: true, streamOwner: owner, compareLive: { group, sides }, streamingStartTime: Date.now() }),
+
+  /** Update one side of the Compare being watched. */
+  updateCompareSide: (slot, fn) =>
+    set((state) => {
+      const live = state.compareLive;
+      if (!live?.sides[slot]) return {};
+      const cur = live.sides[slot];
+      return { compareLive: { ...live, sides: { ...live.sides, [slot]: { ...cur, ...fn(cur) } } } };
+    }),
+
+  /** Pick (or unpick) the better reply of a Compare; stored on the server. */
+  pickReply: async (id, picked) => {
+    const msg = get().messages.find((m) => m.id === id);
+    if (!msg?.compareGroup) return;
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.compareGroup === msg.compareGroup ? { ...m, picked: m.id === id ? picked : picked ? false : m.picked } : m
+      ),
+    }));
+    try {
+      const response = await fetch(`${API_BASE}/messages/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: await authHeaders(),
+        body: JSON.stringify({ picked }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (err) {
+      console.error("Couldn't save the pick:", err);
+    }
+  },
 
   appendStreamThinking: (chunk) => {
     set((state) => ({

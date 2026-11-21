@@ -75,6 +75,8 @@ const MessageBubble = memo(function MessageBubble({
   onBranch,
   isLastAssistant = false,
   branchCount = 0,
+  onContinue,
+  onRetry,
 }) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -162,6 +164,25 @@ const MessageBubble = memo(function MessageBubble({
             </span>
           )}
         </div>
+
+        {/* Cut off by a server restart: what was written is kept. */}
+        {!isUser && message.status === "interrupted" && (
+          <div className="bubble-interrupted" role="status">
+            <span className="bubble-interrupted-label" title="The server restarted while this reply was being written">
+              Interrupted
+            </span>
+            {onContinue && (
+              <button className="bubble-interrupted-btn" onClick={() => onContinue(message)} title="Carry on from where it stopped, in this message">
+                Continue
+              </button>
+            )}
+            {onRetry && (
+              <button className="bubble-interrupted-btn" onClick={() => onRetry(message)} title="Write this reply again">
+                Retry
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Branch indicator */}
         {branchCount > 0 && (

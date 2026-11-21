@@ -174,8 +174,68 @@ const MIGRATIONS = [
       // Existing rows stay NULL: which machine wrote them was never recorded.
       if (!cols.has('machine_id')) db.exec('ALTER TABLE messages ADD COLUMN machine_id TEXT');
     }
+  },
+  {
+    version: 8,
+    description: 'Durable runs and image jobs; interrupted replies; stored Compare',
+    up: (db) => {
+      const cols = new Set(db.prepare("PRAGMA table_info(messages)").all().map((c) => c.name));
+      // NULL = a normal reply; 'interrupted' = the server stopped while writing it.
+      if (!cols.has('status')) db.exec('ALTER TABLE messages ADD COLUMN status TEXT');
+      // Compare: the two replies to one user message share a group id.
+      if (!cols.has('compare_group')) db.exec('ALTER TABLE messages ADD COLUMN compare_group TEXT');
+      if (!cols.has('compare_slot')) db.exec('ALTER TABLE messages ADD COLUMN compare_slot INTEGER');
+      if (!cols.has('compare_picked')) db.exec('ALTER TABLE messages ADD COLUMN compare_picked INTEGER');
+      db.exec(RUNS_AND_JOBS_SQL);
+    }
   }
 ];
+
+/** Tables for durable chat runs and image jobs (server/runs.js, server/imageJobs.js). */
+export const RUNS_AND_JOBS_SQL = `
+  CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    model TEXT,
+    machine_id TEXT,
+    user_message_id TEXT,
+    message_id TEXT,
+    continues INTEGER NOT NULL DEFAULT 0,
+    compare_group TEXT,
+    compare_slot INTEGER,
+    content TEXT NOT NULL DEFAULT '',
+    thinking TEXT NOT NULL DEFAULT '',
+    tool_calls TEXT,
+    timings TEXT,
+    iterations INTEGER,
+    error TEXT,
+    seq INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id, started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+  CREATE TABLE IF NOT EXISTS image_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    machine_id TEXT NOT NULL,
+    params TEXT,
+    stage TEXT,
+    message TEXT,
+    progress TEXT,
+    result TEXT,
+    error TEXT,
+    sd_job_id TEXT,
+    seq INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_image_jobs_status ON image_jobs(status);
+  CREATE INDEX IF NOT EXISTS idx_image_jobs_created ON image_jobs(created_at DESC);
+`;
 
 /**
  * Copy the database to `backupDir` (VACUUM INTO: a consistent snapshot, WAL

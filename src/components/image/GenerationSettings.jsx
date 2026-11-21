@@ -33,6 +33,9 @@ export default function GenerationSettings() {
     generate,
     cancelGeneration,
     clearError,
+    interruptedJob,
+    retryInterrupted,
+    dismissInterrupted,
   } = useImageStore();
 
   const imageMachine = useMachinesStore((s) => s.machines.find((m) => m.id === s.effective.image));
@@ -239,6 +242,22 @@ export default function GenerationSettings() {
         <div className="gen-error">
           <span>{error}</span>
           <button className="gen-error-close" onClick={clearError}>×</button>
+        </div>
+      )}
+
+      {/* A job cut off by a server restart */}
+      {interruptedJob && !isGenerating && (
+        <div className="gen-interrupted" role="status">
+          <span className="gen-interrupted-label">Interrupted</span>
+          <span className="gen-interrupted-text" title={interruptedJob.params?.prompt}>
+            The server restarted while generating{interruptedJob.params?.prompt ? ` “${interruptedJob.params.prompt.slice(0, 60)}”` : ""}.
+          </span>
+          <div className="gen-interrupted-actions">
+            <button className="gen-interrupted-retry" onClick={retryInterrupted} disabled={!interruptedJob.params || !isConnected}>
+              Retry
+            </button>
+            <button className="gen-error-close" onClick={dismissInterrupted} aria-label="Dismiss">×</button>
+          </div>
         </div>
       )}
 

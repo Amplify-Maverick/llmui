@@ -40,6 +40,10 @@ export const SCHEMA_SQL = `
     tool_calls TEXT,
     thinking TEXT,
     machine_id TEXT,
+    status TEXT,
+    compare_group TEXT,
+    compare_slot INTEGER,
+    compare_picked INTEGER,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES messages(id) ON DELETE SET NULL
   );

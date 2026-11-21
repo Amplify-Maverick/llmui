@@ -8,7 +8,26 @@ import { nanoid } from "nanoid";
 export const ROLES = ["user", "assistant", "system", "tool"];
 
 export const MESSAGE_COLUMNS = `id, role, content, model, images, created_at as timestamp,
-  position, tokens_per_sec as tokensPerSec, tool_calls as toolCalls, thinking, machine_id as machine`;
+  position, tokens_per_sec as tokensPerSec, tool_calls as toolCalls, thinking, machine_id as machine,
+  status, compare_group as compareGroup, compare_slot as compareSlot, compare_picked as picked`;
+
+/** Message statuses the server stores. null = a normal, finished message. */
+export const MESSAGE_STATUSES = ["interrupted"];
+export const statusOrNull = (v) => (MESSAGE_STATUSES.includes(v) ? v : null);
+
+/**
+ * Compare fields of an API message → column values. Only kept when the
+ * group id is a non-empty string.
+ */
+export function compareColumns(msg) {
+  const group = typeof msg.compareGroup === "string" && msg.compareGroup.trim() ? msg.compareGroup.trim().slice(0, 64) : null;
+  if (!group) return { compareGroup: null, compareSlot: null, picked: null };
+  return {
+    compareGroup: group,
+    compareSlot: Number.isInteger(msg.compareSlot) ? msg.compareSlot : null,
+    picked: msg.picked ? 1 : 0,
+  };
+}
 
 /**
  * A row selected with MESSAGE_COLUMNS → the API object. Absent optional fields
@@ -24,7 +43,13 @@ export function toApiMessage(m) {
     position: m.position,
     tokensPerSec: m.tokensPerSec,
     machine: m.machine ?? null,
+    status: m.status ?? null,
   };
+  if (m.compareGroup) {
+    out.compareGroup = m.compareGroup;
+    out.compareSlot = m.compareSlot ?? null;
+    out.picked = m.picked === 1;
+  }
   if (m.images) out.images = JSON.parse(m.images);
   if (m.toolCalls) out.toolCalls = JSON.parse(m.toolCalls);
   if (m.thinking) out.thinking = m.thinking;
@@ -54,9 +79,11 @@ export function appendMessage(db, conversationId, msg) {
   const position = pos + 1;
   const now = msg.timestamp || Date.now();
   const content = msg.content || "";
+  const cmp = compareColumns(msg);
   db.prepare(`
-    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id,
+      status, compare_group, compare_slot, compare_picked)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, conversationId, msg.role, content,
     msg.model || null,
@@ -65,7 +92,9 @@ export function appendMessage(db, conversationId, msg) {
     msg.tokensPerSec || null,
     msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
     msg.thinking || null,
-    machineOrNull(msg.machine)
+    machineOrNull(msg.machine),
+    statusOrNull(msg.status),
+    cmp.compareGroup, cmp.compareSlot, cmp.picked
   );
   db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, conversationId);
   if (msg.role === "user" && position === 0 && content) {

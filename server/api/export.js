@@ -1,7 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/index.js';
-import { machineOrNull } from '../messageStore.js';
+import { machineOrNull, statusOrNull, compareColumns } from '../messageStore.js';
 
 const router = express.Router();
 
@@ -34,6 +34,8 @@ function formatConversation(conv, messages, branches = []) {
       toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
       thinking: m.thinking || undefined,
       machine: m.machine_id ?? null,
+      status: m.status ?? null,
+      ...(m.compare_group ? { compareGroup: m.compare_group, compareSlot: m.compare_slot ?? null, picked: m.compare_picked === 1 } : {}),
     })),
     branches: branches.map(b => ({
       id: b.id,
@@ -212,8 +214,10 @@ router.post('/import', (req, res) => {
 
   const insertMsg = db.prepare(`
     INSERT INTO messages
-    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
-    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine)
+    (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id,
+     status, compare_group, compare_slot, compare_picked)
+    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine,
+     @status, @compareGroup, @compareSlot, @picked)
   `);
 
   const importAll = db.transaction(() => {
@@ -253,6 +257,8 @@ router.post('/import', (req, res) => {
             toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
             thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null,
             machine: machineOrNull(msg.machine),
+            status: statusOrNull(msg.status),
+            ...compareColumns(msg),
           });
         }
 

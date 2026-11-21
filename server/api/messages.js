@@ -1,7 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/index.js';
-import { ROLES, appendMessage, listMessages, machineOrNull } from '../messageStore.js';
+import { ROLES, appendMessage, listMessages, machineOrNull, statusOrNull, compareColumns } from '../messageStore.js';
 import { activeRunFor } from '../runs.js';
 
 const router = express.Router();
@@ -38,7 +38,7 @@ router.post('/conversations/:conversationId/messages', (req, res) => {
   const { conversationId } = req.params;
   if (!requireConversation(db, conversationId, res)) return;
   if (refuseDuringRun(conversationId, res)) return;
-  const { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine } = req.body;
+  const { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine, status, compareGroup, compareSlot, picked } = req.body;
   if (!ROLES.includes(role)) {
     return res.status(400).json({ error: 'role must be user, assistant, system or tool' });
   }
@@ -48,7 +48,7 @@ router.post('/conversations/:conversationId/messages', (req, res) => {
   if (machine !== undefined && machine !== null && typeof machine !== 'string') {
     return res.status(400).json({ error: 'machine must be a string' });
   }
-  res.json(appendMessage(db, conversationId, { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine }));
+  res.json(appendMessage(db, conversationId, { id, role, content, model, images, tokensPerSec, toolCalls, timestamp, thinking, machine, status, compareGroup, compareSlot, picked }));
 });
 
 // PUT /api/conversations/:conversationId/messages - Bulk replace all messages
@@ -66,8 +66,10 @@ router.put('/conversations/:conversationId/messages', (req, res) => {
 
   const deleteAll = db.prepare('DELETE FROM messages WHERE conversation_id = ?');
   const insertMsg = db.prepare(`
-    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
-    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine)
+    INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id,
+      status, compare_group, compare_slot, compare_picked)
+    VALUES (@id, @conversationId, @role, @content, @model, @images, @createdAt, @position, @tokensPerSec, @toolCalls, @thinking, @machine,
+      @status, @compareGroup, @compareSlot, @picked)
   `);
 
   const replaceAll = db.transaction(() => {
@@ -87,7 +89,9 @@ router.put('/conversations/:conversationId/messages', (req, res) => {
         toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
         thinking: typeof msg.thinking === 'string' && msg.thinking ? msg.thinking : null,
         // Round-tripped as the client got it, so a save never drops it.
-        machine: machineOrNull(msg.machine)
+        machine: machineOrNull(msg.machine),
+        status: statusOrNull(msg.status),
+        ...compareColumns(msg)
       });
     }
     // Update conversation
@@ -103,10 +107,20 @@ router.put('/conversations/:conversationId/messages', (req, res) => {
 router.patch('/messages/:id', (req, res) => {
   const db = getDb();
   const { id } = req.params;
-  const { content, tokensPerSec, toolCalls, thinking } = req.body;
+  const { content, tokensPerSec, toolCalls, thinking, status, picked } = req.body;
 
   const updates = [];
   const params = [];
+
+  if (picked !== undefined) {
+    if (typeof picked !== 'boolean') return res.status(400).json({ error: 'picked must be true or false' });
+    const row = db.prepare('SELECT conversation_id, compare_group FROM messages WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Message not found' });
+    if (!row.compare_group) return res.status(400).json({ error: 'Only a Compare reply can be picked' });
+  }
+  if (status !== undefined && status !== null && !statusOrNull(status)) {
+    return res.status(400).json({ error: 'status must be "interrupted" or null' });
+  }
 
   if (content !== undefined) {
     updates.push('content = ?');
@@ -124,13 +138,31 @@ router.patch('/messages/:id', (req, res) => {
     updates.push('thinking = ?');
     params.push(thinking || null);
   }
+  if (status !== undefined) {
+    updates.push('status = ?');
+    params.push(statusOrNull(status));
+  }
+  if (picked !== undefined) {
+    updates.push('compare_picked = ?');
+    params.push(picked ? 1 : 0);
+  }
 
   if (updates.length === 0) {
     return res.status(400).json({ error: 'No fields to update' });
   }
 
   params.push(id);
-  const result = db.prepare(`UPDATE messages SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  const result = db.transaction(() => {
+    // One pick per Compare group: picking this reply unpicks the other.
+    if (picked === true) {
+      db.prepare(`
+        UPDATE messages SET compare_picked = 0
+        WHERE compare_group = (SELECT compare_group FROM messages WHERE id = ?)
+          AND conversation_id = (SELECT conversation_id FROM messages WHERE id = ?) AND id != ?
+      `).run(id, id, id);
+    }
+    return db.prepare(`UPDATE messages SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  })();
 
   if (result.changes === 0) {
     return res.status(404).json({ error: 'Message not found' });

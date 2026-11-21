@@ -28,7 +28,8 @@ import { loadSdConfig, chatGate, sdStatus } from "./sd.js";
 import { llamaFetch, keyHint } from "./llama.js";
 import { fetchHelper, helperConfigured, normalizeHelperGpu } from "./sdfetch.js";
 import { createAuth, readOrCreateSecret, pruneUnusedDevices } from "./auth.js";
-import { runsRouter } from "./runs.js";
+import { runsRouter, recoverInterruptedRuns, flushRuns } from "./runs.js";
+import { recoverInterruptedJobs, cleanUpInterruptedJob, flushJobs } from "./imageJobs.js";
 import { runToolLoop } from "./chatLoop.js";
 import {
   getMachine,
@@ -740,6 +741,17 @@ getDb();
 
 const migrationResult = await checkAndMigrate({ dryRun });
 pruneUnusedDevices();
+
+// Runs and image jobs the last process left running were cut off: store the
+// partial replies as "interrupted" and mark the jobs interrupted, before any
+// request can see them as running.
+if (!dryRun) {
+  recoverInterruptedRuns();
+  for (const row of recoverInterruptedJobs()) {
+    const machine = getMachine(row.machine_id);
+    if (machine) cleanUpInterruptedJob(machine, row); // background: frees that GPU
+  }
+}
 if (migrationResult.log.length > 0 && migrationResult.migrated) {
   console.log("Migration completed successfully");
 }
@@ -751,8 +763,20 @@ if (dryRun && migrationResult.dryRun) {
 }
 
 // Graceful shutdown
+// Write running runs' partial replies and jobs' state first, so the next
+// start recovers as much as possible.
+function flushWork() {
+  try {
+    flushRuns();
+    flushJobs();
+  } catch (err) {
+    console.error("Couldn't save running work:", err.message);
+  }
+}
+
 process.on("SIGTERM", () => {
   console.log("Shutting down...");
+  flushWork();
   stopNvidiaSmiLoop();
   closeDb();
   process.exit(0);
@@ -760,6 +784,7 @@ process.on("SIGTERM", () => {
 
 process.on("SIGINT", () => {
   console.log("Shutting down...");
+  flushWork();
   stopNvidiaSmiLoop();
   closeDb();
   process.exit(0);

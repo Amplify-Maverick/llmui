@@ -371,7 +371,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
  * onProgress({ stage, step, totalSteps, value }) — value is overall 0..1 when known.
  * signal aborts the job (cancelling it on sd-server and waiting for it to stop).
  */
-export async function txt2img(machine, p, { onProgress, signal } = {}) {
+export async function txt2img(machine, p, { onProgress, signal, onSubmitted } = {}) {
   const body = {
     prompt: p.prompt,
     negative_prompt: p.negativePrompt || "",
@@ -399,6 +399,7 @@ export async function txt2img(machine, p, { onProgress, signal } = {}) {
     throw err;
   }
 
+  onSubmitted?.(submitted.id);
   const jobPath = submitted.poll_url || `/sdcpp/v1/jobs/${encodeURIComponent(submitted.id)}`;
   let cancelSent = false;
   for (;;) {

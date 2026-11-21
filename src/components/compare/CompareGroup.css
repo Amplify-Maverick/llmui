@@ -1,0 +1,87 @@
+.compare-group {
+  margin-bottom: 20px;
+}
+
+.compare-group-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.compare-group-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .compare-group-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.compare-group-column {
+  min-width: 0;
+  border-radius: 14px;
+}
+
+.compare-group-column .message-row {
+  margin-bottom: 6px;
+}
+
+.compare-group-column .bubble {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.compare-group-column.picked .bubble {
+  border-color: var(--color-primary, #6ee7b7);
+  box-shadow: 0 0 0 1px var(--color-primary, #6ee7b7);
+}
+
+.compare-group-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.compare-group-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.compare-group-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.compare-group-btn.pick.active {
+  border-color: var(--color-primary, #6ee7b7);
+  color: var(--color-primary, #6ee7b7);
+}
+
+.compare-group-empty {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+
+/* Compare side pickers in the chat header */
+.compare-side-select {
+  width: 210px;
+}
+
+@media (max-width: 720px) {
+  .compare-side-select {
+    width: 100%;
+  }
+}

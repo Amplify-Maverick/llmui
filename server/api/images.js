@@ -23,7 +23,7 @@ import {
   isImageJobActive,
   resolveModelSetup,
 } from "../sd.js";
-import { startImageJob, getJob, listJobs, jobSnapshot } from "../imageJobs.js";
+import { startImageJob, getJob, listJobs, jobSnapshot, jobRow, jobRowSnapshot, storedJobsSince, JOB_RETENTION_MS } from "../imageJobs.js";
 import { streamLog } from "../eventlog.js";
 import imageModelsRouter from "./imageModels.js";
 import { routeTo, machineFromQuery, publicMachine, getMachine } from "../backends.js";
@@ -246,7 +246,11 @@ router.post("/jobs", toImageMachine, async (req, res) => {
 router.get("/jobs", (req, res) => {
   const active = req.query.active === "1" || req.query.active === "true";
   res.set("Cache-Control", "no-store");
-  res.json({ jobs: listJobs().filter((j) => !active || j.status === "running").map(jobSnapshot) });
+  const live = listJobs().map(jobSnapshot);
+  // Plus recent ones only the database still knows (e.g. interrupted by a restart).
+  const stored = active ? [] : storedJobsSince(Date.now() - JOB_RETENTION_MS);
+  const all = [...live, ...stored].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json({ jobs: all.filter((j) => !active || j.status === "running") });
 });
 
 /** A job that's no longer in memory but whose images were stored. */
@@ -281,9 +285,23 @@ function storedJob(id) {
   };
 }
 
+/** A job's snapshot: live, else its row, else its stored generation. */
+function findJobSnapshot(id) {
+  const job = getJob(id);
+  if (job) return jobSnapshot(job);
+  const row = jobRow(id);
+  return row ? jobRowSnapshot(row) : storedJob(id);
+}
+
+const END_EVENT = {
+  completed: (snap) => ({ type: "complete", machine: snap.machine, ...snap.result }),
+  failed: (snap) => ({ type: "error", error: snap.error }),
+  cancelled: () => ({ type: "cancelled" }),
+  interrupted: (snap) => ({ type: "interrupted", error: snap.error }),
+};
+
 router.get("/jobs/:id", (req, res) => {
-  const job = getJob(req.params.id);
-  const snap = job ? jobSnapshot(job) : storedJob(req.params.id);
+  const snap = findJobSnapshot(req.params.id);
   if (!snap) return res.status(404).json({ error: "Job not found", code: "no_job" });
   res.set("Cache-Control", "no-store");
   res.json(snap);
@@ -291,20 +309,35 @@ router.get("/jobs/:id", (req, res) => {
 
 router.get("/jobs/:id/events", (req, res) => {
   const job = getJob(req.params.id);
-  if (!job) return res.status(404).json({ error: "Job not found", code: "no_job" });
-  res.setHeader("X-LLMUI-Job-Id", job.id);
-  streamLog(req, res, job.log, { after: req.query.after, format: "sse" });
+  if (job) {
+    res.setHeader("X-LLMUI-Job-Id", job.id);
+    return streamLog(req, res, job.log, { after: req.query.after, format: "sse" });
+  }
+  // Ended before this process started: its events are gone; send the end
+  // event, with a seq past anything a client saw.
+  const snap = findJobSnapshot(req.params.id);
+  if (!snap) return res.status(404).json({ error: "Job not found", code: "no_job" });
+  const end = END_EVENT[snap.status];
+  if (!end) return res.status(404).json({ error: "Job not found", code: "no_job" });
+  res.setHeader("X-LLMUI-Job-Id", snap.id);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  const e = { seq: Math.max(snap.seq || 0, Number(req.query.after) || 0) + 1, ...end(snap) };
+  res.end(`data: ${JSON.stringify(e)}\n\n`);
 });
 
+const NOT_COMPLETED = {
+  cancelled: { error: "The job was cancelled", code: "job_cancelled" },
+  interrupted: { error: "The job was interrupted by a server restart", code: "job_interrupted" },
+};
+
 router.get("/jobs/:id/result", (req, res) => {
-  const job = getJob(req.params.id);
-  const snap = job ? jobSnapshot(job) : storedJob(req.params.id);
+  const snap = findJobSnapshot(req.params.id);
   if (!snap) return res.status(404).json({ error: "Job not found", code: "no_job" });
   if (snap.status === "running") return res.status(409).json({ error: "The job is still running", code: "job_running", status: snap.status });
   if (snap.status !== "completed") {
     return res.status(409).json({
-      error: snap.status === "cancelled" ? "The job was cancelled" : `The job failed: ${snap.error}`,
-      code: snap.status === "cancelled" ? "job_cancelled" : "job_failed",
+      ...(NOT_COMPLETED[snap.status] || { error: `The job failed: ${snap.error}`, code: "job_failed" }),
       status: snap.status,
     });
   }
@@ -323,7 +356,8 @@ router.get("/jobs/:id/result", (req, res) => {
 router.post("/jobs/:id/cancel", async (req, res) => {
   const job = getJob(req.params.id);
   if (!job) {
-    if (storedJob(req.params.id)) return res.json(storedJob(req.params.id));
+    const snap = findJobSnapshot(req.params.id);
+    if (snap) return res.json(snap);
     return res.status(404).json({ error: "Job not found", code: "no_job" });
   }
   if (job.status === "running") {

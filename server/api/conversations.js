@@ -1,7 +1,7 @@
 import express from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db/index.js';
-import { activeRunFor, cancelRunsFor } from '../runs.js';
+import { activeRunFor, activeRunsFor, cancelRunsFor } from '../runs.js';
 
 const router = express.Router();
 
@@ -42,7 +42,8 @@ router.get('/', (req, res) => {
       enableThinking: c.enableThinking === 1 ? true : c.enableThinking === 0 ? false : null,
       isCompare: c.isCompare === 1,
       compareModels: c.compareModels ? JSON.parse(c.compareModels) : null,
-      activeRunId: activeRunFor(c.id)?.id || null
+      activeRunId: activeRunFor(c.id)?.id || null,
+      activeRunIds: activeRunsFor(c.id).map((r) => r.id)
     })),
     pagination: {
       page: parseInt(page),
@@ -105,7 +106,8 @@ router.get('/:id', (req, res) => {
     enableThinking: conversation.enableThinking === 1 ? true : conversation.enableThinking === 0 ? false : null,
     isCompare: conversation.isCompare === 1,
     compareModels: conversation.compareModels ? JSON.parse(conversation.compareModels) : null,
-    activeRunId: activeRunFor(conversation.id)?.id || null
+    activeRunId: activeRunFor(conversation.id)?.id || null,
+    activeRunIds: activeRunsFor(conversation.id).map((r) => r.id)
   });
 });
 
@@ -235,8 +237,9 @@ router.post('/:id/branch', (req, res) => {
     );
 
     const insertMsg = db.prepare(`
-      INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, conversation_id, role, content, model, images, created_at, position, tokens_per_sec, tool_calls, thinking, machine_id,
+        status, compare_group, compare_slot, compare_picked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     if (editedContent) {
@@ -250,14 +253,15 @@ router.post('/:id/branch', (req, res) => {
       for (const msg of messagesToCopy) {
         insertMsg.run(
           nanoid(), newId, msg.role, msg.content, msg.model,
-          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id
+          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id,
+          msg.status, msg.compare_group, msg.compare_slot, msg.compare_picked
         );
       }
 
       // Add the edited message at the branch point position
       insertMsg.run(
         nanoid(), newId, 'user', editedContent, null,
-        null, now, branchMsg.position, null, null, null, null
+        null, now, branchMsg.position, null, null, null, null, null, null, null, null
       );
     } else {
       // Copy messages up to and including branch point (positions 0..branchMsg.position)
@@ -270,7 +274,8 @@ router.post('/:id/branch', (req, res) => {
       for (const msg of messagesToCopy) {
         insertMsg.run(
           nanoid(), newId, msg.role, msg.content, msg.model,
-          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id
+          msg.images, msg.created_at, msg.position, msg.tokens_per_sec, msg.tool_calls, msg.thinking, msg.machine_id,
+          msg.status, msg.compare_group, msg.compare_slot, msg.compare_picked
         );
       }
     }

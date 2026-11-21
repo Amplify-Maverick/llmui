@@ -254,6 +254,30 @@ export const runsApi = {
     return response.json();
   },
 
+  /**
+   * POST /api/conversations/:id/compare: one user message, two models in
+   * parallel. Resolves { compareGroup, userMessageId, runs: [snapshot, snapshot] }.
+   */
+  async compare(conversationId, body) {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/compare`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw await errorFrom(response, "Compare failed");
+    return response.json();
+  },
+
+  /** The runs of the chat's latest turn (two for a Compare), newest state. */
+  async latestTurn(conversationId) {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/runs`, {
+      headers: await authHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) return [];
+    return (await response.json()).runs || [];
+  },
+
   /** The chat's current or most recent run ({ status, ... }), or null. */
   async forConversation(conversationId) {
     const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/run`, {
