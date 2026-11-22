@@ -19,6 +19,62 @@ function Size({ bytes }) {
   return <span className="mm-size">{bytes ? formatBytes(bytes) : "size unknown"}</span>;
 }
 
+/** Sum of known sizes and how many items had none. */
+function total(items, sizeOf) {
+  let bytes = 0;
+  let unknown = 0;
+  for (const it of items || []) {
+    const b = sizeOf(it);
+    if (b > 0) bytes += b;
+    else unknown++;
+  }
+  return { bytes, unknown };
+}
+
+/** "Models use X (text · image) · Y free of Z", always shown on an online machine's card. */
+function Storage({ text, image, disk }) {
+  const t = text?.items ? total(text.items, (m) => m.diskSize) : null;
+  const i = image?.items ? total(image.items, (f) => f.size) : null;
+  const unknown = (t?.unknown || 0) + (i?.unknown || 0);
+  const pct = disk?.total > 0 ? Math.round(((disk.total - disk.free) / disk.total) * 100) : null;
+  return (
+    <div className="mm-storage">
+      <div className="mm-storage-line">
+        <span className="mm-storage-label">Models</span>
+        {!text || !image ? (
+          <span className="mm-note">measuring…</span>
+        ) : (
+          <span>
+            <strong>{formatBytes((t?.bytes || 0) + (i?.bytes || 0))}</strong>
+            <span className="mm-storage-split">
+              {" "}(text {t ? formatBytes(t.bytes) : "?"} · image {i ? formatBytes(i.bytes) : "?"})
+            </span>
+            {unknown > 0 && <span className="mm-note"> + {unknown} of unknown size</span>}
+          </span>
+        )}
+      </div>
+      <div
+        className="mm-storage-line"
+        title={disk ? `Disk holding the model folder, as reported by sd-fetch. Downloads keep ${formatBytes(disk.reserve)} free.` : ""}
+      >
+        <span className="mm-storage-label">Free</span>
+        {disk ? (
+          <span>
+            <strong>{formatBytes(disk.free)}</strong> of {formatBytes(disk.total)}
+          </span>
+        ) : (
+          <span className="mm-note">{image ? "unknown (download helper unavailable)" : "checking…"}</span>
+        )}
+      </div>
+      {pct != null && (
+        <div className="mm-storage-bar" role="img" aria-label={`Disk ${pct}% used`}>
+          <span style={{ width: `${pct}%` }} className={pct >= 90 ? "is-full" : ""} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Section({ title, result, empty, children }) {
   return (
     <div className="mm-section">
@@ -45,17 +101,17 @@ export default function MachineModels({ machine, managed, onOpenModels }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(null); // { items } | { error } | null while loading
   const [image, setImage] = useState(null);
+  const [disk, setDisk] = useState(null); // sd-fetch's { free, total, reserve } of the model disk
   const online = machine.status?.online;
   const seq = useRef(0);
 
   const load = useCallback(async () => {
-    const n = ++seq.current;
-    setText(null);
-    setImage(null);
+    const n = ++seq.current; // earlier listings stay shown until this one arrives
     const [t, i] = await Promise.all([
       settle(async () => (await llamaApi.list(machine.id)).models),
       settle(async () => {
         const data = await imageApi.models(machine.id);
+        if (data.helper?.disk) setDisk(data.helper.disk);
         if (data.sdError && !data.files?.length) throw new Error(data.sdError);
         return data.files || [];
       }),
@@ -65,8 +121,9 @@ export default function MachineModels({ machine, managed, onOpenModels }) {
     setImage(i);
   }, [machine.id]);
 
+  // Listed once the machine is online (for the storage line), again when opened.
   useEffect(() => {
-    if (open && online) load();
+    if (online) load();
     return () => {
       seq.current++;
     };
@@ -74,6 +131,7 @@ export default function MachineModels({ machine, managed, onOpenModels }) {
 
   return (
     <div className="mm">
+      {online && <Storage text={text} image={image} disk={disk} />}
       <button className="mm-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className={`mm-caret ${open ? "is-open" : ""}`} aria-hidden="true">▸</span>
         {open ? "Hide installed models" : "Show installed models"}
