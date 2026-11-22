@@ -16,7 +16,23 @@ export default function ModelManager() {
     fetchAll: fetchImageModels,
   } = useImageStore();
 
-  const [subTab, setSubTab] = useState("text"); // "text" | "image"
+  // "text" | "image". Remembered, so coming back to Models (e.g. to watch an
+  // image download) doesn't silently switch to the Text tab.
+  const [subTab, setSubTabState] = useState(() => {
+    try {
+      return localStorage.getItem("models-subtab") === "image" ? "image" : "text";
+    } catch {
+      return "text";
+    }
+  });
+  const setSubTab = (t) => {
+    setSubTabState(t);
+    try {
+      localStorage.setItem("models-subtab", t);
+    } catch {
+      // per-browser convenience only
+    }
+  };
   const [imageKey, setImageKey] = useState(0); // bump to reload the image tab
 
   // Everything on this page acts on the machine that kind of request goes to.
