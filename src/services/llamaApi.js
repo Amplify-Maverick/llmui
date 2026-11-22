@@ -125,6 +125,8 @@ export const llamaApi = {
  */
 export function parseProgress(data) {
   if (!data || typeof data !== "object") return null;
+  // Newer routers nest the per-file map: { progress: { <url>: { done, total } } }.
+  if (data.progress && typeof data.progress === "object") data = data.progress;
   const pick = (o) => {
     const done = o.done ?? o.downloaded ?? o.current;
     return typeof done === "number" && typeof o.total === "number" ? { done, total: o.total } : null;

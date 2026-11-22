@@ -82,6 +82,7 @@ test("parseProgress reads direct and per-file progress, summing files", () => {
   assert.deepEqual(parseProgress({ downloaded: 5, total: 10 }), { done: 5, total: 10 });
   assert.deepEqual(parseProgress({ "a.gguf": { done: 1, total: 4 }, "mmproj.gguf": { current: 2, total: 2 } }), { done: 3, total: 6 });
   assert.equal(parseProgress({ status: "x" }), null);
+  assert.deepEqual(parseProgress({ progress: { "u/a.gguf": { done: 3, total: 10 }, "u/mmproj.gguf": { done: 0, total: 0 } } }), { done: 3, total: 10 });
   assert.equal(parseProgress(null), null);
 });
 
