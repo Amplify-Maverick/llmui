@@ -8,6 +8,7 @@
 import express from "express";
 import { llamaFetch, upstreamError, keyHint } from "../llama.js";
 import { publicMachine } from "../backends.js";
+import { parseHfLink, fetchRepoInfo } from "../hflink.js";
 
 const router = express.Router();
 
@@ -372,8 +373,32 @@ const hfFetch = (url) =>
 export const CHAT_PIPELINE_TAGS = new Set(["text-generation", "image-text-to-text"]);
 
 // GET /api/llama/hf/search?q=... — GGUF chat-model repos, most downloaded first.
+// A Hugging Face link as q gives just that repo, plus { link: { repo, quant,
+// file, revision } } naming what it pointed at.
 router.get("/hf/search", async (req, res) => {
-  const q = String(req.query.q || "").trim().slice(0, 100);
+  const raw = String(req.query.q || "").trim();
+  const link = parseHfLink(raw.slice(0, 2000));
+  if (link?.error) return res.status(400).json({ error: link.error });
+  if (link) {
+    try {
+      const info = await fetchRepoInfo(link.repo, ["pipeline_tag", "downloads", "likes", "lastModified", "gated"]);
+      const quant = link.quant || (link.file && /\.gguf$/i.test(link.file) && !/mmproj/i.test(link.file) ? quantOf(link.file) : null);
+      return res.json({
+        repos: [{
+          id: info.id,
+          downloads: info.downloads || 0,
+          likes: info.likes || 0,
+          pipelineTag: info.pipeline_tag || null,
+          updatedAt: info.lastModified || null,
+          gated: info.gated || false,
+        }],
+        link: { repo: info.id, quant, file: link.file, revision: link.revision },
+      });
+    } catch (err) {
+      return res.status(err.status || 502).json({ error: err.message });
+    }
+  }
+  const q = raw.slice(0, 100);
   // Over-fetch, since non-chat repos are filtered out below.
   const params = new URLSearchParams({ filter: "gguf", sort: "downloads", direction: "-1", limit: "100" });
   if (q) params.set("search", q);
@@ -399,6 +424,13 @@ router.get("/hf/search", async (req, res) => {
 const QUANT_RE = /(?:^|[-_./])((?:UD-)?(?:I?Q\d(?:_[A-Z0-9]+)*|TQ\d_\d|MXFP4(?:_MOE)?|BF16|F16|F32))(?=[-_./]|$)/i;
 const SHARD_RE = /-(\d{5})-of-(\d{5})\.gguf$/i;
 
+/** Quant tag of a GGUF path ("Q4_K_M"): from the filename, else a directory name. null if none. */
+export function quantOf(path) {
+  const name = path.split("/").pop();
+  const m = QUANT_RE.exec(name.replace(SHARD_RE, ".gguf")) || QUANT_RE.exec(path);
+  return m ? m[1].toUpperCase() : null;
+}
+
 /** Group a repo's GGUF files by quant, summing split shards. */
 export function groupQuants(files) {
   const quants = new Map();
@@ -412,10 +444,8 @@ export function groupQuants(files) {
       mmproj.push({ name, size: f.lfs?.size ?? f.size ?? 0 });
       continue;
     }
-    // Prefer the quant in the filename; fall back to a directory name.
-    const m = QUANT_RE.exec(name.replace(SHARD_RE, ".gguf")) || QUANT_RE.exec(f.path);
-    if (!m) continue;
-    const tag = m[1].toUpperCase();
+    const tag = quantOf(f.path);
+    if (!tag) continue;
     const size = f.lfs?.size ?? f.size ?? 0;
     const q = quants.get(tag) || { quant: tag, size: 0, files: [] };
     q.size += size;

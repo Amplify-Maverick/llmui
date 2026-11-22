@@ -7,6 +7,7 @@ import { ConfirmModal } from "../shared/Modal.jsx";
 import { useMachinesStore } from "../../stores/machinesStore.js";
 import { MachineColumns, MachineColumn, InstallOn } from "./MachineColumns.jsx";
 import { useRemoteImageModels, installedId } from "./useRemoteImageModels.js";
+import { looksLikeLink } from "../../utils/hfLink.js";
 import "./TextModelManager.css";
 import "./ImageModelManager.css";
 
@@ -186,6 +187,32 @@ function SetupPanel({ file, recipes, files, onSave, onClose }) {
   );
 }
 
+const TEXT_TAGS = new Set(["text-generation", "image-text-to-text"]);
+
+/** What a pasted link resolved to, and why it might not be installable. */
+function LinkNote({ link, repo }) {
+  const notes = [];
+  const loadable = repo.files.some((f) => f.kind === "model" && f.recipe);
+  if (link.file && link.fileExists === false) {
+    notes.push(`This repo has no file ${link.file}${link.revision ? ` at "${link.revision}"` : ""}.`);
+  } else if (link.file && link.fileListed === false) {
+    notes.push(
+      `The linked file (${link.file.split("/").pop()}) isn't one sd-server can load as a single file: it's a diffusers part, LoRA, split shard or too small to be a checkpoint.`
+    );
+  }
+  if (TEXT_TAGS.has(repo.pipelineTag)) {
+    notes.push("This is a text model: paste the link on the Text tab instead.");
+  } else if (!loadable) {
+    notes.push("Nothing in this repo is a single-file checkpoint sd-server has a recipe for.");
+  } else if (link.file && link.fileListed) {
+    notes.push("The linked file is highlighted below.");
+  } else {
+    notes.push("Pick a file below to download.");
+  }
+  if (repo.gated) notes.push("This repo is gated: the machine's download helper needs HF_TOKEN in /etc/sd/fetch.env with access granted.");
+  return <p className="tmm-hint tmm-link-note">{notes.join(" ")}</p>;
+}
+
 export default function ImageModelManager() {
   const fetchImageOptions = useImageStore((s) => s.fetchAll);
 
@@ -204,6 +231,7 @@ export default function ImageModelManager() {
   const [searchError, setSearchError] = useState(null);
   const [openRepo, setOpenRepo] = useState(null);
   const [lastQuery, setLastQuery] = useState("");
+  const [linked, setLinked] = useState(null); // { repo, file, revision, fileListed } when a pasted link was resolved
   // ── Machines: the selected one (images go there) gets every control; the
   // others are listed beside it for install / delete only.
   const machines = useMachinesStore((s) => s.machines);
@@ -238,16 +266,24 @@ export default function ImageModelManager() {
     }
   }, []);
 
+  const searchSeq = useRef(0);
   const search = useCallback(async (q) => {
+    const n = ++searchSeq.current; // only the latest search may set results
     setSearching(true);
     setSearchError(null);
     setLastQuery(q);
     try {
-      setResults(await imageApi.searchHF(q));
+      const res = await imageApi.searchHF(q);
+      if (n !== searchSeq.current) return;
+      setResults(res);
+      setLinked(res.link || null);
+      if (res.link) setOpenRepo(res.link.repo); // a pasted link opens its repo straight away
     } catch (err) {
+      if (n !== searchSeq.current) return;
       setSearchError(err.message);
+      setLinked(null);
     } finally {
-      setSearching(false);
+      if (n === searchSeq.current) setSearching(false);
     }
   }, []);
 
@@ -288,9 +324,11 @@ export default function ImageModelManager() {
   const helperReady = !!helper?.ok;
   const jobActive = !!job && ACTIVE.has(job.state);
   const gpuBytes = data?.gpuBytes || results?.gpuBytes || 8 * GiB;
-  const fileShown = (f) => !fitOnly || f.kind !== "model" || f.fit !== "nofit";
+  // The fit filter never hides what a pasted link pointed at.
+  const filterFit = fitOnly && !linked;
+  const fileShown = (f) => !filterFit || f.kind !== "model" || f.fit !== "nofit";
   const visibleRepos = (results?.repos || []).filter(
-    (r) => !fitOnly || r.files.some((f) => f.kind === "model" && f.fit !== "nofit")
+    (r) => !filterFit || r.files.some((f) => f.kind === "model" && f.fit !== "nofit")
   );
   const usableDisk = helper?.disk ? Math.max(0, helper.disk.free - helper.disk.reserve) : null;
 
@@ -625,10 +663,10 @@ export default function ImageModelManager() {
             className="input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search text-to-image models, e.g. dreamshaper, sdxl, flux gguf"
+            placeholder="Search text-to-image models (e.g. dreamshaper, sdxl) or paste a Hugging Face link"
           />
           <Button type="submit" disabled={searching}>
-            {searching ? "Searching…" : "Search"}
+            {searching ? (looksLikeLink(query) ? "Opening…" : "Searching…") : looksLikeLink(query) ? "Open link" : "Search"}
           </Button>
         </form>
         <p className="tmm-hint">
@@ -638,14 +676,14 @@ export default function ImageModelManager() {
         <label className="tmm-image-opt">
           <input type="checkbox" checked={fitOnly} onChange={(e) => toggleFitOnly(e.target.checked)} />
           Only show models that fit on my GPU
-          {fitOnly && results?.repos.length > 0 && (
+          {filterFit && results?.repos.length > 0 && (
             <span className="tmm-hint">
               ({visibleRepos.length} of {results.repos.length} repos have a checkpoint that fits)
             </span>
           )}
         </label>
         {searchError && <p className="tmm-row-error">{searchError}</p>}
-        {fitOnly && results && !searching && results.repos.length > 0 && visibleRepos.length === 0 && (
+        {filterFit && results && !searching && results.repos.length > 0 && visibleRepos.length === 0 && (
           <p className="tmm-empty">None of these repos has a checkpoint that fits in {gib(gpuBytes)} of VRAM.</p>
         )}
         {searching && !results && <p className="tmm-empty">Searching… (reads each repo's file list)</p>}
@@ -671,11 +709,12 @@ export default function ImageModelManager() {
                 </button>
                 {open && (
                   <div className="tmm-quants">
+                    {linked?.repo === r.id && <LinkNote link={linked} repo={r} />}
                     {r.files.filter(fileShown).map((f) => {
                       const loadable = f.kind === "component" || !!f.recipe;
                       const tooBigForDisk = usableDisk != null && f.size > usableDisk;
                       return (
-                        <div key={f.path} className="imm-hf-file">
+                        <div key={f.path} className={`imm-hf-file ${linked?.repo === r.id && linked.file === f.path ? "is-linked" : ""}`}>
                           <span className="tmm-quant-tag imm-path" title={f.path}>
                             {f.path}
                           </span>

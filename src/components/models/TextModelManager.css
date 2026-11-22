@@ -293,3 +293,18 @@
 .tmm-image-opt .tmm-hint {
   margin: 0;
 }
+
+/* A quant / file a pasted Hugging Face link pointed at. */
+.tmm-quant.is-linked,
+.imm-hf-file.is-linked {
+  background: var(--color-accent-bg);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+  /* Widen the box, not the content, so columns stay aligned with other rows. */
+  margin: 0 -10px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: 4px;
+}
+.tmm-link-note {
+  margin: 4px 0 8px;
+}

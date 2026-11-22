@@ -4,7 +4,8 @@
  * Mounted at /api/images/models (behind requireAuth and routeTo("image"), via
  * images.js): everything acts on req.machine's sd-server, helper and config.
  *
- *  GET    /hf/search?q=            text-to-image repos with single-file checkpoints, mapped to recipes
+ *  GET    /hf/search?q=            text-to-image repos with single-file checkpoints, mapped to recipes;
+ *                                  a Hugging Face link as q gives just that repo (+ link: what it named)
  *  GET    /                        installed files, image recipes, default, helper status
  *  POST   /install                 { repo, path, revision, category, recipe? } → helper job
  *  GET    /install/current         latest helper job (progress)
@@ -25,6 +26,7 @@ import {
 } from "../sd.js";
 import { fetchHelper, helperConfigured, FetchHelperError } from "../sdfetch.js";
 import { publicMachine } from "../backends.js";
+import { parseHfLink, fetchRepoInfo } from "../hflink.js";
 import {
   GiB,
   describeRepo,
@@ -87,6 +89,12 @@ function recipeSummaries(recipes) {
 const HF = "https://huggingface.co/api";
 const hfFetch = (url) => fetch(url, { headers: { "User-Agent": "llmui" }, signal: AbortSignal.timeout(20000) });
 
+// Pipeline tags of chat models (installed on the Text tab instead).
+const TEXT_PIPELINES = new Set(["text-generation", "image-text-to-text"]);
+
+// Model info fields describeRepo() reads.
+const REPO_EXPAND = ["sha", "tags", "cardData", "config", "downloads", "likes", "gated", "lastModified"];
+
 const treeCache = new Map(); // "repo@sha" → tree
 const searchCache = new Map(); // query → { at, infos }
 
@@ -109,7 +117,7 @@ async function searchRepos(q) {
   if (hit && Date.now() - hit.at < 5 * 60000) return hit.infos;
   const params = new URLSearchParams({ pipeline_tag: "text-to-image", sort: "downloads", direction: "-1", limit: "40" });
   if (q) params.set("search", q);
-  for (const e of ["sha", "tags", "cardData", "config", "downloads", "likes", "gated", "lastModified"]) params.append("expand[]", e);
+  for (const e of REPO_EXPAND) params.append("expand[]", e);
   const response = await hfFetch(`${HF}/models?${params}`);
   if (!response.ok) throw Object.assign(new Error(`Hugging Face search failed (HTTP ${response.status})`), { status: 502 });
   const infos = (await response.json()).filter((info) => REPO_RE.test(info.id) && !isAdapterRepo(info));
@@ -133,7 +141,10 @@ async function mapLimit(items, limit, fn) {
 }
 
 router.get("/hf/search", async (req, res) => {
-  const q = String(req.query.q || "").trim().slice(0, 100);
+  const raw = String(req.query.q || "").trim();
+  const link = parseHfLink(raw.slice(0, 2000));
+  if (link?.error) return res.status(400).json({ error: link.error });
+  const q = raw.slice(0, 100);
   try {
     const m = req.machine;
     const recipes = await liveRecipes(m).catch((err) => {
@@ -145,6 +156,38 @@ router.get("/hf/search", async (req, res) => {
       fetchHelper(m, "/v1/files").then((d) => d.files || []).catch(() => []),
     ]);
     const installed = new Set([...catalog.map((f) => f.relative_path || f.id), ...onDisk.map((f) => f.path)]);
+    if (link) {
+      // A pasted link: that repo as-is, even if search would hide it (adapter repo, no checkpoints).
+      const info = await fetchRepoInfo(link.repo, [...REPO_EXPAND, "pipeline_tag"]);
+      const rev = link.revision && link.revision !== "main" ? link.revision : info.sha || "main";
+      let tree;
+      try {
+        tree = await repoTree(info.id, rev);
+      } catch {
+        throw Object.assign(new Error(`Can't list the files of ${info.id}${link.revision ? ` at "${link.revision}"` : ""}`), { status: 404 });
+      }
+      const repo = { ...describeRepo(info, tree, recipes, { gpuBytes: gpuBytes(m), installed }), sha: rev, pipelineTag: info.pipeline_tag || null };
+      // A chat model's GGUFs can look like checkpoints by name and size; never offer them to sd-server.
+      if (TEXT_PIPELINES.has(info.pipeline_tag)) {
+        repo.files = repo.files.map((f) => f.kind === "model"
+          ? { ...f, recipe: null, recipeName: null, how: null, needs: [], reason: `Hugging Face lists this repo as ${info.pipeline_tag}, not an image model` }
+          : f);
+      }
+      return res.json({
+        machine: publicMachine(m),
+        gpuBytes: gpuBytes(m),
+        repos: [repo],
+        link: {
+          repo: info.id,
+          file: link.file,
+          revision: link.revision,
+          // fileExists false: no such file at that revision. fileListed false: it
+          // exists but isn't one sd-server can load as a single file.
+          fileExists: link.file ? tree.some((f) => f.type === "file" && f.path === link.file) : null,
+          fileListed: link.file ? repo.files.some((f) => f.path === link.file) : null,
+        },
+      });
+    }
     const infos = await searchRepos(q);
     const repos = await mapLimit(infos, 8, async (info) => {
       try {

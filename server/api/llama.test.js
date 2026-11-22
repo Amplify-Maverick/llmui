@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupQuants, normalizeEvent, parseProgress, gpuBytes, manifestUrl, normalizeModel } from "./llama.js";
+import { groupQuants, normalizeEvent, parseProgress, gpuBytes, manifestUrl, normalizeModel, quantOf } from "./llama.js";
 
 const f = (path, size) => ({ type: "file", path, size: 1, lfs: { size } });
 
@@ -83,4 +83,11 @@ test("parseProgress reads direct and per-file progress, summing files", () => {
   assert.deepEqual(parseProgress({ "a.gguf": { done: 1, total: 4 }, "mmproj.gguf": { current: 2, total: 2 } }), { done: 3, total: 6 });
   assert.equal(parseProgress({ status: "x" }), null);
   assert.equal(parseProgress(null), null);
+});
+
+test("quantOf reads the quant from a GGUF path", () => {
+  assert.equal(quantOf("Qwen3-8B-Q4_K_M.gguf"), "Q4_K_M");
+  assert.equal(quantOf("UD-Q4_K_XL/Model-UD-Q4_K_XL-00001-of-00002.gguf"), "UD-Q4_K_XL");
+  assert.equal(quantOf("BF16/model-00001-of-00003.gguf"), "BF16");
+  assert.equal(quantOf("README.md"), null);
 });

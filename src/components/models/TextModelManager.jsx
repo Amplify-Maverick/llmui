@@ -9,6 +9,7 @@ import { ConfirmModal } from "../shared/Modal.jsx";
 import { useMachinesStore } from "../../stores/machinesStore.js";
 import { MachineColumns, MachineColumn, InstallOn } from "./MachineColumns.jsx";
 import { useRemoteTextModels } from "./useRemoteTextModels.js";
+import { looksLikeLink } from "../../utils/hfLink.js";
 import "./TextModelManager.css";
 
 const GiB = 1024 ** 3;
@@ -46,6 +47,33 @@ function ProgressBar({ dl }) {
   );
 }
 
+const CHAT_TAGS = new Set(["text-generation", "image-text-to-text"]);
+
+/** What a pasted link resolved to, and anything that will surprise on install. */
+function LinkNote({ link, repo, files }) {
+  const quants = files?.quants;
+  const notes = [];
+  if (quants?.length === 0 && repo.pipelineTag === "text-to-image") {
+    notes.push("This looks like an image model: paste the link on the Image tab instead.");
+  } else if (repo.pipelineTag && !CHAT_TAGS.has(repo.pipelineTag)) {
+    notes.push(`Hugging Face lists this as "${repo.pipelineTag}", not a chat model; llama.cpp may not run it.`);
+  }
+  if (quants?.length) {
+    if (link.quant && !quants.some((q) => q.quant === link.quant)) {
+      notes.push(`This repo has no ${link.quant} file. Pick a quant below.`);
+    } else if (link.quant) {
+      notes.push(`Linked quant ${link.quant} is highlighted below.`);
+    } else {
+      notes.push("Pick a quant below to download.");
+    }
+  }
+  if (link.revision && link.revision !== "main") {
+    notes.push(`The link names revision "${link.revision}", but llama.cpp always downloads the latest version on main.`);
+  }
+  if (repo.gated) notes.push("This repo is gated: the GPU machine's llama.cpp needs a Hugging Face token with access.");
+  return notes.length ? <p className="tmm-hint tmm-link-note">{notes.join(" ")}</p> : null;
+}
+
 export default function TextModelManager() {
   const { models, gpu, downloads, refreshModels, setDownload, clearDownload, handleRouterEvent } = useModelsStore();
   const { defaultModel, updateSetting } = useSettingsStore();
@@ -63,6 +91,7 @@ export default function TextModelManager() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
   const [openRepo, setOpenRepo] = useState(null);
+  const [linked, setLinked] = useState(null); // { repo, quant, file, revision } when a pasted link was resolved
   const [repoFiles, setRepoFiles] = useState({}); // repo → { quants, hasMmproj } | { error } | "loading"
   const [fitOnly, setFitOnly] = useState(() => {
     try {
@@ -116,16 +145,27 @@ export default function TextModelManager() {
   }, [models, downloads, setDownload]);
 
   // ── Hugging Face search ──
+  const searchSeq = useRef(0);
   const search = useCallback(async (q) => {
+    const n = ++searchSeq.current; // only the latest search may set results
     setSearching(true);
     setSearchError(null);
     try {
-      const { repos } = await llamaApi.searchHF(q);
+      const { repos, link } = await llamaApi.searchHF(q);
+      if (n !== searchSeq.current) return;
       setRepos(repos);
+      setLinked(link || null);
+      // A pasted link opens its repo straight away, with the linked quant marked.
+      if (link) {
+        setOpenRepo(link.repo);
+        loadFilesRef.current(link.repo);
+      }
     } catch (err) {
+      if (n !== searchSeq.current) return;
       setSearchError(err.message);
+      setLinked(null);
     } finally {
-      setSearching(false);
+      if (n === searchSeq.current) setSearching(false);
     }
   }, []);
 
@@ -142,6 +182,20 @@ export default function TextModelManager() {
       setRepoFiles((s) => ({ ...s, [repo]: { error: err.message } }));
     }
   }, []);
+
+  // Bring the linked quant into view once its repo's files are listed.
+  const scrolledFor = useRef(null);
+  useEffect(() => {
+    if (!linked?.quant || scrolledFor.current === linked) return;
+    const el = document.querySelector(".tmm-quant.is-linked");
+    if (el) {
+      scrolledFor.current = linked;
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [linked, repoFiles]);
+
+  const loadFilesRef = useRef(loadFiles);
+  loadFilesRef.current = loadFiles;
 
   const toggleRepo = (repo) => {
     if (openRepo === repo) return setOpenRepo(null);
@@ -179,8 +233,10 @@ export default function TextModelManager() {
   const quantFits = (q, files, includeImage) =>
     estimateFit(q.size, gpu, includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0).level !== "nofit";
 
-  const checking = fitOnly ? repos.filter((r) => !repoFiles[r.id] || repoFiles[r.id] === "loading").length : 0;
-  const visibleRepos = fitOnly
+  // The fit filter never hides what a pasted link pointed at.
+  const filterFit = fitOnly && !linked;
+  const checking = filterFit ? repos.filter((r) => !repoFiles[r.id] || repoFiles[r.id] === "loading").length : 0;
+  const visibleRepos = filterFit
     ? repos.filter((r) => {
         const files = repoFiles[r.id];
         if (!files?.quants) return false;
@@ -473,9 +529,11 @@ export default function TextModelManager() {
             className="input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search GGUF repos, e.g. qwen3 8b"
+            placeholder="Search GGUF repos (e.g. qwen3 8b) or paste a Hugging Face link"
           />
-          <Button type="submit" disabled={searching}>{searching ? "Searching…" : "Search"}</Button>
+          <Button type="submit" disabled={searching}>
+            {searching ? (looksLikeLink(query) ? "Opening…" : "Searching…") : looksLikeLink(query) ? "Open link" : "Search"}
+          </Button>
         </form>
         <p className="tmm-hint">
           Fit = file size + ~1 GiB for context and compute (+ 1.5× the projector size with image support), against {gpu ? gib(gpu.budget) : "the GPU's"} usable VRAM.
@@ -484,7 +542,7 @@ export default function TextModelManager() {
         <label className="tmm-image-opt">
           <input type="checkbox" checked={fitOnly} onChange={(e) => toggleFitOnly(e.target.checked)} />
           Only show models that fit on my GPU
-          {fitOnly && repos.length > 0 && (
+          {filterFit && repos.length > 0 && (
             <span className="tmm-hint">
               {checking > 0
                 ? `(checking file sizes… ${repos.length - checking}/${repos.length})`
@@ -494,7 +552,7 @@ export default function TextModelManager() {
         </label>
         {searchError && <p className="tmm-row-error">{searchError}</p>}
         {!searching && repos.length === 0 && !searchError && <p className="tmm-empty">No GGUF repos found.</p>}
-        {!searching && fitOnly && repos.length > 0 && checking === 0 && visibleRepos.length === 0 && (
+        {!searching && filterFit && repos.length > 0 && checking === 0 && visibleRepos.length === 0 && (
           <p className="tmm-empty">None of these repos has a quant that fits in {gpu ? gib(gpu.budget) : "the GPU's VRAM"}.</p>
         )}
         <div className="tmm-list">
@@ -516,6 +574,7 @@ export default function TextModelManager() {
                 </button>
                 {open && (
                   <div className="tmm-quants">
+                    {linked?.repo === r.id && <LinkNote link={linked} repo={r} files={files} />}
                     {files === "loading" && <p className="tmm-empty">Loading files…</p>}
                     {files?.error && <p className="tmm-row-error">{files.error}</p>}
                     {files?.quants?.length === 0 && <p className="tmm-empty">No GGUF quant files found in this repo.</p>}
@@ -532,12 +591,13 @@ export default function TextModelManager() {
                         </span>
                       </label>
                     )}
-                    {files?.quants?.filter((q) => !fitOnly || quantFits(q, files, includeImage)).map((q) => {
+                    {files?.quants?.filter((q) => !filterFit || quantFits(q, files, includeImage)).map((q) => {
                       const id = `${r.id}:${q.quant}`;
+                      const isLinked = linked?.repo === r.id && linked.quant === q.quant;
                       const fit = estimateFit(q.size, gpu, imageExtra);
                       const sidecars = files.hasMmproj && includeImage ? ["mmproj"] : [];
                       return (
-                        <div key={q.quant} className="tmm-quant">
+                        <div key={q.quant} className={`tmm-quant ${isLinked ? "is-linked" : ""}`}>
                           <span className="tmm-quant-tag">{q.quant}</span>
                           <span className="tmm-quant-size">
                             {formatBytes(q.size)}
