@@ -26,7 +26,7 @@ import {
 } from "../sd.js";
 import { fetchHelper, helperConfigured, FetchHelperError } from "../sdfetch.js";
 import { publicMachine } from "../backends.js";
-import { parseHfLink, fetchRepoInfo } from "../hflink.js";
+import { parseHfLink, fetchRepoInfo, REPO_ID_RE } from "../hflink.js";
 import {
   GiB,
   describeRepo,
@@ -156,6 +156,17 @@ router.get("/hf/search", async (req, res) => {
       fetchHelper(m, "/v1/files").then((d) => d.files || []).catch(() => []),
     ]);
     const installed = new Set([...catalog.map((f) => f.relative_path || f.id), ...onDisk.map((f) => f.path)]);
+    // One repo looked up by name (not by search), described as-is.
+    const describeNamed = (info, tree, rev) => {
+      const repo = { ...describeRepo(info, tree, recipes, { gpuBytes: gpuBytes(m), installed }), sha: rev, pipelineTag: info.pipeline_tag || null };
+      // A chat model's GGUFs can look like checkpoints by name and size; never offer them to sd-server.
+      if (TEXT_PIPELINES.has(info.pipeline_tag)) {
+        repo.files = repo.files.map((f) => f.kind === "model"
+          ? { ...f, recipe: null, recipeName: null, how: null, needs: [], reason: `Hugging Face lists this repo as ${info.pipeline_tag}, not an image model` }
+          : f);
+      }
+      return repo;
+    };
     if (link) {
       // A pasted link: that repo as-is, even if search would hide it (adapter repo, no checkpoints).
       const info = await fetchRepoInfo(link.repo, [...REPO_EXPAND, "pipeline_tag"]);
@@ -166,13 +177,7 @@ router.get("/hf/search", async (req, res) => {
       } catch {
         throw Object.assign(new Error(`Can't list the files of ${info.id}${link.revision ? ` at "${link.revision}"` : ""}`), { status: 404 });
       }
-      const repo = { ...describeRepo(info, tree, recipes, { gpuBytes: gpuBytes(m), installed }), sha: rev, pipelineTag: info.pipeline_tag || null };
-      // A chat model's GGUFs can look like checkpoints by name and size; never offer them to sd-server.
-      if (TEXT_PIPELINES.has(info.pipeline_tag)) {
-        repo.files = repo.files.map((f) => f.kind === "model"
-          ? { ...f, recipe: null, recipeName: null, how: null, needs: [], reason: `Hugging Face lists this repo as ${info.pipeline_tag}, not an image model` }
-          : f);
-      }
+      const repo = describeNamed(info, tree, rev);
       return res.json({
         machine: publicMachine(m),
         gpuBytes: gpuBytes(m),
@@ -188,8 +193,19 @@ router.get("/hf/search", async (req, res) => {
         },
       });
     }
-    const infos = await searchRepos(q);
-    const repos = await mapLimit(infos, 8, async (info) => {
+    // A query shaped like a repo id ("owner/name") also looks that repo up:
+    // search only finds repos tagged text-to-image, and many checkpoint repos
+    // carry no pipeline tag at all.
+    const exactLookup = REPO_ID_RE.test(q)
+      ? fetchRepoInfo(q, [...REPO_EXPAND, "pipeline_tag"], { timeout: 10000 })
+          .then(async (info) => describeNamed(info, await repoTree(info.id, info.sha), info.sha || "main"))
+          .catch(() => null)
+      : null;
+    const [infos, exact] = await Promise.all([
+      exactLookup ? searchRepos(q).catch(() => []) : searchRepos(q),
+      exactLookup,
+    ]);
+    const repos = await mapLimit(infos.filter((i) => i.id.toLowerCase() !== exact?.id.toLowerCase()), 8, async (info) => {
       try {
         return describeRepo(info, await repoTree(info.id, info.sha), recipes, { gpuBytes: gpuBytes(m), installed });
       } catch (err) {
@@ -201,7 +217,8 @@ router.get("/hf/search", async (req, res) => {
       machine: publicMachine(m),
       gpuBytes: gpuBytes(m),
       // Only repos with at least one single-file checkpoint / diffusion model.
-      repos: repos.filter((r) => r && r.files.some((f) => f.kind === "model")).slice(0, 25),
+      // The repo the query named comes first.
+      repos: [exact, ...repos].filter((r) => r && r.files.some((f) => f.kind === "model")).slice(0, 25),
     });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.status ? err.message : `Hugging Face unreachable: ${err.message}` });

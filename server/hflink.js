@@ -12,6 +12,9 @@ export const HF_API = "https://huggingface.co/api";
 const HOSTS = new Set(["huggingface.co", "www.huggingface.co", "hf.co"]);
 const SEG_RE = /^(?!\.\.?$)[\w.-]+$/;
 
+/** A bare repo id typed as a search query: "owner/name" (no "." or ".." segments). */
+export const REPO_ID_RE = /^(?!\.\.?\/)[\w.-]+\/(?!\.\.?$)[\w.-]+$/;
+
 /** Cheap check for the UI: does this input look like a link rather than search words? */
 export const looksLikeLink = (s) => /^\s*(?:[a-z][\w+.-]*:\/\/|(?:www\.)?(?:huggingface\.co|hf\.co)\/)/i.test(String(s || ""));
 

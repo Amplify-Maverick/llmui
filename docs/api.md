@@ -600,12 +600,13 @@ Trimmed example (Jellyfin; one entry shown):
     "size": 5021827072,
     "sidecars": []
   }],
-  "gpu": {"name":"Vulkan0","total":8589934592,"source":"measured","margin":1073741824,"budget":7516192768}
+  "gpu": {"name":"Vulkan0","total":8589934592,"source":"measured","margin":1073741824,"budget":7516192768,"ramFree":null}
 }
 ```
 
 - `status`: `loaded` | `loading` | `sleeping` (loaded but idle, wakes on the next request) | `unloading` | `unloaded` | `downloading` | `incomplete` | `unknown`. `failed: true` means the last load failed.
 - GPU bytes a model needs = `model + context + compute` of the `kind: "device"` entry in `memory.min`. Compare that with `gpu.budget`.
+- `gpu.ramFree`: free system RAM on the machine in bytes, from the `kind: "host"` entry of a memory snapshot. `null` when the router doesn't report it, which is the case today. The Models page labels a quant "Fits with RAM offload" when file size + 1 GiB ≤ `budget + ramFree − 4 GiB`.
 - `sidecars: ["mmproj"]` = vision projector installed (the model accepts images). Such entries also carry `mmprojFileSize`.
 - `?sizes=1` adds `diskSize` (bytes, from HF, or null). It's slower.
 - `memory` is raw llama.cpp data. **Unstable.**
@@ -643,14 +644,14 @@ Removes the cached model, or only its projector when `sidecar=mmproj`. Router JS
 
 ### 6.6 Hugging Face search — Stable
 
-`GET /api/llama/hf/search?q=qwen3%208b` returns GGUF chat and vision repos, most downloaded first (up to 30):
+`GET /api/llama/hf/search?q=qwen3%208b` returns GGUF chat and vision repos, most downloaded first (up to 30). A repo counts as chat when its `pipelineTag` is `text-generation` or `image-text-to-text`, or when it has no `pipelineTag` (common, e.g. unsloth's repos) but its tags or name say chat (`conversational`, `Instruct`, ...) and nothing says embedding, speech or image generation. A query shaped like a repo id (`owner/name`) also looks that repo up directly and lists it first, whatever its tags:
 
 ```json
 {"repos":[{"id":"Qwen/Qwen3-VL-8B-Instruct-GGUF","downloads":2363825,"likes":224,"pipelineTag":"image-text-to-text","updatedAt":"2025-10-31T02:50:31.000Z"},
           {"id":"Qwen/Qwen3-8B-GGUF","downloads":854157,"likes":408,"pipelineTag":"text-generation","updatedAt":"2025-05-03T06:33:59.000Z"}]}
 ```
 
-`GET /api/llama/hf/files?repo=Qwen/Qwen3-8B-GGUF` returns the quants with their sizes. The install id is `repo + ":" + quant`.
+`GET /api/llama/hf/files?repo=Qwen/Qwen3-8B-GGUF` returns the quants with their sizes. The install id is `repo + ":" + quant`. A split quant (`*-00001-of-00003.gguf`, often in a subfolder) is one entry: `size` is the total and `files` lists every part. It installs with the same id; llama.cpp downloads all parts and loads from the first.
 
 ```json
 {"repo":"Qwen/Qwen3-8B-GGUF","hasMmproj":false,"mmprojSize":null,
@@ -705,7 +706,7 @@ Trimmed example:
 
 ### 7.2 Hugging Face search — `GET /api/images/models/hf/search?q=` — Stable
 
-Text-to-image repos with single-file models, mapped to recipes (up to 25). This can take several seconds. Trimmed:
+Text-to-image repos with single-file models, mapped to recipes (up to 25). This can take several seconds. A query shaped like a repo id (`owner/name`) also looks that repo up directly and lists it first, even without a `text-to-image` tag (if it has a single-file model). Trimmed:
 
 ```json
 {"machine":{"id":"jellyfin",...},"gpuBytes":8589934592,

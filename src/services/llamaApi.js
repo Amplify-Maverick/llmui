@@ -148,17 +148,26 @@ export function parseProgress(data) {
 /** Headroom for context + compute buffers when estimating fit from file size. */
 export const RUNTIME_OVERHEAD_BYTES = 1 * GiB;
 
+/** System RAM kept free when counting on CPU offload. */
+export const RAM_SAFETY_BYTES = 4 * GiB;
+
 /**
  * GPU fit of a GGUF of `fileBytes`: file + ~1 GiB for context/compute
  * + `extraBytes` (e.g. the mmproj allowance), against total VRAM minus the
- * router's memory margin.
- * Returns { level: "fits" | "tight" | "nofit", need, budget, extra }.
+ * router's memory margin. Too big for VRAM but within VRAM + free system RAM
+ * (gpu.ramFree, minus RAM_SAFETY_BYTES) is "offload": it runs, partly on the
+ * CPU. Without RAM info it stays "nofit".
+ * Returns { level: "fits" | "tight" | "offload" | "nofit", need, budget, extra }.
  */
 export function estimateFit(fileBytes, gpu, extraBytes = 0) {
   const need = fileBytes + RUNTIME_OVERHEAD_BYTES + extraBytes;
   const budget = gpu?.budget ?? 7 * GiB;
-  const level = need <= budget * 0.9 ? "fits" : need <= budget ? "tight" : "nofit";
+  let level = need <= budget * 0.9 ? "fits" : need <= budget ? "tight" : "nofit";
+  if (level === "nofit" && gpu?.ramFree > 0 && need <= budget + gpu.ramFree - RAM_SAFETY_BYTES) level = "offload";
   return { level, need, budget, extra: extraBytes };
 }
 
-export const FIT_LABEL = { fits: "Fits on GPU", tight: "Tight", nofit: "Won't fit" };
+/** Fits entirely in VRAM ("fits" or "tight"). */
+export const fitsOnGpu = (fit) => fit.level === "fits" || fit.level === "tight";
+
+export const FIT_LABEL = { fits: "Fits on GPU", tight: "Tight", offload: "Fits with RAM offload", nofit: "Won't fit" };

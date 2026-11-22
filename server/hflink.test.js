@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHfLink, looksLikeLink } from "./hflink.js";
+import { parseHfLink, looksLikeLink, REPO_ID_RE } from "./hflink.js";
 
 const ok = (repo, revision = null, file = null, quant = null) => ({ repo, revision, file, quant });
 
@@ -46,4 +46,9 @@ test("links that can't be installed from", () => {
   assert.deepEqual(parseHfLink("https://huggingface.co/o/r/blob/main/../../x"), ok("o/r"));
   assert.match(err("https://huggingface.co/o/r:a:b"), /doesn't name/);
   assert.match(err("https://huggingface.co/o/r%ZZ"), /valid URL/);
+});
+
+test("REPO_ID_RE matches bare owner/name queries only", () => {
+  for (const ok of ["unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF", "leejet/FLUX.1-schnell-gguf", "a/.b"]) assert.ok(REPO_ID_RE.test(ok), ok);
+  for (const bad of ["qwen3 8b", "a/b/c", "../x", "a/..", "a/.", "owner/", "/name", "a/b:Q4_K_M"]) assert.ok(!REPO_ID_RE.test(bad), bad);
 });

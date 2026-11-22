@@ -79,15 +79,31 @@ async function listModels(machine) {
   return (data.data || data.models || []).map(normalizeModel);
 }
 
-/** GPU size as reported by the router (any model's measured device), else a fallback. */
-function gpuInfo(models) {
+/**
+ * Free system RAM of the machine, from the "host" entry of a memory snapshot.
+ * The router doesn't report it yet (host has no total/free), so this is
+ * usually null; the UI then skips the "Fits with RAM offload" label.
+ */
+export function hostRamFree(snapshot) {
+  const h = snapshot?.devices?.find((d) => d.kind === "host");
+  return typeof h?.free === "number" && h.free > 0 ? h.free : null;
+}
+
+/**
+ * GPU size as reported by the router (any model's measured device), else a
+ * fallback; plus ramFree (bytes, or null when unknown).
+ */
+export function gpuInfo(models) {
+  let gpu = null;
+  let ramFree = null;
   for (const m of models) {
     for (const snap of [m.memory?.effective, m.memory?.min, m.memory?.max]) {
       const d = gpuDevice(snap);
-      if (d) return { name: d.name, total: d.total, source: "measured" };
+      if (d && !gpu) gpu = { name: d.name, total: d.total, source: "measured" };
+      ramFree ??= hostRamFree(snap);
     }
   }
-  return { name: null, total: FALLBACK_VRAM_BYTES, source: "assumed" };
+  return { ...(gpu || { name: null, total: FALLBACK_VRAM_BYTES, source: "assumed" }), ramFree };
 }
 
 // ------------------------------------------------------------
@@ -373,27 +389,59 @@ const hfFetch = (url) =>
 // Only chat/vision LLMs: other GGUF repos (music, TTS, embeddings, diffusion)
 // download fine but llama-server can't run them.
 export const CHAT_PIPELINE_TAGS = new Set(["text-generation", "image-text-to-text"]);
+// Signs that a repo without a pipeline_tag is a chat model...
+const CHAT_TAGS = new Set(["conversational", "text-generation-inference", "chat"]);
+const CHAT_NAME_RE = /instruct|chat|-it(?:[-_.]|$)/i;
+// ...and that it isn't (embeddings, speech, image generation), in its tags or name.
+const NON_CHAT_RE = /embed|rerank|retriev|sentence|feature-extraction|whisper|speech|tts|text-to-audio|text-to-image|image-to-image|diffus|sd\.cpp|flux|image-generation|text-encoder/i;
+
+/**
+ * Should a search hit be listed as a chat model? Many GGUF repos (e.g.
+ * unsloth's) have no pipeline_tag, so an untagged repo counts when its tags or
+ * name say chat (conversational, instruct, ...) and nothing says embedding,
+ * speech or image generation.
+ */
+export function isChatRepo(r) {
+  if (r.pipeline_tag) return CHAT_PIPELINE_TAGS.has(r.pipeline_tag);
+  const tags = (r.tags || []).filter((t) => !t.includes(":")); // skip base_model:/license: etc.
+  if (NON_CHAT_RE.test(r.id || "") || tags.some((t) => NON_CHAT_RE.test(t))) return false;
+  return tags.some((t) => CHAT_TAGS.has(t)) || CHAT_NAME_RE.test(r.id || "");
+}
+
+const repoSummary = (r) => ({
+  id: r.id,
+  downloads: r.downloads || 0,
+  likes: r.likes || 0,
+  pipelineTag: r.pipeline_tag || null,
+  updatedAt: r.lastModified || r.createdAt || null,
+});
+
+const REPO_FIELDS = ["pipeline_tag", "downloads", "likes", "lastModified", "gated", "tags"];
+
+/** The repo a query names exactly ("owner/name"), or null if it doesn't exist. */
+async function exactRepo(q) {
+  if (!REPO_RE.test(q)) return null;
+  try {
+    return await fetchRepoInfo(q, REPO_FIELDS, { timeout: 8000 });
+  } catch {
+    return null; // no such repo, or HF hiccup: the normal search still runs
+  }
+}
 
 // GET /api/llama/hf/search?q=... — GGUF chat-model repos, most downloaded first.
-// A Hugging Face link as q gives just that repo, plus { link: { repo, quant,
-// file, revision } } naming what it pointed at.
+// A query shaped like a repo id ("owner/name") also looks that repo up and
+// lists it first, whatever its tags. A Hugging Face link as q gives just that
+// repo, plus { link: { repo, quant, file, revision } } naming what it pointed at.
 router.get("/hf/search", async (req, res) => {
   const raw = String(req.query.q || "").trim();
   const link = parseHfLink(raw.slice(0, 2000));
   if (link?.error) return res.status(400).json({ error: link.error });
   if (link) {
     try {
-      const info = await fetchRepoInfo(link.repo, ["pipeline_tag", "downloads", "likes", "lastModified", "gated"]);
+      const info = await fetchRepoInfo(link.repo, REPO_FIELDS);
       const quant = link.quant || (link.file && /\.gguf$/i.test(link.file) && !/mmproj/i.test(link.file) ? quantOf(link.file) : null);
       return res.json({
-        repos: [{
-          id: info.id,
-          downloads: info.downloads || 0,
-          likes: info.likes || 0,
-          pipelineTag: info.pipeline_tag || null,
-          updatedAt: info.lastModified || null,
-          gated: info.gated || false,
-        }],
+        repos: [{ ...repoSummary(info), gated: info.gated || false }],
         link: { repo: info.id, quant, file: link.file, revision: link.revision },
       });
     } catch (err) {
@@ -405,18 +453,14 @@ router.get("/hf/search", async (req, res) => {
   const params = new URLSearchParams({ filter: "gguf", sort: "downloads", direction: "-1", limit: "100" });
   if (q) params.set("search", q);
   try {
-    const response = await hfFetch(`${HF}/models?${params}`);
-    if (!response.ok) return res.status(502).json({ error: `Hugging Face error (${response.status})` });
-    const data = await response.json();
-    res.json({
-      repos: data.filter((r) => CHAT_PIPELINE_TAGS.has(r.pipeline_tag)).slice(0, 30).map((r) => ({
-        id: r.id,
-        downloads: r.downloads || 0,
-        likes: r.likes || 0,
-        pipelineTag: r.pipeline_tag || null,
-        updatedAt: r.lastModified || r.createdAt || null,
-      })),
-    });
+    const [response, exact] = await Promise.all([hfFetch(`${HF}/models?${params}`), exactRepo(q)]);
+    if (!response.ok && !exact) return res.status(502).json({ error: `Hugging Face error (${response.status})` });
+    const data = response.ok ? await response.json() : [];
+    const found = data.filter(isChatRepo).map(repoSummary);
+    const repos = exact
+      ? [repoSummary(exact), ...found.filter((r) => r.id.toLowerCase() !== exact.id.toLowerCase())]
+      : found;
+    res.json({ repos: repos.slice(0, 30) });
   } catch (err) {
     res.status(502).json({ error: `Hugging Face unreachable: ${err.message}` });
   }
@@ -433,7 +477,12 @@ export function quantOf(path) {
   return m ? m[1].toUpperCase() : null;
 }
 
-/** Group a repo's GGUF files by quant, summing split shards. */
+/**
+ * Group a repo's GGUF files by quant, summing split shards
+ * (*-00001-of-00003.gguf, possibly in a per-quant subfolder) into one entry.
+ * A split quant installs like any other, as "owner/repo:QUANT": llama.cpp
+ * downloads every part and loads the model from the first one.
+ */
 export function groupQuants(files) {
   const quants = new Map();
   let hasMmproj = false;

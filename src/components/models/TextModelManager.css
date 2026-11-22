@@ -253,6 +253,11 @@
   color: var(--color-warning);
   border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
+.tmm-fit.fit-offload {
+  color: var(--color-warning);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
 .tmm-fit.fit-nofit {
   color: var(--color-danger);
   border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);

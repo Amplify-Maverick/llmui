@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useModelsStore, modelStatusLabel } from "../../stores/modelsStore.js";
 import { useSettingsStore } from "../../stores/settingsStore.js";
-import { llamaApi, estimateFit, FIT_LABEL } from "../../services/llamaApi.js";
+import { llamaApi, estimateFit, fitsOnGpu, FIT_LABEL } from "../../services/llamaApi.js";
 import { formatBytes } from "../../utils/formatters.js";
 import { hasMmproj, mmprojAllowance, mmprojAllowanceForFile } from "../../utils/mmproj.js";
 import Button from "../shared/Button.jsx";
@@ -231,7 +231,7 @@ export default function TextModelManager() {
 
   const includeImageFor = (r, files) => !!files?.hasMmproj && (imageOpt[r.id] ?? r.pipelineTag === "image-text-to-text");
   const quantFits = (q, files, includeImage) =>
-    estimateFit(q.size, gpu, includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0).level !== "nofit";
+    fitsOnGpu(estimateFit(q.size, gpu, includeImage ? mmprojAllowanceForFile(files.mmprojSize) : 0));
 
   // The fit filter never hides what a pasted link pointed at.
   const filterFit = fitOnly && !linked;
@@ -605,7 +605,7 @@ export default function TextModelManager() {
                           </span>
                           <span
                             className={`tmm-fit fit-${fit.level}`}
-                            title={`Needs ≈${gib(fit.need)} of ${gib(fit.budget)} usable${fit.extra ? ` (incl. ${gib(fit.extra)} image add-on)` : ""}`}
+                            title={`Needs ≈${gib(fit.need)} of ${gib(fit.budget)} usable VRAM${fit.extra ? ` (incl. ${gib(fit.extra)} image add-on)` : ""}${fit.level === "offload" ? `; the rest runs from system RAM (${gib(gpu.ramFree)} free), slowly` : ""}`}
                           >
                             {FIT_LABEL[fit.level]}
                           </span>
@@ -632,7 +632,7 @@ export default function TextModelManager() {
                                   failed={dl?.state === "failed"}
                                   disabled={!up}
                                   title={up ? undefined : `${machine.name}'s model server is unreachable`}
-                                  variant={fit.level === "nofit" ? "ghost" : "primary"}
+                                  variant={fitsOnGpu(fit) ? "primary" : "ghost"}
                                   onInstall={() => (here ? install(id, sidecars) : installRemote(machine.id, id, sidecars))}
                                 />
                               );
